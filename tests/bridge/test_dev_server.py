@@ -59,7 +59,7 @@ def test_connect_to_appsync(mock_json_dumps, mock_b64encode, mock_connect):
 
 def test_subscribe_to_channel():
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success", "id":"request-sub"}')
     channel = "test_channel"
     api_key = "test_key"
 

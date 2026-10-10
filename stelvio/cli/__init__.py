@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.markup import escape
 
+from stelvio._signals import _cancel_confirmation, _command_scope
 from stelvio.cli.commands import (
     run_deploy,
     run_destroy,
@@ -142,6 +143,8 @@ def _handle_cli_error(
     stream_output: bool = False,
 ) -> NoReturn:
     """Format and display a CLI error, then exit with the appropriate code."""
+    if getattr(error, "_stelvio_lifecycle_reported", False):
+        raise SystemExit(int(CliExitCode.OPERATION_FAILED)) from None
     if isinstance(error, StateLockedError):
         code = CliExitCode.STATE_LOCKED
     elif isinstance(error, (StelvioProjectError, StelvioValidationError)):
@@ -354,21 +357,24 @@ def deploy(
         ensure_pulumi(show_status=not (json_output or stream_output))
         env = determine_env(env, require_explicit_in_ci=True, command_name="deploy")
         error_ctx["env"] = env
-        _, is_shared_env = get_environment_confirmation_info(env)
-        if is_shared_env and not yes:
-            _require_yes_for_machine_output(
-                json_output, stream_output, "deploy to a shared environment requires --yes."
+        with _command_scope("deploy", env, show_unchanged=show_unchanged) as session:
+            _, is_shared_env = get_environment_confirmation_info(env)
+            if is_shared_env and not yes:
+                session.phase = "confirmation"
+                _require_yes_for_machine_output(
+                    json_output, stream_output, "deploy to a shared environment requires --yes."
+                )
+                console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
+                if not click.confirm(f"Deploy to {env}?"):
+                    _cancel_confirmation()
+                    console.print("Deployment cancelled.")
+                    return
+            run_deploy(
+                env,
+                show_unchanged=show_unchanged,
+                json_output=json_output,
+                stream_output=stream_output,
             )
-            console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
-            if not click.confirm(f"Deploy to {env}?"):
-                console.print("Deployment cancelled.")
-                return
-        run_deploy(
-            env,
-            show_unchanged=show_unchanged,
-            json_output=json_output,
-            stream_output=stream_output,
-        )
     except (StelvioProjectError, StelvioValidationError, StateLockedError) as e:
         _handle_cli_error(e, **error_ctx)
     except Exception as e:
@@ -386,13 +392,16 @@ def dev(env: str | None, yes: bool, show_unchanged: bool) -> None:
     ensure_pulumi()
     try:
         env = determine_env(env, require_explicit_in_ci=True, command_name="dev")
-        _, is_shared_env = get_environment_confirmation_info(env)
-        if is_shared_env and not yes:
-            console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
-            if not click.confirm(f"Deploy to {env}?"):
-                console.print("Deployment cancelled.")
-                return
-        run_dev(env, show_unchanged=show_unchanged)
+        with _command_scope("dev", env, show_unchanged=show_unchanged) as session:
+            _, is_shared_env = get_environment_confirmation_info(env)
+            if is_shared_env and not yes:
+                session.phase = "confirmation"
+                console.print(f"About to deploy to [bold red]{env}[/bold red] environment.")
+                if not click.confirm(f"Deploy to {env}?"):
+                    _cancel_confirmation()
+                    console.print("Deployment cancelled.")
+                    return
+            run_dev(env, show_unchanged=show_unchanged)
     except (StelvioProjectError, StelvioValidationError) as e:
         _handle_cli_error(e)
     except StateLockedError as e:

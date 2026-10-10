@@ -4,12 +4,15 @@ import datetime
 import json
 import traceback
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 
 import websockets
 from rich.console import Console
 from rich.markup import escape
 
+from stelvio import signals
+from stelvio._signals import _current, _diagnostic, _record_failure
 from stelvio.bridge._chunking import (
     ChunkBuffer,
     channel_segment,
@@ -42,17 +45,26 @@ async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol
 
     ws = await websockets.connect(uri, subprotocols=["aws-appsync-event-ws", f"header-{auth_b64}"])
 
-    # Send connection_init (optional but recommended)
-    init_message = {"type": "connection_init"}
-    await ws.send(json.dumps(init_message))
-
-    # Wait for connection_ack
-    ack = await asyncio.wait_for(ws.recv(), timeout=10)
-    ack_data = json.loads(ack)
-    if ack_data.get("type") != "connection_ack":
-        raise ConnectionError(f"Expected connection_ack, got: {ack_data.get('type')}")
+    try:
+        await ws.send(json.dumps({"type": "connection_init"}))
+        await _wait_for_connection_ack(ws)
+    except BaseException as error:
+        _record_failure(error)
+        await _stop_bridge(ws, error)
+        raise
 
     return ws
+
+
+async def _wait_for_connection_ack(ws: websockets.WebSocketClientProtocol) -> None:
+    async with asyncio.timeout(10):
+        while True:
+            ack_data = json.loads(await ws.recv())
+            if ack_data.get("type") == "ka":
+                continue
+            if ack_data.get("type") != "connection_ack":
+                raise ConnectionError(f"Expected connection_ack, got: {ack_data.get('type')}")
+            return
 
 
 async def subscribe_to_channel(
@@ -69,10 +81,17 @@ async def subscribe_to_channel(
             }
         )
     )
-    ack = json.loads(await ws.recv())
-    if ack.get("type") == "subscribe_error":
-        errors = ack.get("errors", [])
-        raise ConnectionError(f"AppSync subscribe to {channel!r} failed: {errors}")
+    async with asyncio.timeout(10):
+        while True:
+            ack = json.loads(await ws.recv())
+            if ack.get("type") == "ka":
+                continue
+            if ack.get("type") in ("subscribe_success", "subscribe_error"):
+                if ack.get("id") not in (None, "request-sub"):
+                    continue
+                if ack.get("type") == "subscribe_success" and ack.get("id") == "request-sub":
+                    return
+            raise ConnectionError(f"AppSync subscription to {channel!r} failed: {ack}")
 
 
 async def publish_to_channel(
@@ -197,20 +216,48 @@ async def _handle_data_message(
 async def main(region: str, profile: str, app_name: str, env: str) -> None:
     """Main loop."""
 
-    # Discover AppSync API
-    config = discover_or_create_appsync(region, profile)
+    session = _current.get()
+    if session is not None:
+        await session.emit_async(signals.before_dev_bridge_start)
+    ws = None
+    primary = None
+    try:
+        # Discover AppSync API
+        config = discover_or_create_appsync(region, profile)
 
-    # Connect
-    ws = await connect_to_appsync(asdict(config))
+        # Connect
+        ws = await connect_to_appsync(asdict(config))
 
-    # Subscribe to request channel
-    request_channel = f"/stelvio/{channel_segment(app_name)}/{channel_segment(env)}/in"
-    await subscribe_to_channel(ws, request_channel, config.api_key)
+        # Subscribe to request channel
+        request_channel = f"/stelvio/{channel_segment(app_name)}/{channel_segment(env)}/in"
+        await subscribe_to_channel(ws, request_channel, config.api_key)
 
-    console = Console()
-    console.print("[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
-    console.print("Press Ctrl+C to stop.\n")
+        if session is not None:
+            session.bridge_ready = True
+            await session.emit_async(signals.after_dev_bridge_start)
+            session.phase = "dev_bridge"
 
+        console = Console()
+        console.print("[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
+        console.print("Press Ctrl+C to stop.\n")
+
+        await _listen(ws, config.api_key, app_name, env, console)
+    except BaseException as error:
+        primary = error
+        _record_failure(error)
+        raise
+    finally:
+        if ws is not None:
+            await _stop_bridge(ws, primary)
+
+
+async def _listen(
+    ws: websockets.WebSocketClientProtocol,
+    api_key: str,
+    app_name: str,
+    env: str,
+    console: Console,
+) -> None:
     # Handle messages
     async for message in ws:
         data = json.loads(message)
@@ -242,9 +289,37 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 continue
             # Data message (Lambda invocation)
             case "data":
-                await _handle_data_message(data, ws, config.api_key, app_name, env)
+                await _handle_data_message(data, ws, api_key, app_name, env)
             case _:
                 pass
+
+
+async def _stop_bridge(
+    ws: websockets.WebSocketClientProtocol, primary: BaseException | None
+) -> None:
+    session = _current.get()
+    failure = primary
+
+    async def attempt(action: Callable[[], Awaitable[object]]) -> bool:
+        nonlocal failure
+        try:
+            await action()
+        except BaseException as error:
+            if failure is None:
+                failure = error
+                _record_failure(error)
+            else:
+                _diagnostic(error)
+            return False
+        return True
+
+    if session is not None:
+        await attempt(lambda: session.emit_async(signals.before_dev_bridge_stop))
+    closed = await attempt(ws.close)
+    if session is not None and closed:
+        await attempt(lambda: session.emit_async(signals.after_dev_bridge_stop))
+    if primary is None and failure is not None:
+        raise failure
 
 
 def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:

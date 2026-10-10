@@ -11,7 +11,9 @@ from stelvio.component import Component, ComponentRegistry
 from stelvio.config import StelvioAppConfig
 from stelvio.link import LinkConfig
 
+from ._signals import Handler, _Receiver, _register
 from .project import get_project_root
+from .signals import ErrorPolicy, Signal
 
 T = TypeVar("T", bound=PulumiResource)
 
@@ -39,6 +41,7 @@ class StelvioApp:
         self._config_func = None
         self._run_func = None
         self._app_config: StelvioAppConfig | None = None
+        self._signal_handlers: dict[Signal[Any], list[_Receiver]] = {}
         if link_configs:
             for component_type, fn in link_configs.items():
                 self.set_user_link_for(component_type, fn)
@@ -61,6 +64,15 @@ class StelvioApp:
         self._config_func = func
         logger.debug("Config function '%s' registered for app '%s'.", func.__name__, self._name)
         return func
+
+    def on[EventT](
+        self, signal: Signal[EventT], *, errors: ErrorPolicy = "fail"
+    ) -> Callable[[Handler[EventT]], Handler[EventT]]:
+        def decorate(func: Handler[EventT]) -> Handler[EventT]:
+            _register(self, signal, func, errors)
+            return func
+
+        return decorate
 
     def run(self, func: Callable[[], None]) -> Callable[[], None]:
         if self._run_func:
