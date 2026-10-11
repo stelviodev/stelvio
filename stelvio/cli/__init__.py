@@ -354,6 +354,9 @@ class _DeployCommand(click.Command):
     "--stream", "stream_output", is_flag=True, help="Output newline-delimited JSON events"
 )
 @click.option("--skip-local-execute", is_flag=True, help="Skip local execution callbacks")
+@click.option(
+    "--repl", is_flag=True, help="Open a Python shell after deployment and local callbacks"
+)
 @click.pass_context
 def deploy(  # noqa: PLR0913  # Command inputs are passed explicitly.
     ctx: click.Context,
@@ -363,6 +366,7 @@ def deploy(  # noqa: PLR0913  # Command inputs are passed explicitly.
     json_output: bool,
     stream_output: bool,
     skip_local_execute: bool,
+    repl: bool,
 ) -> None:
     """Deploys your app. Pass local callback arguments after --."""
     error_ctx = {
@@ -381,6 +385,7 @@ def deploy(  # noqa: PLR0913  # Command inputs are passed explicitly.
             env,
             show_unchanged=show_unchanged,
             skip_local_execute=skip_local_execute,
+            repl=repl,
             local_args=ctx.meta["stelvio_local_args"],
         ) as session:
             _, is_shared_env = get_environment_confirmation_info(env)

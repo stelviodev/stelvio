@@ -163,6 +163,7 @@ class _Session:
         self.local_components: object | None = None
         self.local_callbacks: list[_Receiver] = []
         self.skip_local_execute = False
+        self.repl = False
         self.local_argv: tuple[str, ...] = (sys.argv[0],)
 
     def event(self, signal: Signal[Any], **extra: object) -> OperationEvent:
@@ -210,6 +211,10 @@ class _Session:
         if self.prepared:
             return self.inputs.config
         self.app = app
+        if self.repl:
+            from stelvio._local_execute import _register_collector  # noqa: PLC0415
+
+            _register_collector(app)
         self.inputs.config = _copy_config(config)
         self.inputs.editable = True
         try:
@@ -342,6 +347,16 @@ def _complete_operation(session: _Session) -> None:
                 phase="local_execute",
             )
 
+    if session.repl:
+        from stelvio._repl import _start_repl  # noqa: PLC0415
+
+        session.phase = "repl"
+        session.handler = None
+        if session.local_components is None:
+            raise RuntimeError("REPL component values were not captured during resource creation.")
+        with _local_execution_context():
+            _start_repl(session.local_components)
+
 
 @contextmanager
 def _command_scope(  # noqa: PLR0913  # Command inputs are passed explicitly.
@@ -351,6 +366,7 @@ def _command_scope(  # noqa: PLR0913  # Command inputs are passed explicitly.
     show_unchanged: bool = False,
     compact: bool = False,
     skip_local_execute: bool = False,
+    repl: bool = False,
     local_args: tuple[str, ...] = (),
 ) -> Iterator[_Session]:
     active = _current.get()
@@ -361,6 +377,7 @@ def _command_scope(  # noqa: PLR0913  # Command inputs are passed explicitly.
         command, env, OperationOptions(show_unchanged=show_unchanged, compact=compact)
     )
     session.skip_local_execute = skip_local_execute
+    session.repl = repl
     session.local_argv = (sys.argv[0], *local_args)
     token = _current.set(session)
     try:

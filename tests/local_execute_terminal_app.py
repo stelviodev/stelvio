@@ -62,6 +62,28 @@ class TerminalStack(PulumiStack):
         return {"result": OutputValue("terminal-output", secret=False)}
 
 
+def deploy_arguments(scenario):
+    arguments = ["test", "--yes"]
+    if scenario.startswith("repl"):
+        arguments.append("--repl")
+    if scenario == "repl-skip":
+        arguments.append("--skip-local-execute")
+    if scenario == "repl-json":
+        arguments.append("--json")
+    elif scenario == "repl-stream":
+        arguments.append("--stream")
+    return [*arguments, "--", "terminal-argument"]
+
+
+def write_report(project, home, report):
+    records = [json.loads(data) for key, data in home.files.items() if key.startswith("update/")]
+    report["lock_exists"] = home.file_exists("lock/demo/test.json")
+    report["workdirs"] = [path.name for path in (project / "work").iterdir()]
+    report["completed"] = all(record["time_completed"] is not None for record in records)
+    report["update_errors"] = [record["errors"] for record in records]
+    (project / "report.json").write_text(json.dumps(report))
+
+
 def main():
     # Give the child its controlling terminal so writing Ctrl+C delivers a real SIGINT.
     import fcntl
@@ -69,7 +91,10 @@ def main():
 
     fcntl.ioctl(sys.stdin.fileno(), termios.TIOCSCTTY, 0)
     project = Path(sys.argv[1])
-    unchanged = sys.argv[2] == "unchanged"
+    scenario = sys.argv[2]
+    unchanged = "unchanged" in scenario
+    repl = scenario.startswith("repl")
+    no_callbacks = scenario == "repl-no-callback"
     asyncio.set_event_loop(asyncio.new_event_loop())
     pulumi.runtime.set_mocks(PulumiTestMocks())
     app = StelvioApp("demo")
@@ -80,7 +105,6 @@ def main():
     home = MemoryHome()
     report = {"input": None, "cancellations": [], "errors": [], "following": 0}
 
-    @app.local_execute
     def prompt(components, argv):
         assert argv == [sys.argv[0], "terminal-argument"]
         answer = input("test:")
@@ -88,9 +112,12 @@ def main():
         print(f"Bucket ready: {components.my_bucket.bucket_name}", file=sys.stderr)
         print(f"input={answer}")
 
-    @app.local_execute
     def following(components):
         report["following"] += 1
+
+    if not no_callbacks:
+        app.local_execute(prompt)
+        app.local_execute(following)
 
     @app.on(signals.on_cancel)
     def cancelled(event):
@@ -118,22 +145,15 @@ def main():
         }
         for target, replacement in replacements.items():
             patches.enter_context(patch(target, replacement))
+        if repl:
+            patches.enter_context(patch.dict(sys.modules, {"IPython": None}))
         exit_code = 0
         try:
-            cli.deploy.main(
-                args=["test", "--yes", "--", "terminal-argument"], standalone_mode=False
-            )
+            cli.deploy.main(args=deploy_arguments(scenario), standalone_mode=False)
         except (KeyboardInterrupt, click.Abort):
             exit_code = 130
         finally:
-            records = [
-                json.loads(data) for key, data in home.files.items() if key.startswith("update/")
-            ]
-            report["lock_exists"] = home.file_exists("lock/demo/test.json")
-            report["workdirs"] = [path.name for path in (project / "work").iterdir()]
-            report["completed"] = all(record["time_completed"] is not None for record in records)
-            report["update_errors"] = [record["errors"] for record in records]
-            (project / "report.json").write_text(json.dumps(report))
+            write_report(project, home, report)
             print("terminal-done", flush=True)
     raise SystemExit(exit_code)
 
