@@ -35,9 +35,15 @@ The component registers itself with Pulumi on construction; the AWS resources do
 until Stelvio reads `.resources` at deploy time.
 
 ```python
+from stelvio.component import Component
+from stelvio.provider import ProviderStore
+
+
 class Cron(Component[CronResources, CronCustomizationDict]):
     def __init__(self, name, schedule, ..., *, tags=None, customize=None):
-        super().__init__("stelvio:aws:Cron", name, tags=tags, customize=customize)
+        super().__init__(
+            ProviderStore.aws(), "stelvio:aws:Cron", name, tags=tags, customize=customize
+        )
         _validate_schedule(schedule)
         self._schedule = schedule
 
@@ -55,17 +61,20 @@ The rules:
 - `_create_resources()` is pure: reads `self._x`, sets nothing, returns everything.
 - Resources land in a frozen `@final` dataclass named `{Component}Resources`. Expose what a
   user might reference; machinery (route table associations) stays out.
-- Every component's `__init__` must have keyword-only `customize`, plus `tags` unless
-  nothing it creates supports tags on AWS (`TopicQueueSubscription`), and `parent` when
-  other components use it (like `Function`). Mark the class `@final`.
+- Every component's `__init__` must have keyword-only `customize` and `tags`, and `parent`
+  when other components create it (like `Function`). Two exceptions: no `customize` when it
+  creates no AWS resource (`Url`), no `tags` when nothing it creates supports tags on AWS
+  (`TopicQueueSubscription`). `tests/aws/test_keyword_only_constructor_params.py` pins the
+  exceptions. Mark the class `@final`.
 
 ## The four dataclasses
 
 A component brings up to four supporting types, named by convention:
 
 - `{X}Resources`: what `_create_resources()` returns. Always.
-- `{X}CustomizationDict`: the valid `customize=` keys, one per resource. Mirrors
-  `{X}Resources` fields (singular where those are lists); a shared test keeps them in sync.
+- `{X}CustomizationDict`: the valid `customize=` keys, one per resource a user might want
+  to change. It doesn't mirror `{X}Resources`, which holds only what users read or pass on,
+  so a key without a matching field is normal.
 - `{X}Config` and `{X}ConfigDict`: when a component takes too many extra params. The
   constructor already carries `name`, `tags`, `customize`; two or three extras are the max
   (Cron's `schedule`, `enabled`, `payload`), over that, group them into a dataclass with a
@@ -196,7 +205,7 @@ Code: validation, `_create_resources`, `_resource_opts` everywhere, customizatio
 tags, `resource_name`, link creator if linkable. Then the part that gets forgotten:
 
 - Export from the package `__init__.py`.
-- Unit tests plus the four shared suites (see [Writing unit tests](unit-tests.md)), and
+- Unit tests plus the shared suites (see [Writing unit tests](unit-tests.md)), and
   integration tests.
 - Creates persistent data? Add its types to `_DATA_LOSS_REPLACEMENT_TYPES` in
   `stelvio/rich_deployment_model.py` so replacements warn before eating data.
