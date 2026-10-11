@@ -1,4 +1,4 @@
-from .constants import NUMBER_WORDS
+from stelvio._link_codegen import NUMBER_WORDS
 
 
 def _envar_name(link_name: str, prop_name: str) -> str:

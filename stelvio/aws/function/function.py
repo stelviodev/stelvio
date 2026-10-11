@@ -249,6 +249,8 @@ class Function(
         ide_resource_file_content = create_stlv_resource_file_content(
             LinkPropertiesRegistry.get_link_properties_map(folder_path),
             LinkPropertiesRegistry.has_cors(folder_path),
+            # Sibling Lambdas have isolated environments; the IDE file combines their schemas.
+            validate_environment_names=False,
         )
 
         # Merge environment variables (user config.environment takes precedence)

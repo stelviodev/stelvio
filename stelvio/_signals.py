@@ -139,6 +139,7 @@ class _Session:
         self.stack_name: str | None = None
         self.recorded_errors: tuple[str, ...] = ()
         self.secondary_failures: list[BaseException] = []
+        self.local_components: object | None = None
 
     def event(self, signal: Signal[Any], **extra: object) -> OperationEvent:
         event_type = _EVENT_TYPES[self.operation]

@@ -31,6 +31,9 @@ Define handlers at module level, or import their registration modules from
 receive the current operation's before signal. Registering the same function for
 the same signal twice keeps the first registration and its error policy.
 
+For post-deploy tasks that need resolved link properties and IDE completion, use
+[`@app.local_execute`](local-execution.md).
+
 ## Operation signals
 
 | Before | After | Event type |

@@ -1,7 +1,7 @@
-import re
 from pathlib import Path
 
-from .constants import NUMBER_WORDS
+from stelvio._link_codegen import _link_names, _to_valid_python_class_name
+
 from .naming import _envar_name
 
 
@@ -17,12 +17,27 @@ def _create_stlv_resource_file(folder: Path, content: str | None) -> None:
 
 
 def create_stlv_resource_file_content(
-    link_properties_map: dict[str, list[str]], include_cors: bool = False
+    link_properties_map: dict[str, list[str]],
+    include_cors: bool = False,
+    *,
+    validate_environment_names: bool = True,
 ) -> str | None:
     """Generate resource access file content with classes for linked resources."""
     # Return None if no properties to generate and no CORS
     if not any(link_properties_map.values()) and not include_cors:
         return None
+
+    names = _link_names(
+        link_properties_map,
+        class_suffix="Resource",
+        reserved_classes={"LinkedResources", "CorsResource"}
+        if include_cors
+        else {"LinkedResources"},
+        reserved_attributes={"cors"} if include_cors else set(),
+        reserved_properties={"cached_property"},
+    )
+    if validate_environment_names:
+        _validate_env_names(link_properties_map)
 
     lines = [
         "import os",
@@ -49,13 +64,26 @@ def create_stlv_resource_file_content(
     for link_name, properties in link_properties_map.items():
         if not properties:
             continue
-        cls_name = _to_valid_python_class_name(link_name)
-        lines.append(
-            f"    {_pascal_to_snake(cls_name)}: Final[{cls_name}Resource] = {cls_name}Resource()"
-        )
+        cls_name, attribute = names[link_name]
+        lines.append(f"    {attribute}: Final[{cls_name}] = {cls_name}()")
     lines.extend(["\n", "Resources: Final = LinkedResources()"])
 
     return "\n".join(lines)
+
+
+def _validate_env_names(link_properties_map: dict[str, list[str]]) -> None:
+    seen: dict[str, tuple[str, str]] = {}
+    for name, properties in link_properties_map.items():
+        for prop in properties:
+            key = _envar_name(name, prop)
+            origin = (name, prop)
+            if key in seen and seen[key] != origin:
+                other_name, other_prop = seen[key]
+                raise ValueError(
+                    f"Link properties {other_name!r}.{other_prop} and {name!r}.{prop} "
+                    f"both generate environment variable {key!r}."
+                )
+            seen[key] = origin
 
 
 def _create_cors_class() -> list[str]:
@@ -106,51 +134,3 @@ def _create_link_resource_class(link_name: str, properties: list[str]) -> list[s
         )
     lines.append("")
     return lines
-
-
-def _split_camel_case(word: str) -> list[str]:
-    """Split a camelCase or PascalCase word into parts.
-
-    Examples:
-        testEmail -> [test, Email]
-        XMLParser -> [XML, Parser]
-        myAPITest -> [my, API, Test]
-    """
-    return re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|\W|$)|\d+", word)
-
-
-def _to_valid_python_class_name(aws_name: str) -> str:
-    """Convert a name to a valid Python class name in PascalCase.
-
-    Handles various input formats:
-        test-email -> TestEmail
-        test_email -> TestEmail
-        testEmail -> TestEmail
-        test.email -> TestEmail
-    """
-    # Split on common delimiters
-    words = aws_name.replace("-", " ").replace(".", " ").replace("_", " ").split()
-
-    # Split each word on camelCase boundaries
-    all_words = []
-    for word in words:
-        parts = _split_camel_case(word)
-        all_words.extend(parts if parts else [word])
-
-    # Clean and capitalize each word
-    cleaned_words = ["".join(c for c in word if c.isalnum()) for word in all_words]
-    class_name = "".join(word.capitalize() for word in cleaned_words)
-
-    # Convert only first digit if name starts with number
-    if class_name and class_name[0].isdigit():
-        first_digit = NUMBER_WORDS[class_name[0]]
-        class_name = first_digit + class_name[1:]
-
-    return class_name
-
-
-def _pascal_to_snake(pascal_str: str) -> str:
-    return "".join(
-        "_" + char.lower() if char.isupper() and i > 0 else char.lower()
-        for i, char in enumerate(pascal_str)
-    )

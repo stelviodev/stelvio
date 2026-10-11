@@ -92,6 +92,7 @@ Intro = [
 Concepts = [
     { "Stelvio App" = "docs/concepts/stelvio-app.md" },
     { "Lifecycle Signals" = "docs/concepts/signals.md" },
+    { "Local Execution" = "docs/concepts/local-execution.md" },
     { "Environments" = "docs/concepts/environments.md" },
     { "Linking" = "docs/concepts/linking.md" },
     { "Dev Mode" = "docs/concepts/dev-mode.md" },

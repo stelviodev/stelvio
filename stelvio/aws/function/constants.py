@@ -11,15 +11,3 @@ LAMBDA_BASIC_EXECUTION_ROLE = "arn:aws:iam::aws:policy/service-role/AWSLambdaBas
 LAMBDA_VPC_ACCESS_EXECUTION_ROLE = (
     "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 )
-NUMBER_WORDS = {
-    "0": "Zero",
-    "1": "One",
-    "2": "Two",
-    "3": "Three",
-    "4": "Four",
-    "5": "Five",
-    "6": "Six",
-    "7": "Seven",
-    "8": "Eight",
-    "9": "Nine",
-}

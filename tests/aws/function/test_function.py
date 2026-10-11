@@ -855,6 +855,59 @@ def test_function_accepts_a_link_without_properties(pulumi_mocks, project_cwd):
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
+def test_sibling_functions_can_use_the_same_env_name_for_distinct_link_properties(
+    pulumi_mocks, project_cwd
+):
+    first = Function(
+        "first",
+        handler="functions/simple.handler",
+        links=[Link("a", properties={"b_url": "first-url"}, permissions=[])],
+    )
+    second = Function(
+        "second",
+        handler="functions/simple2.handler",
+        links=[Link("a-b", properties={"url": "second-url"}, permissions=[])],
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        return [first.resources, second.resources]
+
+    deploy()
+    assert pulumi_mocks.assert_res("first", R.FUNCTION).inputs["environment"]["variables"] == {
+        "STLV_A_B_URL": "first-url"
+    }
+    assert pulumi_mocks.assert_res("second", R.FUNCTION).inputs["environment"]["variables"] == {
+        "STLV_A_B_URL": "second-url"
+    }
+    pulumi_mocks.assert_res_counts({R.FUNCTION: 2, R.ROLE: 2, R.ROLE_POLICY_ATTACHMENT: 2})
+
+
+def test_one_function_rejects_colliding_link_property_env_names(pulumi_mocks, project_cwd):
+    function = Function(
+        "fn",
+        handler="functions/simple.handler",
+        links=[
+            Link("a", properties={"b_url": "first-url"}, permissions=[]),
+            Link("a-b", properties={"url": "second-url"}, permissions=[]),
+        ],
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        with raises(
+            ValueError,
+            match=re.escape(
+                "Link properties 'a'.b_url and 'a-b'.url "
+                "both generate environment variable 'STLV_A_B_URL'."
+            ),
+        ):
+            _ = function.resources
+
+    deploy()
+    pulumi_mocks.assert_no_res(R.FUNCTION)
+
+
 def test_function_folder_resources_file_ignores_a_trailing_slash_in_the_folder(
     pulumi_mocks, project_cwd
 ):

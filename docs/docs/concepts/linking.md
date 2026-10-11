@@ -124,6 +124,11 @@ def handler(event, context):
 
 ## Using Links
 
+Generated accessors reject ambiguous normalized names, such as `my-bucket` and
+`my_bucket`, and invalid Python property names. The same naming rules apply to
+[`@app.local_execute`](local-execution.md), which exposes resolved link properties
+for local tasks after deployment.
+
 ### Basic Linking
 
 ```python
