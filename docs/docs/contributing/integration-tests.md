@@ -9,6 +9,8 @@ They're the release gate: every component has them, add them for what you add. C
 manual dispatch only (`.github/workflows/integration-tests.yml`, Python 3.12–3.14), so nothing
 runs them on your PR. Run them yourself if you have an account; say so in the PR if you can't.
 
+Keep the Python matrix aligned with the [Python support policy](python-support.md).
+
 Read `tests/integration/test_queue.py` and `test_scenario_events.py` next to this page.
 
 ## The shape

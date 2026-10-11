@@ -58,7 +58,7 @@ def mock_cache_fs(tmp_path, monkeypatch):
         (None, ["requests", "boto3"], None, None),
         (None, "src/layer_requirements.txt", None, None),
         ("src/my_layer_code", ["requests", "boto3"], None, None),
-        ("src/my_layer_code", "src/layer_requirements.txt", "python3.13", "arm64"),
+        ("src/my_layer_code", "src/layer_requirements.txt", "arm64", "python3.13"),
     ],
     ids=[
         "code_only",

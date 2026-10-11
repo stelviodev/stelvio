@@ -33,6 +33,7 @@ from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, Func
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE_DEVMODE,
     DEFAULT_MEMORY,
+    DEFAULT_RUNTIME_DEVMODE,
     DEFAULT_TIMEOUT,
 )
 from stelvio.aws.function.iam import _attach_role_policies, _create_lambda_role
@@ -280,9 +281,11 @@ class Function(
                 resource_name(self.name, limit=64),
                 role=lambda_role.arn,
                 architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
-                runtime=DEFAULT_RUNTIME,
+                runtime=DEFAULT_RUNTIME_DEVMODE,
                 # Stub deps must match the stub's own arch, not the user's function config.
-                code=_create_lambda_bridge_archive(DEFAULT_RUNTIME, DEFAULT_ARCHITECTURE_DEVMODE),
+                code=_create_lambda_bridge_archive(
+                    DEFAULT_RUNTIME_DEVMODE, DEFAULT_ARCHITECTURE_DEVMODE
+                ),
                 handler="stlv_function_stub.handler",
                 environment={"variables": env_vars},
                 memory_size=DEFAULT_MEMORY,

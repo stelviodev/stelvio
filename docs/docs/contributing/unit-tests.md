@@ -3,6 +3,9 @@
 Unit tests run Pulumi with mocked providers: nothing deploys, no AWS credentials, the suite
 runs in seconds. `uv run pytest`.
 
+CI must test the latest three stable Python versions and the next release as
+experimental when available. See the [Python support policy](python-support.md).
+
 AWS component tests live in `tests/aws/`, core tests in `tests/` itself, plus `tests/dns/` and
 `tests/bridge/`. Integration tests (`tests/integration/`) deploy real resources and gate
 releases: every component has them, add them for anything new, run them if you can. See

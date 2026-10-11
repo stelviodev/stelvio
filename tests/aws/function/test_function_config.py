@@ -17,6 +17,8 @@ from stelvio.link import Link
 
 from ...test_utils import assert_config_dict_matches_dataclass
 
+INCOMPATIBLE_RUNTIME = "python3.13" if DEFAULT_RUNTIME != "python3.13" else "python3.12"
+
 
 def test_function_config_dict_has_same_fields_as_function_config():
     assert_config_dict_matches_dataclass(FunctionConfig, FunctionConfigDict)
@@ -186,10 +188,10 @@ def create_layer(name=None, runtime=None, arch=None):
         ),
         (
             "incompatible_runtime",
-            lambda: [create_layer(name="mock-layer-py313", runtime="python3.13")],
+            lambda: [create_layer(name="mock-layer-other", runtime=INCOMPATIBLE_RUNTIME)],
             ValueError,
             f"Function runtime '{DEFAULT_RUNTIME}' is incompatible with "
-            f"Layer 'mock-layer-py313' runtime 'python3.13'.",
+            f"Layer 'mock-layer-other' runtime '{INCOMPATIBLE_RUNTIME}'.",
             None,
         ),
         (
@@ -210,7 +212,7 @@ def create_layer(name=None, runtime=None, arch=None):
         ),
         (
             "incompatible_runtime_explicit_func",
-            lambda: [create_layer()],
+            lambda: [create_layer(runtime="python3.12")],
             ValueError,
             "Function runtime 'python3.13' is incompatible with "
             "Layer 'mock-layer-1' runtime 'python3.12'.",

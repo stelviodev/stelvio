@@ -1,4 +1,5 @@
 DEFAULT_ARCHITECTURE_DEVMODE = "arm64"
+DEFAULT_RUNTIME_DEVMODE = "python3.14"
 DEFAULT_MEMORY = 128
 DEFAULT_TIMEOUT = 60
 # stlv_resources.py: the on-disk copy is the folder union for the IDE; each Lambda gets its

@@ -149,7 +149,7 @@ def assert_function_configuration(function_args, test_case: FunctionTestCase):
     # Check lambda configuration
     assert function_args.name == TP + test_case.name
     assert function_args.inputs["handler"] == test_case.expected_handler
-    assert function_args.inputs["runtime"] == test_case.runtime or DEFAULT_RUNTIME
+    assert function_args.inputs["runtime"] == (test_case.runtime or DEFAULT_RUNTIME)
     assert function_args.inputs["architectures"] == [test_case.arch or DEFAULT_ARCHITECTURE]
     assert function_args.inputs["memorySize"] == DEFAULT_MEMORY
     assert function_args.inputs["timeout"] == DEFAULT_TIMEOUT
@@ -1576,11 +1576,11 @@ def test_function_dev_mode_stub_deps_match_stub_lambda(
     deploy()
 
     pulumi_mocks.assert_res(
-        "fn", R.FUNCTION, {"runtime": "python3.12", "architectures": ["arm64"]}, partial=True
+        "fn", R.FUNCTION, {"runtime": "python3.14", "architectures": ["arm64"]}, partial=True
     )
     # The real archive builder pip-installs the deps, so the fixture mocks it and its
     # arguments are the only record of the platform the deps target.
-    mock_bridge_archive.assert_called_once_with("python3.12", "arm64")
+    mock_bridge_archive.assert_called_once_with("python3.14", "arm64")
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
