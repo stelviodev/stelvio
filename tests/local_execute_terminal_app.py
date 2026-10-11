@@ -7,6 +7,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import click
 import pulumi
 from pulumi.automation import OpType, OutputValue
 
@@ -15,7 +16,7 @@ from stelvio.app import StelvioApp
 from stelvio.aws.s3 import Bucket
 from stelvio.config import AwsConfig, StelvioAppConfig
 from tests.aws.pulumi_mocks import PulumiTestMocks
-from tests.cli_test_helpers import import_cli_commands_module
+from tests.cli_test_helpers import import_cli_commands_module, import_cli_module
 from tests.test_local_execute import PulumiStack
 from tests.test_phase_signals import MemoryHome
 from tests.test_rich_deployment_handler import (
@@ -80,7 +81,8 @@ def main():
     report = {"input": None, "cancellations": [], "errors": [], "following": 0}
 
     @app.local_execute
-    def prompt(components):
+    def prompt(components, argv):
+        assert argv == [sys.argv[0], "terminal-argument"]
         answer = input("test:")
         report["input"] = answer
         print(f"Bucket ready: {components.my_bucket.bucket_name}", file=sys.stderr)
@@ -96,6 +98,7 @@ def main():
 
     app.on(signals.on_error)(lambda event: report["errors"].append(str(event.error)))
     commands = import_cli_commands_module()
+    cli = import_cli_module()
     with ExitStack() as patches:
         replacements = {
             "stelvio.command_run.import_module": Mock(),
@@ -110,13 +113,17 @@ def main():
             ),
             "stelvio._local_execute.get_project_root": lambda: project,
             "stelvio.cli.commands.clean_stale_dependency_caches": Mock(),
+            "stelvio.cli.ensure_pulumi": Mock(),
+            "stelvio.cli.run_deploy": commands.run_deploy,
         }
         for target, replacement in replacements.items():
             patches.enter_context(patch(target, replacement))
         exit_code = 0
         try:
-            commands.run_deploy("test")
-        except KeyboardInterrupt:
+            cli.deploy.main(
+                args=["test", "--yes", "--", "terminal-argument"], standalone_mode=False
+            )
+        except (KeyboardInterrupt, click.Abort):
             exit_code = 130
         finally:
             records = [

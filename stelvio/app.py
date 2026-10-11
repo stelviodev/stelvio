@@ -43,7 +43,7 @@ class StelvioApp:
         self._run_func = None
         self._app_config: StelvioAppConfig | None = None
         self._signal_handlers: dict[Signal[Any], list[_Receiver]] = {}
-        self._local_execute_handlers: list[Handler[Any]] = []
+        self._local_execute_handlers: list[Callable[..., Any]] = []
         if link_configs:
             for component_type, fn in link_configs.items():
                 self.set_user_link_for(component_type, fn)
@@ -77,19 +77,19 @@ class StelvioApp:
         return decorate
 
     @overload
-    def local_execute[ComponentsT](
-        self, func: Handler[ComponentsT], *, errors: ErrorPolicy = "fail"
-    ) -> Handler[ComponentsT]: ...
+    def local_execute[**P, R](
+        self, func: Callable[P, R], *, errors: ErrorPolicy = "fail"
+    ) -> Callable[P, R]: ...
 
     @overload
-    def local_execute[ComponentsT](
+    def local_execute[**P, R](
         self, func: None = None, *, errors: ErrorPolicy = "fail"
-    ) -> Callable[[Handler[ComponentsT]], Handler[ComponentsT]]: ...
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
 
     def local_execute(
-        self, func: Handler[Any] | None = None, *, errors: ErrorPolicy = "fail"
-    ) -> Handler[Any] | Callable[[Handler[Any]], Handler[Any]]:
-        def decorate(handler: Handler[Any]) -> Handler[Any]:
+        self, func: Callable[..., Any] | None = None, *, errors: ErrorPolicy = "fail"
+    ) -> Callable[..., Any] | Callable[[Callable[..., Any]], Callable[..., Any]]:
+        def decorate(handler: Callable[..., Any]) -> Callable[..., Any]:
             _register_local(self, handler, errors)
             return handler
 

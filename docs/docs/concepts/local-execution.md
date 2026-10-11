@@ -61,6 +61,43 @@ Callbacks use the local process's credentials. Link IAM permissions and linked f
 are not applied to local execution. Tasks such as seeding data, running migrations,
 or calling APIs need the appropriate local credentials and dependencies.
 
+## CLI controls and arguments
+
+Use `stlv deploy --skip-local-execute` to deploy without running local callbacks.
+Component collection, generated types, and value validation still run, as do ordinary
+lifecycle handlers.
+
+Pass local arguments after the first `--`:
+
+```bash
+stlv deploy -- arg1 --arg2=123
+stlv deploy staging --yes -- arg1 --arg2=123
+```
+
+Callbacks accepting a second positional parameter receive a fresh `list[str]`:
+
+```python
+@app.local_execute
+def inspect_arguments(components: "LocalComponents", argv: list[str]) -> None:
+    print(f"Local arguments: {argv[1:]}", file=sys.stderr)
+```
+
+As with Python's `sys.argv`, element zero is the CLI process's `sys.argv[0]`, and
+user arguments begin at element one. The first command above supplies
+`[sys.argv[0], "arg1", "--arg2=123"]`; without local arguments, it supplies
+`[sys.argv[0]]`. Stelvio does not modify global `sys.argv`. Each callback gets its own
+list, so mutations do not affect later callbacks.
+
+Existing one-argument callbacks continue to work. A callback accepting both forms
+(for example, `argv=None`) receives the two-argument form. The second parameter must
+accept a positional argument. Invalid inspectable signatures fail during registration;
+callables whose signatures cannot be inspected retain one-argument invocation.
+
+The shell tokenizes arguments, and Stelvio preserves their strings and order, including
+option-like tokens and additional `--` separators. Options and an optional environment
+must appear before the first separator; callbacks choose how to parse local arguments.
+Arguments are unused when local execution is skipped or no callbacks are registered.
+
 ## Blocking interaction
 
 ```python

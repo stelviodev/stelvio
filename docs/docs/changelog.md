@@ -6,6 +6,8 @@
 
 - **Run local tasks after deployment output finishes.** `@app.local_execute` provides resolved link properties with generated IDE types and supports blocking prompts without spinner redraws.
 
+- **Control local execution from deploy.** Skip callbacks with `--skip-local-execute`, or pass arguments after `--` to callbacks accepting `argv`.
+
     → [Local Execution](concepts/local-execution.md)
 
 ### Lifecycle Signals
