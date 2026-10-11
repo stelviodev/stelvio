@@ -455,3 +455,90 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
     finally:
         # AWS keeps its pre-upgrade snapshot even after the test stack is destroyed.
         delete_document_db_upgrade_snapshots(cluster_id)
+
+
+def test_document_db_serverless_capacity_update(stelvio_env, project_dir):
+    scaling = None
+
+    def infra():
+        vpc = Vpc("net", az=2)
+        db = DocumentDb(
+            "todos",
+            vpc=vpc,
+            instance_class="serverless",
+            serverless_scaling=scaling,
+            username="appuser",
+            password=Output.secret("StelvioServerlessTestPassword"),
+            customize={"cluster": {"apply_immediately": True}},
+        )
+        fn = Function(
+            "client",
+            handler="handlers/docdb_client::main.main",
+            vpc=VpcAttachment(vpc=vpc, subnets="isolated"),
+            links=[db],
+            requirements=["pymongo"],
+        )
+        export_document_db(db)
+        export_function(fn)
+
+    original = stelvio_env.deploy(infra)
+    function_arn = original["function_client_arn"]
+    assert invoke_lambda(function_arn) == {"username": "appuser", "mongo_ok": True}
+    document = {"_id": "serverless-update", "value": 42}
+    assert invoke_lambda(function_arn, {"operation": "write", "document": document}) == {
+        "document": document,
+    }
+    cluster_id = original["document_db_todos_cluster_id"]
+    # Read back configured bounds; CRUD alone cannot prove the scaling range.
+    assert_document_db_cluster(
+        cluster_id,
+        engine_version="8.0.0",
+        serverless_scaling={"MinCapacity": 0.5, "MaxCapacity": 16},
+    )
+    instance_ids = assert_document_db_instances(
+        cluster_id,
+        instance_count=1,
+        instance_class="db.serverless",
+        engine_version="8.0.0",
+    )
+
+    scaling = {"min_capacity": 1, "max_capacity": 8}
+    updated = stelvio_env.deploy(infra)
+    assert invoke_lambda(
+        updated["function_client_arn"],
+        {
+            "operation": "read",
+            "id": document["_id"],
+        },
+    ) == {"document": document}
+    new_document = {"_id": "serverless-after-update", "value": 43}
+    assert invoke_lambda(
+        updated["function_client_arn"],
+        {
+            "operation": "write",
+            "document": new_document,
+        },
+    ) == {"document": new_document}
+    assert invoke_lambda(
+        updated["function_client_arn"],
+        {
+            "operation": "read",
+            "id": new_document["_id"],
+        },
+    ) == {"document": new_document}
+    for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
+        key = f"document_db_todos_{field}"
+        assert updated[key] == original[key]
+    assert_document_db_cluster(
+        cluster_id,
+        serverless_scaling={"MinCapacity": 1, "MaxCapacity": 8},
+    )
+    assert (
+        assert_document_db_instances(
+            cluster_id,
+            instance_count=1,
+            instance_class="db.serverless",
+            engine_version="8.0.0",
+        )
+        == instance_ids
+    )

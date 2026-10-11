@@ -4,6 +4,7 @@ from .document_db import (
     DocumentDbConfigDict,
     DocumentDbCustomizationDict,
     DocumentDbResources,
+    DocumentDbServerlessScalingConfig,
     default_document_db_link,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "DocumentDbConfigDict",
     "DocumentDbCustomizationDict",
     "DocumentDbResources",
+    "DocumentDbServerlessScalingConfig",
     "default_document_db_link",
 ]

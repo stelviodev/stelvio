@@ -34,6 +34,54 @@ That's a one-instance cluster on engine `8.0`. You need a `Vpc` with at least
 two availability zones. The default `Vpc` already has that. `Vpc(..., az=1)`
 raises `ValueError` when you construct `DocumentDb`.
 
+### Serverless capacity
+
+Set `instance_class="serverless"` (or `"db.serverless"`) to create serverless
+instances. With no range supplied, each instance scales between **0.5 and 16
+DocumentDB capacity units (DCUs)**:
+
+```python
+db = DocumentDb("todos", vpc=vpc, instance_class="serverless")
+```
+
+Set both bounds to choose a different range:
+
+```python
+db = DocumentDb(
+    "todos",
+    vpc=vpc,
+    instance_class="serverless",
+    instances=2,
+    serverless_scaling={"min_capacity": 1, "max_capacity": 8},
+)
+```
+
+`min_capacity` must be between 0.5 and 256; `max_capacity` must be between 1
+and 256. Both accept increments of 0.5, and the minimum must not exceed the
+maximum. Equal bounds are allowed and hold capacity constant. A supplied
+`serverless_scaling` dictionary must contain exactly these two keys.
+
+`instances` still controls the number of instances. The range applies to
+**each serverless instance**, so two instances with a maximum of 8 DCUs can
+consume up to 16 DCUs together. Serverless retains active capacity at its
+minimum; it does not scale to zero or bill per request. Storage, I/O, and any
+Secrets Manager or network charges still apply. See
+[AWS serverless scaling guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-scaling-config.html).
+
+Both engine `5.0` and `8.0` support serverless. Engine `5.0` requires a recent
+patch, and availability varies by region. Check
+[AWS requirements](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-limitations.html)
+before deployment. Stelvio does not query AWS availability during construction.
+
+You can set `serverless_scaling` on a provisioned cluster to prepare for
+serverless instances, including mixed instance classes selected through an
+`instance` customization callable. The automatic 0.5–16 range is a default:
+app-wide dictionary customization can replace it. An explicit constructor range
+takes precedence over app-wide dictionary defaults; callable and component-level
+customizations can override it. If you select `db.serverless` only through
+`customize`, also supply the scaling range through `serverless_scaling` or the
+cluster's `serverless_v2_scaling_configuration` customization.
+
 ### Instance class capacity
 
 !!! warning "Capacity is per zone, and it changes"
