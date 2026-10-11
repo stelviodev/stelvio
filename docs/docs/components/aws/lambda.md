@@ -100,6 +100,13 @@ from stelvio.aws.function import Function
 fn = Function(handler="simple.handler")
 ```
 
+When `runtime` is omitted, Functions use the major/minor Python version of the
+interpreter running `stlv`, for example `python3.14` for Python 3.14. Versions outside
+Stelvio's supported range (`python3.10` through `python3.15`) fall back to `python3.14`.
+Layers use the same default. Set `runtime="python3.14"` to pin a runtime: upgrading
+the interpreter running `stlv` can otherwise change it on your next deployment.
+The `stlv dev` stub always uses Python 3.14 and arm64.
+
 ## Linking and Environment Variables
 
 When you link other components to your Lambda function, Stelvio automatically:
@@ -422,7 +429,7 @@ Stelvio performs the following steps automatically:
    `python3.11` on Amazon Linux 2 (`manylinux_2_17`). Flags used internally:
     * `--python-platform x86_64-manylinux_2_34` (uv) or one `--platform` per compatible
       `manylinux` tag (pip)
-    * `--python-version 3.12`
+    * `--python-version 3.14` (for a function targeting `python3.14`)
     * `--implementation cp --no-compile` (pip)
     * `--only-binary=:all:` (pre-compiled wheels only; nothing is compiled for Lambda)
 3. **Caching:** Dependencies are installed into a local cache directory within
@@ -552,8 +559,9 @@ Key `Layer` parameters:
     *   A path string (relative to project root) to a `requirements.txt` file.
     *   A list of requirement strings (e.g., `["requests", "boto3"]`).
     *   `None` (default): No dependencies are installed for this layer. **Unlike functions, there is no automatic lookup for `requirements.txt` when `requirements` is `None`.**
-*   `runtime`, `architecture`: (Optional) Specify the compatible runtime and architecture. Defaults
-    to the project-wide defaults (`python3.12`, `x86_64`). Layers must be compatible with the
+*   `runtime`, `architecture`: (Optional) Specify the compatible runtime and architecture. The
+    runtime defaults to the Python version running `stlv`, with `python3.14` as the fallback
+    outside Stelvio's supported range; architecture defaults to `x86_64`. Layers must be compatible with the
     functions that use them (Stelvio performs this check).
 
 !!! warning "Layer Content Required"

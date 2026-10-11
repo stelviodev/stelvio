@@ -8,6 +8,10 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Lambda Functions
+
+- **Function and Layer runtime defaults follow the Python interpreter running `stlv`**, falling back to `python3.14` outside the supported range. Existing unpinned resources may change runtime on the next deploy; set `runtime=` to pin it.
+
 ## 0.10.1b7 (2026-10-09)
 
 ### Lambda Functions in VPC

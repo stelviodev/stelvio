@@ -148,7 +148,7 @@ def assert_function_configuration(function_args, test_case: FunctionTestCase):
     # Check lambda configuration
     assert function_args.name == TP + test_case.name
     assert function_args.inputs["handler"] == test_case.expected_handler
-    assert function_args.inputs["runtime"] == test_case.runtime or DEFAULT_RUNTIME
+    assert function_args.inputs["runtime"] == (test_case.runtime or DEFAULT_RUNTIME)
     assert function_args.inputs["architectures"] == [test_case.arch or DEFAULT_ARCHITECTURE]
     assert function_args.inputs["memorySize"] == DEFAULT_MEMORY
     assert function_args.inputs["timeout"] == DEFAULT_TIMEOUT

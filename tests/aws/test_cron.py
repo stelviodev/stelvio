@@ -5,6 +5,7 @@ import pytest
 
 from stelvio.aws.cron import Cron, CronResources
 from stelvio.aws.function import Function, FunctionConfig
+from stelvio.aws.types import DEFAULT_RUNTIME
 
 from ..conftest import TP
 
@@ -94,7 +95,7 @@ def test_cron_creates_function(pulumi_mocks, project_cwd):
         fn = functions[0]
         assert fn.typ == "aws:lambda/function:Function"
         assert fn.inputs["handler"] == "simple.handler"
-        assert fn.inputs["runtime"] == "python3.12"
+        assert fn.inputs["runtime"] == DEFAULT_RUNTIME
 
     cron.resources.function.resources.function.id.apply(check_resources)
 
