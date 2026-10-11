@@ -1686,11 +1686,11 @@ def test_function_dev_mode_stub_deps_match_stub_lambda(
     deploy()
 
     pulumi_mocks.assert_res(
-        "fn", R.FUNCTION, {"runtime": "python3.12", "architectures": ["arm64"]}, partial=True
+        "fn", R.FUNCTION, {"runtime": "python3.14", "architectures": ["arm64"]}, partial=True
     )
     # The real archive builder pip-installs the deps, so the fixture mocks it and its
     # arguments are the only record of the platform the deps target.
-    mock_bridge_archive.assert_called_once_with("python3.12", "arm64")
+    mock_bridge_archive.assert_called_once_with("python3.14", "arm64")
     pulumi_mocks.assert_res_counts({R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1})
 
 
