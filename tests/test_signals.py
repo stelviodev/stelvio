@@ -350,8 +350,12 @@ def test_registration_rejects_custom_signals_and_invalid_policy(app):
         app.on(signals.before_deploy, errors="ignore")(lambda event: None)
 
 
-def test_command_run_cleanup_preserves_primary_and_attempts_both_steps(app, monkeypatch, capsys):
+def test_command_run_cleanup_preserves_primary_and_attempts_both_steps(
+    app, monkeypatch, capsys, tmp_path
+):
     run = CommandRun("test")
+    run._locked = True
+    run._workdir = tmp_path
     original = ValueError("original")
     unlock = Mock(side_effect=OSError("unlock failed"))
     cleanup = Mock(side_effect=OSError("cleanup failed"))
