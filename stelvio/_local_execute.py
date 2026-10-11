@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import make_dataclass
 from functools import wraps
 from pathlib import Path
@@ -12,11 +13,13 @@ from pulumi import Output
 
 from stelvio import signals
 from stelvio._link_codegen import _link_names
-from stelvio._signals import Handler, _current, _Receiver, _register
+from stelvio._signals import _current, _Receiver, _register
 from stelvio.component import ComponentRegistry
 from stelvio.project import get_project_root
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pulumi import Input
 
     from stelvio.app import StelvioApp
@@ -129,13 +132,33 @@ async def _collect(event: PhaseEvent) -> None:
     session.local_components = _snapshot(values, names)
 
 
-def _register_local(app: StelvioApp, handler: Handler[Any], errors: ErrorPolicy) -> None:
+def _accepts_argv(handler: Callable[..., Any]) -> bool:
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return False  # Uninspectable callables retain legacy one-argument invocation.
+    try:
+        signature.bind(object(), [])
+    except TypeError:
+        try:
+            signature.bind(object())
+        except TypeError as error:
+            raise TypeError(
+                "local_execute handler must accept (components) or (components, argv)"
+            ) from error
+        return False
+    return True
+
+
+def _register_local(app: StelvioApp, handler: Callable[..., Any], errors: ErrorPolicy) -> None:
     if errors not in ("fail", "continue"):
         raise ValueError("errors must be 'fail' or 'continue'")
     if not callable(handler):
         raise TypeError("local_execute handler must be callable")
     if any(existing == handler for existing in app._local_execute_handlers):  # noqa: SLF001
         return
+
+    with_argv = _accepts_argv(handler)
 
     @wraps(handler)
     def execute(event: DeployEvent) -> object:
@@ -146,11 +169,17 @@ def _register_local(app: StelvioApp, handler: Handler[Any], errors: ErrorPolicy)
             raise RuntimeError(
                 "Local component values were not captured during resource creation."
             )
+        if with_argv:
+            return handler(session.local_components, list(session.local_argv))
         return handler(session.local_components)
 
     @wraps(handler)
     def enqueue(event: DeployEvent) -> None:
-        if event.command == "deploy" and (session := _current.get()) is not None:
+        if (
+            event.command == "deploy"
+            and (session := _current.get()) is not None
+            and not session.skip_local_execute
+        ):
             session.local_callbacks.append(_Receiver(execute, errors))
 
     _register(app, signals.after_resource_creation, _collect, "fail")

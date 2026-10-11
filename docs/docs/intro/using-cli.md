@@ -62,6 +62,8 @@ stlv deploy
 stlv deploy staging
 stlv deploy staging --yes --json
 stlv deploy staging --yes --stream
+stlv deploy --skip-local-execute
+stlv deploy -- arg1 --arg2=123
 ```
 
 **Options:**
@@ -69,6 +71,11 @@ stlv deploy staging --yes --stream
 - `--yes, -y` - Skip confirmation prompts
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
 - `--stream` - Output newline-delimited JSON events during the operation
+- `--skip-local-execute` - Skip local callbacks while retaining their type generation and value validation
+
+Tokens after the first `--` go to local callbacks accepting `(components, argv)`.
+Their `argv` is `[sys.argv[0], *tokens]`; existing `(components)` callbacks still work.
+Place Stelvio options and the environment before the separator.
 
 Human-readable deploy output shows changed components as they finish, then prints component URLs and any user-defined exports.
 

@@ -334,7 +334,18 @@ def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool
         raise
 
 
-@click.command()
+class _DeployCommand(click.Command):
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        local_args: tuple[str, ...] = ()
+        if "--" in args:
+            separator = args.index("--")
+            local_args = tuple(args[separator + 1 :])
+            args = args[:separator]
+        ctx.meta["stelvio_local_args"] = local_args
+        return super().parse_args(ctx, args)
+
+
+@click.command(cls=_DeployCommand)
 @click.argument("env", default=None, required=False)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts")
 @click.option("--show-unchanged", is_flag=True, help="Show resources that won't change")
@@ -342,10 +353,18 @@ def diff(env: str | None, show_unchanged: bool, compact: bool, json_output: bool
 @click.option(
     "--stream", "stream_output", is_flag=True, help="Output newline-delimited JSON events"
 )
-def deploy(
-    env: str | None, yes: bool, show_unchanged: bool, json_output: bool, stream_output: bool
+@click.option("--skip-local-execute", is_flag=True, help="Skip local execution callbacks")
+@click.pass_context
+def deploy(  # noqa: PLR0913  # Command inputs are passed explicitly.
+    ctx: click.Context,
+    env: str | None,
+    yes: bool,
+    show_unchanged: bool,
+    json_output: bool,
+    stream_output: bool,
+    skip_local_execute: bool,
 ) -> None:
-    """Deploys your app."""
+    """Deploys your app. Pass local callback arguments after --."""
     error_ctx = {
         "operation": "deploy",
         "env": env,
@@ -357,7 +376,13 @@ def deploy(
         ensure_pulumi(show_status=not (json_output or stream_output))
         env = determine_env(env, require_explicit_in_ci=True, command_name="deploy")
         error_ctx["env"] = env
-        with _command_scope("deploy", env, show_unchanged=show_unchanged) as session:
+        with _command_scope(
+            "deploy",
+            env,
+            show_unchanged=show_unchanged,
+            skip_local_execute=skip_local_execute,
+            local_args=ctx.meta["stelvio_local_args"],
+        ) as session:
             _, is_shared_env = get_environment_confirmation_info(env)
             if is_shared_env and not yes:
                 session.phase = "confirmation"

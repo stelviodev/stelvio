@@ -368,9 +368,14 @@ def test_local_execution_guide_examples_work_before_generated_types_exist(
     local_pipeline.commands.run_deploy("test")
     captured = capsys.readouterr()
     lines = captured.err.splitlines()
-    assert len(lines) == 3
+    assert len(lines) == 4
     bucket_name = lines[0].removeprefix("Bucket ready: ")
-    assert lines == [f"Bucket ready: {bucket_name}", "Answer: n", f"arn:aws:s3:::{bucket_name}"]
+    assert lines == [
+        f"Bucket ready: {bucket_name}",
+        "Local arguments: []",
+        "Answer: n",
+        f"arn:aws:s3:::{bucket_name}",
+    ]
     user_input.assert_called_once_with(f"Use bucket {bucket_name}? [y/N]: ")
     assert captured.out == ""
     assert (local_pipeline.root / "stlv_local.py").exists()
@@ -401,13 +406,14 @@ def test_local_execute_preserves_machine_output_and_exit_status(
     monkeypatch.setattr(local_pipeline.commands, "console", Console())
 
     @phase_app.local_execute(errors="continue" if outcome == "continue" else "fail")
-    def execute(components):
+    def execute(components, argv):
         assert asdict(components) == {}
+        assert argv == [sys.argv[0], "arg1", "--arg2=123"]
         print("local ran", file=sys.stderr)
         if outcome != "success":
             raise ValueError("local failed")
 
-    result = CliRunner().invoke(cli.deploy, ["test", "--yes", mode])
+    result = CliRunner().invoke(cli.deploy, ["test", "--yes", mode, "--", "arg1", "--arg2=123"])
     assert result.exit_code == (1 if outcome == "fail" else 0)
     if mode == "--json":
         summaries = [json.loads(result.stdout)]
@@ -504,3 +510,173 @@ def test_failure_before_completion_suppresses_queued_local_callbacks(
     assert len(errors) == 1
     assert errors[0].phase == failure
     assert not local_pipeline.home.file_exists("lock/demo/test.json")
+
+
+@fixture
+def local_cli(local_pipeline, monkeypatch):
+    cli = import_cli_module()
+    monkeypatch.setattr(cli, "ensure_pulumi", Mock())
+    determine_env = Mock(return_value="test")
+    monkeypatch.setattr(cli, "determine_env", determine_env)
+    monkeypatch.setattr(cli, "run_deploy", local_pipeline.commands.run_deploy)
+    return SimpleNamespace(command=cli.deploy, determine_env=determine_env)
+
+
+@mark.parametrize(
+    ("arguments", "environment", "forwarded"),
+    [
+        ([], None, []),
+        (["--"], None, []),
+        (["--", "arg1", "--arg2=123"], None, ["arg1", "--arg2=123"]),
+        (["test", "--", "a b", "", "--", "--json"], "test", ["a b", "", "--", "--json"]),
+        (
+            ["--show-unchanged", "test", "--", "--skip-local-execute"],
+            "test",
+            ["--skip-local-execute"],
+        ),
+    ],
+)
+def test_deploy_forwards_only_arguments_after_separator(  # noqa: PLR0913
+    phase_app, local_pipeline, local_cli, monkeypatch, arguments, environment, forwarded
+):
+    phase_app.run(lambda: None)
+    received = []
+    process_argv = ["/bin/stlv", "original", "arguments"]
+    monkeypatch.setattr(sys, "argv", process_argv)
+
+    @phase_app.local_execute
+    def execute(components, argv):
+        assert asdict(components) == {}
+        received.append(argv)
+        assert sys.argv is process_argv
+
+    result = CliRunner().invoke(local_cli.command, ["--yes", *arguments])
+    assert result.exit_code == 0, result.output
+    assert received == [["/bin/stlv", *forwarded]]
+    assert sys.argv == ["/bin/stlv", "original", "arguments"]
+    local_cli.determine_env.assert_called_once_with(
+        environment, require_explicit_in_ci=True, command_name="deploy"
+    )
+    assert (local_pipeline.root / "stlv_local.py").exists()
+
+
+@mark.parametrize("arguments", [["--arg2=123"], ["test", "unexpected"]])
+def test_deploy_rejects_unrecognized_inputs_before_separator(local_cli, arguments):
+    result = CliRunner().invoke(local_cli.command, [*arguments, "--", "local"])
+    assert result.exit_code == 2
+    local_cli.determine_env.assert_not_called()
+
+
+@mark.parametrize("mode", [[], ["--json"], ["--stream"]])
+def test_skip_local_execute_retains_collection_signals_and_completion(
+    phase_app, local_pipeline, local_cli, monkeypatch, mode
+):
+    phase_app.run(lambda: Bucket("my-bucket"))
+    callbacks = Mock()
+    phase_app.local_execute(callbacks)
+    ordinary = Mock()
+    phase_app.on(signals.after_deploy)(ordinary)
+    monkeypatch.setattr(local_pipeline.commands, "RichDeploymentHandler", RichDeploymentHandler)
+    monkeypatch.setattr(local_pipeline.commands, "console", Console())
+    result = CliRunner().invoke(
+        local_cli.command, ["test", "--yes", *mode, "--skip-local-execute", "--", "unused"]
+    )
+    assert result.exit_code == 0, result.output
+    callbacks.assert_not_called()
+    ordinary.assert_called_once()
+    assert "my_bucket" in (local_pipeline.root / "stlv_local.py").read_text()
+    if "--json" in mode:
+        assert json.loads(result.stdout)["status"] == "success"
+    elif "--stream" in mode:
+        records = [json.loads(line) for line in result.stdout.splitlines()]
+        assert [record["event"] for record in records] == ["start", "summary"]
+        assert records[-1]["status"] == "success"
+    else:
+        assert "Deployed in" in result.stdout
+
+
+def test_skip_local_execute_still_validates_component_values(phase_app, local_cli):
+    phase_app.run(lambda: Bucket("my-bucket"))
+    phase_app.local_execute(Mock())
+    StelvioApp.set_user_link_for(Bucket, lambda bucket: LinkConfig(properties={"invalid": 123}))
+    result = CliRunner().invoke(local_cli.command, ["test", "--yes", "--skip-local-execute"])
+    assert result.exit_code == 1
+    assert isinstance(result.exception, TypeError)
+    assert "must resolve to a string" in str(result.exception)
+
+
+def test_argv_callback_order_isolation_and_successive_commands(
+    phase_app, local_pipeline, local_cli, monkeypatch
+):
+    phase_app.run(lambda: None)
+    monkeypatch.setattr(sys, "argv", ["stlv"])
+    calls = []
+
+    @phase_app.local_execute
+    def first(components, argv):
+        calls.append(("first", list(argv)))
+        argv.append("mutation")
+
+    @phase_app.local_execute(errors="continue")
+    async def second(components, argv=None):
+        await asyncio.sleep(0)
+        calls.append(("second", argv))
+
+    @phase_app.local_execute
+    def legacy(components):
+        calls.append(("legacy", None))
+
+    phase_app.local_execute(first)
+    for arguments in (["--", "one"], ["--skip-local-execute", "--", "unused"], []):
+        _ContextStore.clear()  # Each CLI invocation normally has its own process context.
+        result = CliRunner().invoke(local_cli.command, ["test", "--yes", *arguments])
+        assert result.exit_code == 0, result.output
+    assert calls == [
+        ("first", ["stlv", "one"]),
+        ("second", ["stlv", "one"]),
+        ("legacy", None),
+        ("first", ["stlv"]),
+        ("second", ["stlv"]),
+        ("legacy", None),
+    ]
+
+
+@mark.parametrize("handler", [lambda: None, lambda a, b, c: None, lambda a, *, argv: None])
+def test_invalid_local_callback_signature_is_rejected_during_registration(phase_app, handler):
+    with raises(TypeError, match="must accept"):
+        phase_app.local_execute(handler)
+
+
+def test_uninspectable_local_callback_retains_legacy_invocation(phase_app, local_pipeline):
+    phase_app.run(lambda: None)
+    received = []
+
+    def legacy(components):
+        received.append(asdict(components))
+
+    legacy.__signature__ = "unavailable"
+    phase_app.local_execute(legacy)
+    local_pipeline.commands.run_deploy("test")
+    assert received == [{}]
+
+
+def test_callback_type_error_is_not_retried_without_argv(phase_app, local_pipeline):
+    phase_app.run(lambda: None)
+    attempts = []
+    original = TypeError("inside callback")
+
+    @phase_app.local_execute
+    def execute(components, argv=None):
+        attempts.append(argv)
+        raise original
+
+    with raises(TypeError, match="inside callback") as raised:
+        local_pipeline.commands.run_deploy("test")
+    assert raised.value is original
+    assert attempts == [[sys.argv[0]]]
+
+
+def test_forwarded_arguments_without_local_callbacks_are_unused(phase_app, local_cli):
+    phase_app.run(lambda: None)
+    result = CliRunner().invoke(local_cli.command, ["test", "--yes", "--", "unused", "--flag"])
+    assert result.exit_code == 0, result.output

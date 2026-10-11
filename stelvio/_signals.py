@@ -162,6 +162,8 @@ class _Session:
         self.secondary_failures: list[BaseException] = []
         self.local_components: object | None = None
         self.local_callbacks: list[_Receiver] = []
+        self.skip_local_execute = False
+        self.local_argv: tuple[str, ...] = (sys.argv[0],)
 
     def event(self, signal: Signal[Any], **extra: object) -> OperationEvent:
         event_type = _EVENT_TYPES[self.operation]
@@ -342,8 +344,14 @@ def _complete_operation(session: _Session) -> None:
 
 
 @contextmanager
-def _command_scope(
-    command: OperationName, env: str, *, show_unchanged: bool = False, compact: bool = False
+def _command_scope(  # noqa: PLR0913  # Command inputs are passed explicitly.
+    command: OperationName,
+    env: str,
+    *,
+    show_unchanged: bool = False,
+    compact: bool = False,
+    skip_local_execute: bool = False,
+    local_args: tuple[str, ...] = (),
 ) -> Iterator[_Session]:
     active = _current.get()
     if active is not None:
@@ -352,6 +360,8 @@ def _command_scope(
     session = _Session(
         command, env, OperationOptions(show_unchanged=show_unchanged, compact=compact)
     )
+    session.skip_local_execute = skip_local_execute
+    session.local_argv = (sys.argv[0], *local_args)
     token = _current.set(session)
     try:
         yield session
