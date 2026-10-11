@@ -1,8 +1,6 @@
 from typing import Any
 
-from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid
-
-TP = "test-test-"
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, TP, R, tid
 
 # PulumiTestMocks use tid(name) as the API id (no truncation — ids must be unique).
 WEBSOCKET_API_ID = tid(TP + "chat")
