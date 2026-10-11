@@ -126,6 +126,7 @@ Components = [
 
 [[project.nav]]
 Contributing = [
+    { "Python support" = "docs/contributing/python-support.md" },
     { "Components" = "docs/contributing/components.md" },
     { "Code style" = "docs/contributing/code-style.md" },
     { "Unit tests" = "docs/contributing/unit-tests.md" },
@@ -135,4 +136,3 @@ Contributing = [
 
 [[project.nav]]
 Changelog = "docs/changelog.md"
-
