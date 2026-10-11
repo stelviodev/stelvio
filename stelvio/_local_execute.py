@@ -110,6 +110,8 @@ async def _collect(event: PhaseEvent) -> None:
     session = _current.get()
     if session is None or event.command not in ("diff", "deploy"):
         return
+    if not session.repl and not session.app._local_execute_handlers:  # noqa: SLF001
+        return
     session.local_components = None
     links = {}
     for component in event.components:
@@ -130,6 +132,10 @@ async def _collect(event: PhaseEvent) -> None:
         return
     values = await _resolve_links(links)
     session.local_components = _snapshot(values, names)
+
+
+def _register_collector(app: StelvioApp) -> None:
+    _register(app, signals.after_resource_creation, _collect, "fail")
 
 
 def _accepts_argv(handler: Callable[..., Any]) -> bool:
@@ -182,6 +188,6 @@ def _register_local(app: StelvioApp, handler: Callable[..., Any], errors: ErrorP
         ):
             session.local_callbacks.append(_Receiver(execute, errors))
 
-    _register(app, signals.after_resource_creation, _collect, "fail")
+    _register_collector(app)
     _register(app, signals.after_deploy, enqueue, "fail")
     app._local_execute_handlers.append(handler)  # noqa: SLF001

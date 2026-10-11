@@ -63,6 +63,7 @@ stlv deploy staging
 stlv deploy staging --yes --json
 stlv deploy staging --yes --stream
 stlv deploy --skip-local-execute
+stlv deploy --repl
 stlv deploy -- arg1 --arg2=123
 ```
 
@@ -72,6 +73,7 @@ stlv deploy -- arg1 --arg2=123
 - `--json` - Output a final JSON summary only (no Rich header/spinner output)
 - `--stream` - Output newline-delimited JSON events during the operation
 - `--skip-local-execute` - Skip local callbacks while retaining their type generation and value validation
+- `--repl` - Open an interactive shell with `components` and `boto3` after local callbacks
 
 Tokens after the first `--` go to local callbacks accepting `(components, argv)`.
 Their `argv` is `[sys.argv[0], *tokens]`; existing `(components)` callbacks still work.
@@ -92,6 +94,11 @@ summary in every output mode. A later callback failure is reported on stderr and
 make the process exit nonzero without a second summary. Check the process exit status
 for the overall command result; the summary's `status` and `exit_code` describe deployment.
 Callbacks control their own output and may prompt, including in machine-output modes.
+
+With `--repl`, the [interactive shell](../concepts/local-execution.md#interactive-shell-after-deployment)
+opens after callbacks, including when they are skipped. IPython is optional; Python's
+standard shell is the fallback. JSON and streaming summaries still appear first, but
+subsequent shell output makes stdout an interactive stream.
 
 !!! warning
     Shared environments ask for confirmation unless you use `--yes`.

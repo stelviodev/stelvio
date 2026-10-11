@@ -118,3 +118,65 @@ def test_ctrl_c_interrupts_blocked_local_input_once(terminal_app):
         "completed": True,
         "update_errors": [None],
     }
+
+
+@mark.parametrize(
+    "terminal_app",
+    ["repl", "repl-unchanged", "repl-skip", "repl-no-callback", "repl-json", "repl-stream"],
+    indirect=True,
+)
+def test_repl_terminal_context_interrupt_and_exit_without_redraw(terminal_app):
+    process, fd, project, scenario = terminal_app
+    callbacks_run = scenario not in ("repl-skip", "repl-no-callback")
+    output = b""
+    if callbacks_run:
+        output = read_until(fd, b"test:")
+        assert read_available(fd) == b""
+        os.write(fd, b"ddd\n")
+    output += read_until(fd, b">>> ")
+    text = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", output).decode()
+    if scenario == "repl-json":
+        before_prompt = text.split("test:")[0]
+        summary = json.loads(before_prompt)
+        assert summary["status"] == "success"
+        assert summary["exit_code"] == 0
+    elif scenario == "repl-stream":
+        before_prompt = text.split("test:")[0]
+        records = [json.loads(line) for line in before_prompt.splitlines()]
+        assert records[0]["event"] == "start"
+        assert records[-1]["event"] == "summary"
+        assert records[-1]["status"] == "success"
+    else:
+        assert text.index("Deployed in") < text.index(">>> ")
+    if callbacks_run:
+        assert text.index("input=ddd") < text.index(">>> ")
+    else:
+        assert "test:" not in text
+        assert "input=" not in text
+    assert read_available(fd) == b""
+    os.write(fd, b"print('context=', components.my_bucket.bucket_name, boto3.__name__)\n")
+    evaluated = read_until(fd, b">>> ")
+    assert b"context= demo-test-my-bucket-test-name boto3" in evaluated
+    assert b"Finalizing" not in evaluated
+    # Interrupt incomplete input: the shell keeps running and returns to its prompt.
+    os.write(fd, b"(\n")
+    read_until(fd, b"... ")
+    os.write(fd, b"\x03")
+    interrupted = read_until(fd, b">>> ")
+    assert b"KeyboardInterrupt" in interrupted
+    assert read_available(fd) == b""
+    os.write(fd, b"exit(1)\n")
+    finished = read_until(fd, b"terminal-done")
+    assert b"Finalizing" not in finished
+    assert process.wait(timeout=5) == 0
+    report = json.loads((project / "report.json").read_text())
+    assert report == {
+        "input": "ddd" if callbacks_run else None,
+        "cancellations": [],
+        "errors": [],
+        "following": 1 if callbacks_run else 0,
+        "lock_exists": False,
+        "workdirs": [],
+        "completed": True,
+        "update_errors": [None],
+    }

@@ -8,6 +8,8 @@
 
 - **Control local execution from deploy.** Skip callbacks with `--skip-local-execute`, or pass arguments after `--` to callbacks accepting `argv`.
 
+- **Inspect deployed components in a shell.** `stlv deploy --repl` opens IPython or Python after local callbacks, with `components` and `boto3` ready.
+
     → [Local Execution](concepts/local-execution.md)
 
 ### Lifecycle Signals

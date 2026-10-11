@@ -52,7 +52,7 @@ refresh do not execute them.
 Local callbacks are scheduled through the existing `after_deploy` signal. All ordinary
 `@app.on(signals.after_deploy)` handlers finish before completion output and local
 execution, regardless of registration order. Local callbacks then run in their own
-registration order as the final command stage. Sync and async callbacks
+registration order after deployment output, before an optional REPL. Sync and async callbacks
 are supported, return values are ignored, and repeated registration of the same
 callback keeps the first error policy. Register callbacks at module level or in
 modules discovered during app execution.
@@ -98,6 +98,50 @@ option-like tokens and additional `--` separators. Options and an optional envir
 must appear before the first separator; callbacks choose how to parse local arguments.
 Arguments are unused when local execution is skipped or no callbacks are registered.
 
+## Interactive shell after deployment
+
+```bash
+stlv deploy --repl
+stlv deploy --skip-local-execute --repl
+stlv deploy --repl -- arg1
+```
+
+`--repl` opens a shell after deployment output and all local callbacks finish.
+It also works without registered callbacks and on unchanged deployments. With
+`--skip-local-execute`, callbacks stay skipped and trailing arguments are ignored;
+the shell still opens. Otherwise, arguments after `--` go to local callbacks as usual.
+
+The shell starts with `components`, the same read-only view of resolved link properties,
+and the imported `boto3` module. It does not supply `argv` or live component objects.
+For example:
+
+```pycon
+>>> components.my_bucket.bucket_name
+>>> boto3.__name__
+'boto3'
+```
+
+Stelvio uses IPython when it is available in the environment running `stlv`. If IPython
+is absent, it uses Python's standard shell without a startup banner or exit message.
+Other IPython import or shell failures are reported to stderr before trying the standard
+shell. IPython is optional; Stelvio does not install it.
+
+Ctrl+C keeps the shell's normal behavior, usually clearing input and returning to the
+prompt. EOF (Ctrl+D on POSIX), normal shell return, and `SystemExit` finish successfully,
+including `exit(1)`. An interruption escaping the shell cancels the command with
+`phase="repl"`. If the standard shell fails, the command fails and sends `on_error`
+with that phase. These failures do not undo the deployment or print another summary.
+Fatal local callback failures and cancellation prevent the shell from starting;
+handled `errors="continue"` failures do not.
+
+The shell uses normal local boto3 credentials and region/profile settings. Stelvio does
+not configure a new SDK session or grant permissions. No terminal is required: redirected
+stdin works, and EOF closes the shell. Stelvio waits for the shell before exiting.
+
+`--repl` is allowed with `--json` and `--stream`. Their deployment summary appears first,
+followed by interactive shell output. The complete stdout stream is therefore no longer
+exclusively JSON or streaming records.
+
 ## Blocking interaction
 
 ```python
@@ -115,7 +159,7 @@ local execution, skips subsequent callbacks, and emits `on_cancel` with
 ## IDE completion
 
 Stelvio generates `stlv_local.py` at the project root when infrastructure is evaluated
-by `stlv diff` or `stlv deploy` and a local callback is registered. Import
+by `stlv diff` or `stlv deploy` and a local callback is registered, or when deploy uses `--repl`. Import
 `LocalComponents` under `TYPE_CHECKING` and quote the annotation, as above, so the app
 also loads before the first generated file exists.
 
