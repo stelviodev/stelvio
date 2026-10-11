@@ -24,6 +24,7 @@ APP_NAME = os.environ.get("STLV_APP_NAME", "stlv")
 STAGE = os.environ.get("STLV_STAGE", "dev")
 FUNCTION_NAME = os.environ.get("STLV_FUNCTION_NAME", "unknown")
 ENDPOINT_ID = os.environ.get("STLV_DEV_ENDPOINT_ID", "endpoint_id")
+DURABLE = os.environ.get("STLV_DURABLE") == "1"
 
 APP_SEGMENT = channel_segment(APP_NAME)
 STAGE_SEGMENT = channel_segment(STAGE)
@@ -220,10 +221,14 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         ws, _reused = await get_or_create_connection()
         timings["connect"] = int((time.time() - t_connect_start) * 1000)
     except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": f"Failed to connect to AppSync: {e!s}"}),
-        }
+        return _bridge_failure(
+            {
+                "statusCode": 500,
+                "body": json.dumps({"error": f"Failed to connect to AppSync: {e!s}"}),
+            },
+            ConnectionError("Durable bridge could not connect to AppSync"),
+            e,
+        )
 
     # Ensure subscribed
     t_subscribe_start = time.time()
@@ -235,7 +240,11 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         global _ws_connection, _subscribed  # noqa: PLW0603
         _ws_connection = None
         _subscribed = False
-        return {"statusCode": 500, "body": json.dumps({"error": f"Failed to subscribe: {e!s}"})}
+        return _bridge_failure(
+            {"statusCode": 500, "body": json.dumps({"error": f"Failed to subscribe: {e!s}"})},
+            ConnectionError("Durable bridge could not subscribe to AppSync"),
+            e,
+        )
 
     # Publish invocation to local dev server
     request_channel = f"/stelvio/{APP_SEGMENT}/{STAGE_SEGMENT}/in"
@@ -268,46 +277,58 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         await publish_with_chunking(ws, request_channel, request_message, context.aws_request_id)
         timings["publish"] = int((time.time() - t_publish_start) * 1000)
     except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps(
-                {
-                    "error": f"Failed to publish to AppSync: {e!s}",
-                    "request_channel": request_channel,
-                    "request_message": request_message,
-                }
-            ),
-        }
+        return _bridge_failure(
+            {
+                "statusCode": 500,
+                "body": json.dumps(
+                    {
+                        "error": f"Failed to publish to AppSync: {e!s}",
+                        "request_channel": request_channel,
+                        "request_message": request_message,
+                    }
+                ),
+            },
+            ConnectionError("Durable bridge could not publish invocation"),
+            e,
+        )
 
     # Wait for response
     t_wait_start = time.time()
     try:
-        response = await wait_for_response(ws, context.aws_request_id, timeout=16)
+        timeout = max(0, context.get_remaining_time_in_millis() / 1000 - 2) if DURABLE else 16
+        response = await wait_for_response(ws, context.aws_request_id, timeout=timeout)
         timings["wait"] = int((time.time() - t_wait_start) * 1000)
     except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": f"Error waiting for response: {e!s}"}),
-        }
+        return _bridge_failure(
+            {
+                "statusCode": 500,
+                "body": json.dumps({"error": f"Error waiting for response: {e!s}"}),
+            },
+            ConnectionError("Durable bridge could not receive local response"),
+            e,
+        )
 
     if response is None:
         timings["total"] = int((time.time() - t_start) * 1000)
-        return {
-            "statusCode": 500,
-            "body": json.dumps(
-                {
-                    "error": "Local dev server not responding",
-                    "hint": "Is 'stlv dev' running?",
-                    "timings": timings,
-                    "env": {
-                        "APP_NAME": APP_NAME,
-                        "STAGE": STAGE,
-                        "FUNCTION_NAME": FUNCTION_NAME,
-                        "ENDPOINT_ID": ENDPOINT_ID,
-                    },
-                }
-            ),
-        }
+        return _bridge_failure(
+            {
+                "statusCode": 500,
+                "body": json.dumps(
+                    {
+                        "error": "Local dev server not responding",
+                        "hint": "Is 'stlv dev' running?",
+                        "timings": timings,
+                        "env": {
+                            "APP_NAME": APP_NAME,
+                            "STAGE": STAGE,
+                            "FUNCTION_NAME": FUNCTION_NAME,
+                            "ENDPOINT_ID": ENDPOINT_ID,
+                        },
+                    }
+                ),
+            },
+            TimeoutError("Local durable worker did not respond before the Lambda deadline"),
+        )
 
     # Calculate total time
     timings["total"] = int((time.time() - t_start) * 1000)
@@ -315,13 +336,25 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
     if response.get("success"):
         return response["result"]
     # Error from local dev
-    return {
-        "statusCode": 500,
-        "body": json.dumps(
-            {
-                "error": response.get("error"),
-                "errorType": response.get("errorType"),
-                "stackTrace": response.get("stackTrace"),
-            }
+    return _bridge_failure(
+        {
+            "statusCode": 500,
+            "body": json.dumps(
+                {
+                    "error": response.get("error"),
+                    "errorType": response.get("errorType"),
+                    "stackTrace": response.get("stackTrace"),
+                }
+            ),
+        },
+        RuntimeError(
+            f"Local durable invocation failed: {response.get('errorType')}: "
+            f"{response.get('error')}"
         ),
-    }
+    )
+
+
+def _bridge_failure(response: dict, error: Exception, cause: Exception | None = None) -> dict:
+    if DURABLE:
+        raise error from cause
+    return response

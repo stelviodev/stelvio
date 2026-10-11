@@ -35,6 +35,7 @@ def export_function(fn: Function) -> None:
     r = fn.resources
     export_output(f"function_{fn.name}_arn", r.function.arn)
     export_output(f"function_{fn.name}_name", r.function.name)
+    export_output(f"function_{fn.name}_invocation_arn", fn.invocation_arn)
     export_output(f"function_{fn.name}_role_arn", r.role.arn)
     export_output(f"function_{fn.name}_role_name", r.role.name)
     if r.function_url is not None:

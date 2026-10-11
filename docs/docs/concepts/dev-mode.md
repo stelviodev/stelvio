@@ -50,6 +50,36 @@ To stop the local server: `Ctrl+C`.
     `stlv dev` still deploys real AWS resources (so it needs AWS credentials and it can cost money). It will also create an AppSync API named `stelvio` in your account if it's not already present. The AppSync API is a purely usage-based cost model.
 
 
+## Durable Functions
+
+Functions configured with `durable` also run on your machine. AWS owns their execution
+state, checkpoints, waits, callbacks, and replay. Stelvio forwards each invocation to a
+separate local Python process and returns the AWS SDK's execution status to Lambda.
+
+Install `aws-durable-execution-sdk-python` in the Python environment running `stlv dev`,
+as well as declaring it in your function's requirements. Local execution uses your
+configured AWS credentials. They need `lambda:CheckpointDurableExecution` and
+`lambda:GetDurableExecutionState` on the function's qualified execution ARNs. Stelvio
+does not forward the Lambda execution role's credentials to your machine.
+
+Each execution captures its handler source, generated resource accessors, linked files,
+and function environment on its first local invocation. New executions pick up edits;
+an existing execution replays its original snapshot. Installed local dependencies are
+shared with your project and are not copied into the snapshot.
+
+Snapshots persist under `.stelvio/durable-dev`. Keep this directory when restarting the
+dev server. If a replay's snapshot is missing, Stelvio reports an invocation error instead
+of running current code. A later invocation can collect finished snapshots after AWS
+confirms terminal status; cleanup additionally needs `lambda:GetDurableExecution`.
+Without that permission, snapshots are retained.
+
+Stopping the server leaves durable executions in AWS. Invocations that cannot reach the
+local worker fail and follow AWS's retry behavior. Restart the server before a suspended
+execution resumes. Local logs show the execution ARN and SDK status.
+
+See [Durable Functions](../components/aws/lambda.md#durable-functions) for configuration,
+handler examples, and trigger limits.
+
 ## Limitations
 
 ### Target Architecture

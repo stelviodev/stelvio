@@ -1,9 +1,9 @@
 from collections import Counter
 from dataclasses import MISSING, Field, dataclass, field, fields
-from typing import Literal, TypedDict, final
+from typing import Literal, NotRequired, TypedDict, final
 
 from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
-from stelvio.aws.function.constants import MAX_LAMBDA_LAYERS
+from stelvio.aws.function.constants import MAX_DURABLE_EVENT_SOURCE_TIMEOUT, MAX_LAMBDA_LAYERS
 from stelvio.aws.function.naming import _envar_name
 from stelvio.aws.function.resources_codegen import (
     _pascal_to_snake,
@@ -20,6 +20,49 @@ from stelvio.aws.vpc import Vpc, VpcAttachment, VpcAttachmentDict
 from stelvio.aws.vpc.vpc import normalize_vpc_attachment
 from stelvio.component import Component
 from stelvio.link import Link, Linkable
+
+
+class DurableConfigDict(TypedDict):
+    execution_timeout: int
+    retention_period: NotRequired[int]
+
+
+@final
+@dataclass(frozen=True, kw_only=True)
+class DurableConfig:
+    """Total workflow timeout (seconds) and completed history retention (days)."""
+
+    execution_timeout: int
+    retention_period: int = 14
+
+    def __post_init__(self) -> None:
+        for name, value, maximum in (
+            ("execution_timeout", self.execution_timeout, 31622400),
+            ("retention_period", self.retention_period, 90),
+        ):
+            if type(value) is not int:
+                raise TypeError(f"durable.{name} must be an integer, got {value!r}")
+            if not 1 <= value <= maximum:
+                raise ValueError(f"durable.{name} must be between 1 and {maximum}, got {value}")
+
+
+def normalize_durable_config(
+    value: DurableConfig | DurableConfigDict | None,
+) -> DurableConfig | None:
+    if value is None or isinstance(value, DurableConfig):
+        return value
+    if isinstance(value, dict):
+        return DurableConfig(**value)
+    raise TypeError("durable must be a DurableConfig, dict, or None")
+
+
+def validate_durable_event_source(config: "FunctionConfig") -> None:
+    durable = normalize_durable_config(config.durable)
+    if durable is not None and durable.execution_timeout > MAX_DURABLE_EVENT_SOURCE_TIMEOUT:
+        raise ValueError(
+            "Direct SQS/DynamoDB durable subscriptions require execution_timeout <= 900 seconds. "
+            "Use an ordinary Function to invoke the durable function asynchronously instead."
+        )
 
 
 class FunctionUrlConfigDict(TypedDict, total=False):
@@ -78,6 +121,7 @@ class FunctionConfigDict(TypedDict, total=False):
     layers: list[Layer] | None
     url: Literal["public", "private"] | FunctionUrlConfig | FunctionUrlConfigDict | None
     vpc: Vpc | VpcAttachment | VpcAttachmentDict | None
+    durable: DurableConfig | DurableConfigDict | None
 
 
 @final
@@ -98,6 +142,7 @@ class FunctionConfig:
     layers: list[Layer] = field(default_factory=list)
     url: Literal["public", "private"] | FunctionUrlConfig | FunctionUrlConfigDict | None = None
     vpc: Vpc | VpcAttachment | VpcAttachmentDict | None = None
+    durable: DurableConfig | DurableConfigDict | None = None
 
     def __post_init__(self) -> None:
         handler_parts = self.handler.split("::")
@@ -129,6 +174,15 @@ class FunctionConfig:
             raise ValueError("File path part should not contain dots")
 
         self._validate_requirements()
+        durable = normalize_durable_config(self.durable)
+        if durable is not None and (self.runtime or DEFAULT_RUNTIME) not in (
+            "python3.13",
+            "python3.14",
+        ):
+            raise ValueError(
+                "Durable functions require an explicit runtime of 'python3.13' or 'python3.14'; "
+                f"got {self.runtime or DEFAULT_RUNTIME!r}."
+            )
         self._validate_layers(
             function_runtime=self.runtime or DEFAULT_RUNTIME,
             function_architecture=self.architecture or DEFAULT_ARCHITECTURE,

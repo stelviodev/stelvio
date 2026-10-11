@@ -185,7 +185,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
         function_instance = self._resolve_lambda_function()
         ds_args: dict[str, Any] = {"name": self.name, "type": self.ds_type}
         if function_instance is not None:
-            ds_args["lambda_config"] = {"function_arn": function_instance.resources.function.arn}
+            ds_args["lambda_config"] = {"function_arn": function_instance.invocation_arn}
         ds_args.update(self._build_ds_type_config())
 
         data_source = appsync.DataSource(
@@ -306,7 +306,7 @@ class AppSyncDataSource(Component[AppSyncDataSourceResources, AppSyncDataSourceC
 
     def _attach_output_policies(self, role: iam.Role, function_instance: Function | None) -> None:
         if self.ds_type == DS_TYPE_LAMBDA and function_instance is not None:
-            fn_arn = function_instance.resources.function.arn
+            fn_arn = function_instance.invocation_arn
             self._policies.append(
                 iam.RolePolicy(
                     resource_name(f"{self._api.name}-ds-{self.name}-lambda-policy", limit=128),

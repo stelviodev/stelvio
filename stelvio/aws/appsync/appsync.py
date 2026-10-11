@@ -542,7 +542,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     {},
                     {
                         "action": "lambda:InvokeFunction",
-                        "function": auth_function.function_name,
+                        "function": auth_function.invocation_name,
                         "principal": "appsync.amazonaws.com",
                         "source_arn": graphql_api.arn,
                     },
@@ -559,7 +559,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     {},
                     {
                         "action": "lambda:InvokeFunction",
-                        "function": function.function_name,
+                        "function": function.invocation_name,
                         "principal": "appsync.amazonaws.com",
                         "source_arn": graphql_api.arn,
                     },

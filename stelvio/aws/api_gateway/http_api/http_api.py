@@ -629,7 +629,7 @@ class HttpApi(
                     limit=PERMISSION_NAME_MAX_LENGTH,
                 ),
                 action="lambda:InvokeFunction",
-                function=fn.function_name,
+                function=fn.invocation_name,
                 principal="apigateway.amazonaws.com",
                 source_arn=Output.concat(api.execution_arn, "/*/*"),
                 opts=self._resource_opts(),
@@ -660,7 +660,7 @@ class HttpApi(
                         f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
                     ),
                     action="lambda:InvokeFunction",
-                    function=auth.function.function_name,
+                    function=auth.function.invocation_name,
                     principal="apigateway.amazonaws.com",
                     source_arn=Output.concat(api.execution_arn, "/authorizers/*"),
                     opts=self._resource_opts(),

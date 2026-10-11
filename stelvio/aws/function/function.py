@@ -29,13 +29,22 @@ from pulumi_aws.iam import (
 from pulumi_aws.lambda_ import FunctionUrl, FunctionUrlCorsArgs
 
 from stelvio import context
-from stelvio.aws.function.config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig
+from stelvio.aws.function.config import (
+    FunctionConfig,
+    FunctionConfigDict,
+    FunctionUrlConfig,
+    normalize_durable_config,
+)
 from stelvio.aws.function.constants import (
     DEFAULT_ARCHITECTURE_DEVMODE,
     DEFAULT_MEMORY,
     DEFAULT_TIMEOUT,
 )
-from stelvio.aws.function.iam import _attach_role_policies, _create_lambda_role
+from stelvio.aws.function.iam import (
+    _attach_role_policies,
+    _create_durable_policy,
+    _create_lambda_role,
+)
 from stelvio.aws.function.naming import _envar_name
 from stelvio.aws.function.packaging import (
     _create_lambda_archive,
@@ -50,6 +59,7 @@ from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.vpc import VpcAttachment
 from stelvio.aws.vpc.vpc import normalize_vpc_attachment
 from stelvio.bridge.local.dtos import BridgeInvocationResult
+from stelvio.bridge.local.durable import handle_durable_invocation
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.local.lambda_context import LambdaContext
 from stelvio.bridge.remote.infrastructure import (
@@ -87,6 +97,7 @@ class FunctionResources:
     role: Role
     policy: Policy | None
     function_url: FunctionUrl | None = None
+    alias: lambda_.Alias | None = None
 
 
 class FunctionCustomizationDict(TypedDict, total=False):
@@ -167,7 +178,11 @@ class Function(
             self._vpc_attachment.vpc if self._vpc_attachment else None,
             self._config.links,
         )
-        self._dev_endpoint_id = f"{self.name}-{sha256(uuid.uuid4().bytes).hexdigest()[:8]}"
+        # Durable executions may resume through an older published stub after a restart.
+        endpoint_seed = (
+            context().prefix(self.name).encode() if self.config.durable else uuid.uuid4().bytes
+        )
+        self._dev_endpoint_id = f"{self.name}-{sha256(endpoint_seed).hexdigest()[:8]}"
 
     @property
     def config(self) -> FunctionConfig:
@@ -175,7 +190,26 @@ class Function(
 
     @property
     def invoke_arn(self) -> Output[str]:
+        if self.resources.alias is not None:
+            return self.resources.alias.invoke_arn
         return self.resources.function.invoke_arn
+
+    @property
+    def invocation_arn(self) -> Output[str]:
+        """Lambda invocation target, qualified for durable functions."""
+        if self.resources.alias is not None:
+            return self.resources.alias.arn
+        return self.resources.function.arn
+
+    @property
+    def invocation_name(self) -> Output[str]:
+        if self.resources.alias is not None:
+            return Output.concat(self.resources.function.name, ":", self.resources.alias.name)
+        return self.resources.function.name
+
+    @property
+    def invocation_qualifier(self) -> Output[str] | None:
+        return self.resources.alias.name if self.resources.alias is not None else None
 
     @property
     def function_name(self) -> Output[str]:
@@ -220,6 +254,18 @@ class Function(
             ),
             opts=self._resource_opts(),
         )
+        durable = normalize_durable_config(self.config.durable)
+        durable_props = (
+            {
+                "durable_config": {
+                    "execution_timeout": durable.execution_timeout,
+                    "retention_period": durable.retention_period,
+                },
+                "publish": True,
+            }
+            if durable is not None
+            else {}
+        )
         vpc_attachment = self._vpc_attachment
         role_attachments = _attach_role_policies(
             self.name,
@@ -259,6 +305,7 @@ class Function(
         }
 
         link_file_map = _link_file_sources(self.name, self._config.links)
+        function_opts = self._function_resource_opts(role_attachments)
         if context().dev_mode:
             # The bridge is shared app-level dev infra: ONE AppSync in the app's
             # default region; stubs in any region reach it over plain HTTPS/WSS.
@@ -276,59 +323,80 @@ class Function(
             env_vars["STLV_STAGE"] = context().env
             env_vars["STLV_FUNCTION_NAME"] = self.name
             env_vars["STLV_DEV_ENDPOINT_ID"] = self._dev_endpoint_id
-            function_resource = lambda_.Function(
-                resource_name(self.name, limit=64),
+            stub_runtime = self.config.runtime if durable is not None else DEFAULT_RUNTIME
+            if durable is not None:
+                env_vars["STLV_DURABLE"] = "1"
+            function_props = dict(
                 role=lambda_role.arn,
                 architectures=[DEFAULT_ARCHITECTURE_DEVMODE],
-                runtime=DEFAULT_RUNTIME,
+                runtime=stub_runtime,
                 # Stub deps must match the stub's own arch, not the user's function config.
-                code=_create_lambda_bridge_archive(DEFAULT_RUNTIME, DEFAULT_ARCHITECTURE_DEVMODE),
+                code=_create_lambda_bridge_archive(stub_runtime, DEFAULT_ARCHITECTURE_DEVMODE),
                 handler="stlv_function_stub.handler",
                 environment={"variables": env_vars},
                 memory_size=DEFAULT_MEMORY,
                 timeout=self.config.timeout or DEFAULT_TIMEOUT,
                 layers=[layer.arn for layer in self.config.layers] if self.config.layers else None,
                 tags=self.tags or None,
+                **durable_props,
                 # Technically this is necessary only for tests as otherwise
                 # it's ok if role attachments are created after functions
-                opts=self._resource_opts(depends_on=role_attachments),
             )
         else:
-            function_resource = lambda_.Function(
-                resource_name(self.name, limit=64),
-                **self._customizer(
-                    "function",
-                    {
-                        "architectures": [self.config.architecture]
-                        if self.config.architecture
-                        else None,
-                        "runtime": self.config.runtime,
-                        "code": _create_lambda_archive(
-                            self.config,
-                            lambda_resource_file_content,
-                            extra_assets={d: FileAsset(str(p)) for d, p in link_file_map.items()},
-                        ),
-                        "handler": self.config.handler_format,
-                        "environment": {"variables": env_vars},
-                        "memory_size": self.config.memory,
-                        "timeout": self.config.timeout,
-                        "layers": [layer.arn for layer in self.config.layers]
-                        if self.config.layers
-                        else None,
-                        "vpc_config": vpc_config,
-                    },
-                    default_props={
-                        "role": lambda_role.arn,
-                        "memory_size": DEFAULT_MEMORY,
-                        "timeout": DEFAULT_TIMEOUT,
-                        "architectures": [DEFAULT_ARCHITECTURE],
-                        "runtime": DEFAULT_RUNTIME,
-                    },
-                    inject_tags=True,
-                ),
-                # Technically this is necessary only for tests as otherwise it's ok if role
-                # attachments are created after functions
-                opts=self._resource_opts(depends_on=role_attachments),
+            function_props = self._customizer(
+                "function",
+                {
+                    "architectures": [self.config.architecture]
+                    if self.config.architecture
+                    else None,
+                    "runtime": self.config.runtime,
+                    "code": _create_lambda_archive(
+                        self.config,
+                        lambda_resource_file_content,
+                        extra_assets={d: FileAsset(str(p)) for d, p in link_file_map.items()},
+                    ),
+                    "handler": self.config.handler_format,
+                    "environment": {"variables": env_vars},
+                    "memory_size": self.config.memory,
+                    "timeout": self.config.timeout,
+                    "layers": [layer.arn for layer in self.config.layers]
+                    if self.config.layers
+                    else None,
+                    "vpc_config": vpc_config,
+                    **durable_props,
+                },
+                default_props={
+                    "role": lambda_role.arn,
+                    "memory_size": DEFAULT_MEMORY,
+                    "timeout": DEFAULT_TIMEOUT,
+                    "architectures": [DEFAULT_ARCHITECTURE],
+                    "runtime": DEFAULT_RUNTIME,
+                },
+                inject_tags=True,
+            )
+        if durable is not None:
+            # Scope before creation, avoiding both an ARN/role cycle and IAM propagation
+            # races. The pinned AWS provider appends seven random characters to names.
+            function_name = function_props.get("name") or (
+                resource_name(self.name, limit=64) + "-???????"
+            )
+            checkpoint_policy = _create_durable_policy(
+                self.name, lambda_role, function_name, aws_region_of(self), self._resource_opts()
+            )
+            function_opts = ResourceOptions.merge(
+                function_opts, ResourceOptions(depends_on=[checkpoint_policy])
+            )
+        function_resource = lambda_.Function(
+            resource_name(self.name, limit=64), **function_props, opts=function_opts
+        )
+        alias = None
+        if durable is not None:
+            alias = lambda_.Alias(
+                resource_name(self.name, limit=128, suffix="-live"),
+                name="live",
+                function_name=function_resource.name,
+                function_version=function_resource.version,
+                opts=self._resource_opts(depends_on=[checkpoint_policy]),
             )
         # Create IDE resource file after successful function creation
         _create_stlv_resource_file(get_project_root() / folder_path, ide_resource_file_content)
@@ -343,10 +411,21 @@ class Function(
                 url_config,
                 self._resource_opts(),
                 customizer=self._customizer,
+                qualifier=alias.name if alias else None,
             )
             self.register_outputs({"url": function_url.function_url})
 
-        return FunctionResources(function_resource, lambda_role, function_policy, function_url)
+        return FunctionResources(
+            function_resource, lambda_role, function_policy, function_url, alias
+        )
+
+    def _function_resource_opts(self, dependencies: list[pulumi.Resource]) -> ResourceOptions:
+        opts = self._resource_opts(depends_on=dependencies)
+        if self.config.durable is not None:
+            opts = ResourceOptions.merge(
+                opts, ResourceOptions(custom_timeouts=pulumi.CustomTimeouts(delete="60m"))
+            )
+        return opts
 
     @cached_property
     def _stlv_resources_code(self) -> CodeType | None:
@@ -363,6 +442,8 @@ class Function(
         return compile(content, "<stlv_resources>", "exec", dont_inherit=True)
 
     async def _handle_bridge_event(self, data: dict) -> BridgeInvocationResult | None:
+        if self.config.durable is not None:
+            return await handle_durable_invocation(self, data)
         project_root = get_project_root()
         handler_file = self.config.full_handler_python_path
         handler_function_name = self.config.handler_function_name
@@ -547,12 +628,14 @@ def _normalize_url_config(url_value: str | FunctionUrlConfig | dict) -> Function
     return parse_config(FunctionUrlConfig, url_value, {})
 
 
-def _create_function_url(
+def _create_function_url(  # noqa: PLR0913
     name: str,
     function: lambda_.Function,
     url_config: FunctionUrlConfig,
     opts: ResourceOptions,
     customizer: Callable[[str, dict, dict], dict],
+    *,
+    qualifier: Input[str] | None = None,
 ) -> FunctionUrl:
     """Create a Function URL with the given configuration.
 
@@ -587,6 +670,8 @@ def _create_function_url(
         "cors": cors_config,
         "invoke_mode": invoke_mode,
     }
+    if qualifier is not None:
+        props["qualifier"] = qualifier
     default_props = {"authorization_type": "NONE", "invoke_mode": "BUFFERED"}
     props = customizer("function_url", props, default_props)
     return FunctionUrl(resource_name(name, limit=64, suffix="-url"), **props, opts=opts)
@@ -762,16 +847,15 @@ def _import_handler_module(config: FunctionConfig, project_root: Path) -> Module
 
 @link_config_creator(Function)
 def default_function_link(function_component: Function) -> LinkConfig:
-    function_resource = function_component.resources.function
     return LinkConfig(
         properties={
-            "function_arn": function_resource.arn,
-            "function_name": function_resource.name,
+            "function_arn": function_component.invocation_arn,
+            "function_name": function_component.invocation_name,
         },
         permissions=[
             AwsPermission(
                 actions=["lambda:InvokeFunction"],
-                resources=[function_resource.arn],
+                resources=[function_component.invocation_arn],
             ),
         ],
     )
