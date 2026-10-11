@@ -2,8 +2,8 @@
 # Run all integration test tiers in parallel.
 #
 # This file is the single source of truth for test/worker counts. Counts are
-# chosen so tests divide evenly across workers with no straggler left running
-# alone at the end. Adjust when adding/removing tests:
+# chosen to balance parallel work within account quotas; tests may not divide
+# evenly across workers. Adjust when adding/removing tests:
 #   integration       — 185 tests / 12 workers  (VPC-creating cases moved out)
 #   integration_vpc   —   9 tests /  4 workers  (account VPC quota is 5,
 #                       including the default VPC)

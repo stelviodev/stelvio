@@ -49,6 +49,7 @@ def test_document_db_supplied_credentials(stelvio_env, project_dir):
         )
         export_document_db(db)
         export_function(fn)
+        export_vpc(vpc)
 
     outputs = stelvio_env.deploy(infra)
     assert invoke_lambda(outputs["function_client_arn"]) == {
@@ -75,6 +76,24 @@ def test_document_db_supplied_credentials(stelvio_env, project_dir):
         master_username="appuser",
     )
     assert cluster.get("MasterUserSecret") is None
+    # DocumentDB does not return the password; Lambda's environment is its read-back.
+    expected_env = {
+        "STLV_TODOS_HOST": cluster["Endpoint"],
+        "STLV_TODOS_READER_HOST": cluster["ReaderEndpoint"],
+        "STLV_TODOS_PORT": str(cluster["Port"]),
+        "STLV_TODOS_USERNAME": "appuser",
+        "STLV_TODOS_PASSWORD": "StelvioTestPassword282",
+        "STLV_TODOS_REPLICA_SET": "rs0",
+        "STLV_TODOS_CA_FILE": "stlv_docdb_ca.pem",
+        "STLV_TODOS_CONNECTION_URI": (
+            f"mongodb://{cluster['Endpoint']}:{cluster['Port']}/"
+            "?tls=true&tlsCAFile=stlv_docdb_ca.pem&replicaSet=rs0&retryWrites=false"
+        ),
+    }
+    lambda_env = assert_lambda_function(outputs["function_client_arn"])
+    assert {k: v for k, v in lambda_env.items() if k.startswith("STLV_TODOS_")} == expected_env
+    vpc_config = get_lambda_vpc_config(outputs["function_client_arn"])
+    assert set(vpc_config["SubnetIds"]) == set(outputs["vpc_net_isolated_subnet_ids"])
     assert_lambda_role_permissions(
         outputs["function_client_role_name"],
         expected_actions=[],

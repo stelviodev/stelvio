@@ -15,8 +15,10 @@ group.
 
 !!! warning "DocumentDB costs money"
     Instances bill while they run, not per request. A default one-instance
-    cluster is about **$57/month**, see [Cost](#cost). Linked functions also
-    need NAT, which has its own [cost](vpc.md#cost).
+    cluster is about **$57/month**, see [Cost](#cost). With AWS-managed passwords,
+    linked functions need NAT or a Secrets Manager VPC endpoint to fetch the
+    password. NAT has its own [cost](vpc.md#cost). With a supplied password,
+    functions can use isolated subnets without NAT.
 
 ## Creating a DocumentDB cluster
 
@@ -95,7 +97,7 @@ Available configuration options:
 ### Supplied credentials
 
 ```python
-from pulumi import Config
+from pulumi import Output
 from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.vpc import Vpc
 
@@ -104,7 +106,7 @@ db = DocumentDb(
     "todos",
     vpc=vpc,
     username="appuser",
-    password=Config().require_secret("documentdb-password"),
+    password=Output.secret("ExamplePassword123"),
 )
 ```
 
@@ -115,8 +117,10 @@ Pulumi secret and injects it into linked Lambda environment variables.
 
 A password without `username` uses `stelvio`. A username without `password`
 keeps the AWS-managed password and seven-day rotation. Both arguments accept
-strings or Pulumi Outputs. Empty strings and values that resolve to another
-type are rejected.
+strings or Pulumi Outputs. Usernames must be 1–63 ASCII letters or digits and
+start with a letter. Passwords must be 8–100 printable ASCII characters,
+excluding `/`, `"`, and `@`. Invalid values are rejected, including values
+resolved from Outputs.
 
 ## Replicas
 
@@ -328,6 +332,9 @@ pieces.
     assume MongoDB Atlas or a self-hosted replica set may not apply.
 
 ### Password rotation
+
+Supplied passwords have no Secrets Manager secret or rotation schedule; update
+your supplied `password` and redeploy to change it.
 
 DocumentDB's AWS-managed master password rotates every seven days by default.
 See

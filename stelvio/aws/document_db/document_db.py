@@ -51,6 +51,9 @@ _INSTANCE_CLASS_RE = re.compile(r"[a-z][a-z0-9]*\.[a-z0-9]+")
 # AWS DocumentDB identifier rules: lowercase alphanumerics and single hyphens,
 # first character a letter, no trailing hyphen.
 _NAME_RE = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
+_USERNAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{0,62}")
+_MIN_PASSWORD_LENGTH = 8
+_MAX_PASSWORD_LENGTH = 100
 # Truncation can leave `--` where the cut lands on a hyphen. DocumentDB rejects that.
 _CONSECUTIVE_HYPHENS_RE = re.compile(r"-{2,}")
 _AWS_NAME_MAX_LENGTH = 255
@@ -516,6 +519,13 @@ def _validate_credential_value(key: str, value: object) -> str:
         raise TypeError(f"`{key}` must be a string or Output of a string")
     if not value:
         raise ValueError(f"`{key}` must be a non-empty string")
+    if key == "username" and not _USERNAME_RE.fullmatch(value):
+        raise ValueError("`username` must be 1-63 ASCII letters or digits and start with a letter")
+    if key == "password":
+        if not _MIN_PASSWORD_LENGTH <= len(value) <= _MAX_PASSWORD_LENGTH:
+            raise ValueError("`password` must be between 8 and 100 characters")
+        if any(not " " <= char <= "~" or char in '/"@' for char in value):
+            raise ValueError('`password` must contain printable ASCII excluding /, ", and @')
     return value
 
 
