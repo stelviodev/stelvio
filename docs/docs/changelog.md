@@ -8,6 +8,12 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Lifecycle Signals
+
+- **Run code before and after CLI operations.** `@app.on(signals.after_deploy)` supports typed payloads, async handlers, input overrides, and per-handler error policies.
+
+    → [Lifecycle Signals](concepts/signals.md)
+
 ## 0.10.1b7 (2026-10-09)
 
 ### Lambda Functions in VPC

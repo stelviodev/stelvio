@@ -222,7 +222,8 @@ def test_run_json_no_deployed_prints_json_only(cli_commands, command, message) -
     cli_commands.CommandRun.return_value.has_deployed = False
     handler = cli_commands.RichDeploymentHandler.return_value
 
-    getattr(cli_commands, command)("dev", json_output=True)
+    kwargs = {"skip_confirm": True} if command == "run_destroy" else {}
+    getattr(cli_commands, command)("dev", json_output=True, **kwargs)
 
     assert cli_commands.console.lines == []
     handler.build_json_summary.assert_called_once_with(outputs={}, message=message)

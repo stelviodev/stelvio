@@ -49,6 +49,11 @@ Add it when you need to:
 !!! warning
     Without `@app.config`, only your personal environment (your username) is available. See [Configuring environments](../concepts/environments.md#configuring-environments).
 
+### @app.on (optional)
+
+To run code before or after CLI operations, register lifecycle handlers with
+`@app.on`. See [Lifecycle Signals](signals.md) for payloads, error policies, and dev events.
+
 ## Configuring AWS credentials and region
 
 Stelvio follows the same credential resolution as the AWS CLI.

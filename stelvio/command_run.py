@@ -70,6 +70,7 @@ from pulumi.automation import (
 )
 from semver import VersionInfo
 
+from stelvio._signals import _configured, _current, _record_failure, _recover
 from stelvio.app import StelvioApp
 from stelvio.aws.home import AwsHome
 from stelvio.config import StelvioAppConfig
@@ -247,6 +248,7 @@ def _load_app_config(env: str) -> tuple[StelvioApp, StelvioAppConfig]:
     app = StelvioApp.get_instance()
     logger.debug("Getting project configuration for environment: %s", env)
     config = app._execute_user_config_func(env)  # noqa: SLF001
+    config = _configured(app, config)
     return app, config
 
 
@@ -332,6 +334,8 @@ class CommandRun:
         passphrase = _get_or_create_passphrase(self._home, self._app_name, self.env)
         # 5. Generate update ID and create workdir
         self._update_id = _generate_update_id()
+        if session := _current.get():
+            session.update_id = self._update_id
         self._workdir = get_dot_stelvio_dir() / self._update_id
         self._workdir.mkdir(parents=True, exist_ok=True)
         # If anything fails after workdir creation, we need to clean up manually
@@ -346,22 +350,26 @@ class CommandRun:
             # 8. Create Pulumi stack (skip for state_only mode)
             if not self._state_only:
                 self._stack = _create_stack(ctx, passphrase, self._workdir)
-        except Exception:
-            if self._locked:
-                self._unlock()
-            if not os.environ.get("STLV_NO_CLEANUP"):
-                shutil.rmtree(self._workdir)
+        except BaseException as error:
+            _record_failure(error)
+            self._cleanup(error)
             raise
         return self
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> bool:
-        try:
-            self._unlock()
-        finally:
-            if not os.environ.get("STLV_NO_CLEANUP"):
-                shutil.rmtree(self._workdir)
-
+        self._cleanup(exc_val if isinstance(exc_val, BaseException) else None)
         return False
+
+    def _cleanup(self, primary: BaseException | None) -> None:
+        failure = _recover(
+            [("lock_release", self._unlock), ("cleanup", self._clean_workdir)], primary
+        )
+        if primary is None and failure is not None:
+            raise failure
+
+    def _clean_workdir(self) -> None:
+        if self._workdir is not None and not os.environ.get("STLV_NO_CLEANUP"):
+            shutil.rmtree(self._workdir)
 
     @property
     def stack(self) -> Stack:
@@ -537,6 +545,8 @@ class CommandRun:
         lock_path = self._workdir / "lock.json"
         lock_path.write_text(json.dumps(lock_info))
         self._home.write_file(key, lock_path)
+        # The lock exists even if creating its audit record fails.
+        self._locked = True
 
         # Create update record (audit trail)
         self._create_update()
