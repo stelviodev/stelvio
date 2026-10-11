@@ -16,6 +16,7 @@ from stelvio.aws.function import (
     FunctionCustomizationDict,
     parse_handler_config,
 )
+from stelvio.aws.function.config import validate_durable_event_source
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
@@ -157,6 +158,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
         self._filters = filters
 
         self._handler = parse_handler_config(handler, opts)
+        validate_durable_event_source(self._handler)
 
     @staticmethod
     def _check_filter_rules(filters: list[SqsFilterDict] | None) -> None:
@@ -226,7 +228,7 @@ class QueueSubscription(Component[QueueSubscriptionResources, QueueSubscriptionC
                 },
                 default_props={
                     "event_source_arn": self._queue.arn,
-                    "function_name": function.function_name,
+                    "function_name": function.invocation_name,
                     "enabled": True,
                     "batch_size": DEFAULT_QUEUE_BATCH_SIZE,
                 },

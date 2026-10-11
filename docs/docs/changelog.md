@@ -8,6 +8,12 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Durable Functions
+
+- **Lambda Durable Functions.** `Function(durable={"execution_timeout": 86400}, runtime="python3.14")` publishes versions with a `live` alias and checkpoint permissions. `stlv dev` runs handlers locally with AWS checkpoints and source pinned per execution.
+
+    → [Durable Functions Guide](components/aws/lambda.md#durable-functions)
+
 ## 0.10.1b7 (2026-10-09)
 
 ### Lambda Functions in VPC

@@ -40,6 +40,7 @@ UNKNOWN_OUTPUT_DISPLAY = "output<string>"
 # Keys use actual Pulumi type tokens (aws:module/resource:ResourceName format).
 RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:lambda/function:Function": "Lambda Function",
+    "aws:lambda/alias:Alias": "Lambda Alias",
     "aws:lambda/permission:Permission": "Lambda Permission",
     "aws:lambda/layerVersion:LayerVersion": "Lambda Layer",
     "aws:lambda/eventSourceMapping:EventSourceMapping": "Event Source Mapping",

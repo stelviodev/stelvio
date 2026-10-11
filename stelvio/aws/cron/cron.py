@@ -181,8 +181,6 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                 parent=self,
             )
 
-        lambda_function = stelvio_function.resources.function
-
         # Create EventBridge Rule with schedule
         rule = cloudwatch.EventRule(
             resource_name(f"{self.name}-rule", limit=64),
@@ -204,7 +202,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
             **self._customizer(
                 "target",
                 {"input": json.dumps(self._payload) if self._payload is not None else None},
-                {"rule": rule.name, "arn": lambda_function.arn},
+                {"rule": rule.name, "arn": stelvio_function.invocation_arn},
             ),
             opts=self._resource_opts(),
         )
@@ -217,7 +215,7 @@ class Cron(Component[CronResources, CronCustomizationDict]):
                 {},
                 {
                     "action": "lambda:InvokeFunction",
-                    "function": lambda_function.name,
+                    "function": stelvio_function.invocation_name,
                     "principal": "events.amazonaws.com",
                     "source_arn": rule.arn,
                 },

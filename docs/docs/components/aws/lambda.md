@@ -619,6 +619,98 @@ Dependencies included directly in a function's package take precedence over depe
 If multiple layers provide the same package, the standard AWS layer ordering applies (later layers
 in the list override earlier ones).
 
+## Durable Functions
+
+```python
+from stelvio.aws.function import DurableConfig, Function
+
+orders = Function(
+    "orders",
+    handler="functions/orders.handler",
+    runtime="python3.14",
+    requirements=["aws-durable-execution-sdk-python==2.0.1"],
+    durable=DurableConfig(execution_timeout=86400, retention_period=7),
+)
+```
+
+[AWS Lambda Durable Functions](https://docs.aws.amazon.com/lambda/latest/dg/durable-functions.html)
+checkpoint workflow progress and replay completed operations when an execution resumes.
+Write the handler with the AWS SDK:
+
+```python
+# functions/orders.py
+from aws_durable_execution_sdk_python import DurableContext, durable_execution, durable_step
+from aws_durable_execution_sdk_python.config import Duration
+
+
+@durable_step
+def validate(step_context, order_id):
+    return {"order_id": order_id, "status": "validated"}
+
+
+@durable_execution
+def handler(event, context: DurableContext):
+    order = context.step(validate(event["order_id"]), name="validate")
+    context.wait(Duration.from_seconds(10), name="confirmation")
+    return order
+```
+
+Use steps for side effects. Code outside durable operations runs again on replay and must
+remain deterministic. Checkpointing does not make an external operation exactly-once;
+design retryable side effects to be idempotent.
+
+`durable` accepts a `DurableConfig` or a dictionary with the same options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `execution_timeout` | Required | Total workflow duration in seconds, from `1` to `31622400`, including suspended time. |
+| `retention_period` | `14` | Days to retain completed execution history, from `1` to `90`. |
+
+The existing `timeout` still limits each individual Lambda invocation. Durability requires
+an explicit `runtime="python3.13"` or `"python3.14"`; the shared default remains Python 3.12.
+Declare the AWS durable SDK in the function's requirements or its requirements file.
+
+### Invoking durable functions
+
+Stelvio publishes a version and maintains a `live` alias. `invocation_arn`,
+`invocation_name`, and linked `Resources.orders.function_arn` / `function_name` target that
+alias. `invoke_arn` provides its API Gateway integration URI. The existing `function_name`
+and `resources.function.arn` remain unqualified resource identifiers.
+
+Use a qualified target when invoking directly, including asynchronous workflows:
+
+```python
+import json
+
+import boto3
+from stlv_resources import Resources
+
+boto3.client("lambda").invoke(
+    FunctionName=Resources.orders.function_arn,
+    InvocationType="Event",
+    Payload=json.dumps({"order_id": "order-123"}).encode(),
+)
+```
+
+Stelvio's links, API integrations, Function URLs, Cron, SNS, S3 notifications, and supported
+event source mappings select the qualified target automatically. HTTP callers still have
+their service's response deadline. Direct SQS and DynamoDB subscriptions require
+`execution_timeout <= 900`; for longer workflows, use an ordinary subscriber that invokes
+the durable function asynchronously.
+
+!!! warning "Deployment lifecycle"
+    Adding or removing `durable` replaces the Lambda function. Replacement and destruction
+    stop unfinished executions of the old function. Changing durable timeout or retention
+    updates it in place. Code deployments publish new versions while preserving older
+    versions so their unfinished executions can resume.
+
+Checkpoint permissions are scoped before Lambda creation using Pulumi's default function
+auto-naming. If you override Pulumi's auto-naming rules, supply an explicit function name
+through `customize={"function": {"name": "my-durable-function"}}` so the permissions match.
+
+Durable handlers also run locally with real AWS checkpoints during `stlv dev`. See
+[Durable execution in dev mode](../../concepts/dev-mode.md#durable-functions).
+
 ## Function URLs
 
 Function URLs provide a dedicated HTTPS endpoint for your Lambda function.

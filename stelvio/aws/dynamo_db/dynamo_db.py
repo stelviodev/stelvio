@@ -14,6 +14,7 @@ from stelvio.aws.function import (
     FunctionCustomizationDict,
     parse_handler_config,
 )
+from stelvio.aws.function.config import validate_durable_event_source
 from stelvio.aws.permission import AwsPermission
 from stelvio.component import Component, link_config_creator, parse_config, resource_name
 from stelvio.link import Link, LinkableMixin, LinkConfig
@@ -309,6 +310,7 @@ class DynamoSubscription(
         self._filters = filters
         self._batch_size = batch_size
         self._handler = parse_handler_config(handler, opts)
+        validate_durable_event_source(self._handler)
 
     def _create_resources(self) -> DynamoSubscriptionResources:
         # Create stream link (mandatory for EventSourceMapping)
@@ -340,7 +342,7 @@ class DynamoSubscription(
                 },
                 default_props={
                     "event_source_arn": self._table.stream_arn,
-                    "function_name": function.function_name,
+                    "function_name": function.invocation_name,
                     "starting_position": "LATEST",
                     "batch_size": 100,
                     "maximum_batching_window_in_seconds": 0,

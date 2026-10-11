@@ -114,7 +114,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
                 {
                     "topic": self._topic.arn,
                     "protocol": "lambda",
-                    "endpoint": function.resources.function.arn,
+                    "endpoint": function.invocation_arn,
                 },
             ),
             opts=self._resource_opts(),
@@ -127,7 +127,7 @@ class TopicSubscription(Component[TopicSubscriptionResources, TopicSubscriptionC
                 {},
                 {
                     "action": "lambda:InvokeFunction",
-                    "function": function.function_name,
+                    "function": function.invocation_name,
                     "principal": "sns.amazonaws.com",
                     "source_arn": self._topic.arn,
                 },

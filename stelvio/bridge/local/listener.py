@@ -2,6 +2,7 @@ import asyncio
 import base64
 import datetime
 import json
+import os
 import traceback
 import uuid
 from dataclasses import asdict
@@ -20,7 +21,7 @@ from stelvio.bridge._chunking import (
 )
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
-from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
+from stelvio.bridge.remote.infrastructure import AppSyncResource, discover_or_create_appsync
 
 NOT_A_TEAPOT = 418
 
@@ -139,6 +140,16 @@ def log_invocation(result: BridgeInvocationResult) -> None:
     wall_clock = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     timestamp = f"[grey][{wall_clock}: {loop_time:06.0f}][/grey]"
 
+    if result.durable_execution_arn is not None:
+        status = result.durable_status or "INVOCATION ERROR"
+        console.print(
+            f"{timestamp} DURABLE {escape(result.durable_execution_arn)} "
+            f"{escape(status)} {duration_ms:.2f}ms"
+        )
+        if result.error_result is not None:
+            console.print(escape(str(result.error_result)))
+        return
+
     if result.error_result is not None:
         console.print(
             f"{timestamp} [bold]{method:7s}[/bold] [bold blue]{path:48s}[/bold blue] "
@@ -176,8 +187,15 @@ def log_invocation(result: BridgeInvocationResult) -> None:
         )
 
 
-async def _handle_data_message(
-    data: dict, ws: object, api_key: str, app_name: str, env: str
+async def _handle_data_message(  # noqa: PLR0913
+    data: dict,
+    ws: object,
+    api_key: str,
+    app_name: str,
+    env: str,
+    *,
+    ordinary_lock: asyncio.Lock | None = None,
+    process_environment: dict[str, str] | None = None,
 ) -> None:
     event_data = json.loads(data["event"])
 
@@ -186,9 +204,21 @@ async def _handle_data_message(
         if not is_complete:
             return
         data = {"type": "data", "event": json.dumps(complete_msg)}
+        event_data = complete_msg
+
+    if process_environment is not None:
+        data = {**data, "_local_environment": process_environment}
 
     for handler in WebsocketHandlers.all():
-        result = await handler.handle_bridge_event(data)
+        if event_data.get("endpointId") != handler._dev_endpoint_id:  # noqa: SLF001
+            continue
+        if ordinary_lock is not None and not getattr(
+            getattr(handler, "config", None), "durable", None
+        ):
+            async with ordinary_lock:
+                result = await handler.handle_bridge_event(data)
+        else:
+            result = await handler.handle_bridge_event(data)
         if result:
             await publish(result, ws, api_key, data, app_name, env)
             log_invocation(result)
@@ -211,7 +241,32 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
     console.print("[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
     console.print("Press Ctrl+C to stop.\n")
 
-    # Handle messages
+    ordinary_lock = asyncio.Lock()
+    process_environment = os.environ.copy()
+    async with asyncio.TaskGroup() as invocations:
+        await _listen(
+            ws,
+            config,
+            app_name,
+            env,
+            console=console,
+            ordinary_lock=ordinary_lock,
+            invocations=invocations,
+            process_environment=process_environment,
+        )
+
+
+async def _listen(  # noqa: PLR0913
+    ws: object,
+    config: AppSyncResource,
+    app_name: str,
+    env: str,
+    *,
+    console: Console,
+    ordinary_lock: asyncio.Lock,
+    invocations: asyncio.TaskGroup,
+    process_environment: dict[str, str],
+) -> None:
     async for message in ws:
         data = json.loads(message)
 
@@ -242,7 +297,17 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 continue
             # Data message (Lambda invocation)
             case "data":
-                await _handle_data_message(data, ws, config.api_key, app_name, env)
+                invocations.create_task(
+                    _handle_data_message(
+                        data,
+                        ws,
+                        config.api_key,
+                        app_name,
+                        env,
+                        ordinary_lock=ordinary_lock,
+                        process_environment=process_environment,
+                    )
+                )
             case _:
                 pass
 

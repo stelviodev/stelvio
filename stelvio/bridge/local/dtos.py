@@ -12,3 +12,5 @@ class BridgeInvocationResult:
     process_time_local: float
     status_code: int
     handler_name: str | None = None
+    durable_execution_arn: str | None = None
+    durable_status: str | None = None
