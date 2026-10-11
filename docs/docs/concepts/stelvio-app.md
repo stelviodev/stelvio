@@ -54,6 +54,11 @@ Add it when you need to:
 To run code before or after CLI operations, register lifecycle handlers with
 `@app.on`. See [Lifecycle Signals](signals.md) for payloads, error policies, and dev events.
 
+### @app.local_execute (optional)
+
+Run local tasks after successful deployment with resolved link properties and IDE
+completion. See [Local Execution](local-execution.md) for the decorator and generated types.
+
 ## Configuring AWS credentials and region
 
 Stelvio follows the same credential resolution as the AWS CLI.

@@ -31,6 +31,8 @@ Two separate problems:
 import os
 import sys
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 # --- Pulumi provider warnings ---
 # Suppress raw Python deprecation warnings from providers; our CLI already
@@ -51,3 +53,15 @@ _devnull_fd = os.open(os.devnull, os.O_WRONLY)
 os.dup2(_devnull_fd, 2)
 os.close(_devnull_fd)
 sys.stderr = os.fdopen(_real_stderr_fd, "w", buffering=1)
+
+
+@contextmanager
+def _native_stderr() -> Iterator[None]:
+    # Native input() prompts and local subprocesses need the real fd after provisioning.
+    suppressed_fd = os.dup(2)
+    try:
+        os.dup2(_real_stderr_fd, 2)
+        yield
+    finally:
+        os.dup2(suppressed_fd, 2)
+        os.close(suppressed_fd)

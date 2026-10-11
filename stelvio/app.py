@@ -2,7 +2,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from importlib import import_module
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar, final
+from typing import Any, ClassVar, TypeVar, final, overload
 
 from pulumi import Resource as PulumiResource
 
@@ -11,6 +11,7 @@ from stelvio.component import Component, ComponentRegistry
 from stelvio.config import StelvioAppConfig
 from stelvio.link import LinkConfig
 
+from ._local_execute import _register_local
 from ._signals import Handler, _current, _program_phase, _Receiver, _register
 from .project import get_project_root
 from .signals import ErrorPolicy, Signal
@@ -42,6 +43,7 @@ class StelvioApp:
         self._run_func = None
         self._app_config: StelvioAppConfig | None = None
         self._signal_handlers: dict[Signal[Any], list[_Receiver]] = {}
+        self._local_execute_handlers: list[Handler[Any]] = []
         if link_configs:
             for component_type, fn in link_configs.items():
                 self.set_user_link_for(component_type, fn)
@@ -73,6 +75,25 @@ class StelvioApp:
             return func
 
         return decorate
+
+    @overload
+    def local_execute[ComponentsT](
+        self, func: Handler[ComponentsT], *, errors: ErrorPolicy = "fail"
+    ) -> Handler[ComponentsT]: ...
+
+    @overload
+    def local_execute[ComponentsT](
+        self, func: None = None, *, errors: ErrorPolicy = "fail"
+    ) -> Callable[[Handler[ComponentsT]], Handler[ComponentsT]]: ...
+
+    def local_execute(
+        self, func: Handler[Any] | None = None, *, errors: ErrorPolicy = "fail"
+    ) -> Handler[Any] | Callable[[Handler[Any]], Handler[Any]]:
+        def decorate(handler: Handler[Any]) -> Handler[Any]:
+            _register_local(self, handler, errors)
+            return handler
+
+        return decorate(func) if func is not None else decorate
 
     def run(self, func: Callable[[], None]) -> Callable[[], None]:
         if self._run_func:

@@ -2,13 +2,13 @@ from collections import Counter
 from dataclasses import MISSING, Field, dataclass, field, fields
 from typing import Literal, TypedDict, final
 
-from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
-from stelvio.aws.function.constants import MAX_LAMBDA_LAYERS
-from stelvio.aws.function.naming import _envar_name
-from stelvio.aws.function.resources_codegen import (
+from stelvio._link_codegen import (
     _pascal_to_snake,
     _to_valid_python_class_name,
 )
+from stelvio.aws.cors import CorsConfig, CorsConfigDict, normalize_cors_config
+from stelvio.aws.function.constants import MAX_LAMBDA_LAYERS
+from stelvio.aws.function.naming import _envar_name
 from stelvio.aws.layer import Layer
 from stelvio.aws.types import (
     DEFAULT_ARCHITECTURE,
