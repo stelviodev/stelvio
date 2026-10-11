@@ -12,7 +12,7 @@ from pulumi import Output
 
 from stelvio import signals
 from stelvio._link_codegen import _link_names
-from stelvio._signals import Handler, _current, _register
+from stelvio._signals import Handler, _current, _Receiver, _register
 from stelvio.component import ComponentRegistry
 from stelvio.project import get_project_root
 
@@ -148,6 +148,11 @@ def _register_local(app: StelvioApp, handler: Handler[Any], errors: ErrorPolicy)
             )
         return handler(session.local_components)
 
+    @wraps(handler)
+    def enqueue(event: DeployEvent) -> None:
+        if event.command == "deploy" and (session := _current.get()) is not None:
+            session.local_callbacks.append(_Receiver(execute, errors))
+
     _register(app, signals.after_resource_creation, _collect, "fail")
-    _register(app, signals.after_deploy, execute, errors)
+    _register(app, signals.after_deploy, enqueue, "fail")
     app._local_execute_handlers.append(handler)  # noqa: SLF001

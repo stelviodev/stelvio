@@ -43,12 +43,16 @@ view and each component's properties are immutable; dictionary access is unsuppo
 
 Callbacks run after successful `stlv deploy`, including deployments with no
 infrastructure changes. Provisioning, state saving, completion recording, lock release,
-and required cleanup have finished. Failed or cancelled deployments skip callbacks.
+and required cleanup have finished. The complete deployment summary, warnings, and
+resource outputs have been printed, and deployment spinners have stopped. Failed
+or cancelled deployments skip callbacks.
 `stlv diff` generates types but does not execute callbacks. `stlv dev`, destroy, and
 refresh do not execute them.
 
-Local callbacks use the existing `after_deploy` signal and run in registration order
-alongside ordinary `@app.on(signals.after_deploy)` handlers. Sync and async callbacks
+Local callbacks are scheduled through the existing `after_deploy` signal. All ordinary
+`@app.on(signals.after_deploy)` handlers finish before completion output and local
+execution, regardless of registration order. Local callbacks then run in their own
+registration order as the final command stage. Sync and async callbacks
 are supported, return values are ignored, and repeated registration of the same
 callback keeps the first error policy. Register callbacks at module level or in
 modules discovered during app execution.
@@ -56,6 +60,20 @@ modules discovered during app execution.
 Callbacks use the local process's credentials. Link IAM permissions and linked files
 are not applied to local execution. Tasks such as seeding data, running migrations,
 or calling APIs need the appropriate local credentials and dependencies.
+
+## Blocking interaction
+
+```python
+@app.local_execute
+def ask_about_bucket(components: "LocalComponents") -> None:
+    answer = input(f"Use bucket {components.my_bucket.bucket_name}? [y/N]: ")
+    print(f"Answer: {answer}", file=sys.stderr)
+```
+
+Blocking calls such as `input()` are supported. Stelvio waits for the callback before
+exiting, and the deployment display no longer redraws while you type. Ctrl+C interrupts
+local execution, skips subsequent callbacks, and emits `on_cancel` with
+`phase="local_execute"`. The completed deployment is preserved.
 
 ## IDE completion
 
@@ -76,8 +94,8 @@ names are also rejected, in both local and Lambda link accessors.
 
 ## Errors and output
 
-By default, a callback exception fails the command and prevents remaining ordinary
-handlers from running. The infrastructure remains deployed. Use `errors="continue"`
+By default, a callback exception fails the command and prevents remaining local
+callbacks from running. The infrastructure remains deployed. Use `errors="continue"`
 for a callback whose failure should be reported without failing the command:
 
 ```python
@@ -95,5 +113,11 @@ generated file or add them to deployment summaries.
 Framework diagnostics go to stderr. Callbacks control their own output; use stderr
 or an external destination when using `--json` or `--stream`. Stelvio waits for each
 callback and does not impose a timeout, retry it, or roll back its side effects.
+
+The summary appears before local execution in every output mode. JSON and streaming
+summaries describe the deployment outcome, including their `status` and `exit_code`.
+A subsequent fatal local error is reported on stderr and makes the process exit
+nonzero, without another stdout summary. Use the process exit status for the overall
+command result. Error notifications for callbacks have `phase="local_execute"`.
 
 See [Lifecycle Signals](signals.md) for error notifications and cancellation behavior.

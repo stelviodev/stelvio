@@ -80,9 +80,15 @@ Human-readable deploy output shows changed components as they finish, then print
 - `error`
 - final `summary`
 
+[`@app.local_execute`](../concepts/local-execution.md) callbacks run after the deployment
+summary in every output mode. A later callback failure is reported on stderr and can
+make the process exit nonzero without a second summary. Check the process exit status
+for the overall command result; the summary's `status` and `exit_code` describe deployment.
+Callbacks control their own output and may prompt, including in machine-output modes.
+
 !!! warning
     Shared environments ask for confirmation unless you use `--yes`.
-    In JSON mode, Stelvio never prompts. `stlv deploy ENV --json` therefore requires `--yes`
+    In JSON mode, Stelvio never prompts for confirmation. `stlv deploy ENV --json` therefore requires `--yes`
     for shared environments. `stlv deploy ENV --stream` follows the same rule.
     Outside CI, commands keep the existing default of using your personal environment when env is omitted.
 

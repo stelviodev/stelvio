@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import signal
 import sys
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
@@ -34,6 +36,8 @@ from stelvio.signals import (
 )
 
 if TYPE_CHECKING:
+    from types import FrameType
+
     from stelvio.app import StelvioApp
     from stelvio.config import StelvioAppConfig
 
@@ -65,8 +69,17 @@ def _diagnostic(error: BaseException, *, handler: str | None = None) -> None:
     sys.stderr.write(f"{prefix} failed: {type(error).__name__}: {error}\n")
 
 
-async def _dispatch(app: StelvioApp, event: OperationEvent, *, robust: bool = False) -> None:
-    for receiver in tuple(app._signal_handlers.get(event.signal, ())):  # noqa: SLF001
+async def _dispatch(
+    app: StelvioApp,
+    event: OperationEvent,
+    *,
+    robust: bool = False,
+    receivers: tuple[_Receiver, ...] | None = None,
+    phase: str | None = None,
+) -> None:
+    if receivers is None:
+        receivers = tuple(app._signal_handlers.get(event.signal, ()))  # noqa: SLF001
+    for receiver in receivers:
         name = getattr(receiver.handler, "__qualname__", type(receiver.handler).__name__)
         try:
             response = receiver.handler(event)
@@ -83,11 +96,18 @@ async def _dispatch(app: StelvioApp, event: OperationEvent, *, robust: bool = Fa
             session = _current.get()
             if session is not None:
                 session.handler = name
-                session.phase = event.signal.name
+                session.phase = phase or event.signal.name
             raise
 
 
-def _dispatch_sync(app: StelvioApp, event: OperationEvent, *, robust: bool = False) -> None:
+def _dispatch_sync(
+    app: StelvioApp,
+    event: OperationEvent,
+    *,
+    robust: bool = False,
+    receivers: tuple[_Receiver, ...] | None = None,
+    phase: str | None = None,
+) -> None:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -100,7 +120,7 @@ def _dispatch_sync(app: StelvioApp, event: OperationEvent, *, robust: bool = Fal
         previous_loop = None
     try:
         with asyncio.Runner() as runner:
-            runner.run(_dispatch(app, event, robust=robust))
+            runner.run(_dispatch(app, event, robust=robust, receivers=receivers, phase=phase))
     finally:
         asyncio.set_event_loop(previous_loop)
 
@@ -134,12 +154,14 @@ class _Session:
         self.cancelled = False
         self.bridge_ready = False
         self.completion: Callable[[], object] | None = None
+        self.completion_emitted = False
         self.failed_completion: Callable[[BaseException], object] | None = None
         self.state_exists: bool | None = None
         self.stack_name: str | None = None
         self.recorded_errors: tuple[str, ...] = ()
         self.secondary_failures: list[BaseException] = []
         self.local_components: object | None = None
+        self.local_callbacks: list[_Receiver] = []
 
     def event(self, signal: Signal[Any], **extra: object) -> OperationEvent:
         event_type = _EVENT_TYPES[self.operation]
@@ -275,6 +297,50 @@ class _Session:
         )
 
 
+def _interrupt_local_execution(signum: int, frame: FrameType | None) -> None:
+    signal.default_int_handler(signum, frame)
+
+
+@contextmanager
+def _local_execution_context() -> Iterator[None]:
+    restore_signal = (
+        threading.current_thread() is threading.main_thread()
+        and signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    )
+    if restore_signal:
+        # Runner's task cancellation cannot interrupt synchronous input() on its first SIGINT.
+        signal.signal(signal.SIGINT, _interrupt_local_execution)
+    suppression = sys.modules.get("stelvio._suppress_grpc")
+    try:
+        # Importing the app without the CLI must not enable fd-level gRPC suppression.
+        with suppression._native_stderr() if suppression is not None else nullcontext():  # noqa: SLF001
+            yield
+    finally:
+        if restore_signal:
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
+def _complete_operation(session: _Session) -> None:
+    session.emit(getattr(signals, f"after_{session.command}"))
+    if session.completion is not None:
+        session.phase = "completion"
+        session.handler = None
+        session.completion()
+        session.completion_emitted = True
+    if session.local_callbacks:
+        session.phase = "local_execute"
+        session.handler = None
+        callbacks = tuple(session.local_callbacks)
+        session.local_callbacks.clear()
+        with _local_execution_context():
+            _dispatch_sync(
+                session.app,
+                session.event(signals.after_deploy),
+                receivers=callbacks,
+                phase="local_execute",
+            )
+
+
 @contextmanager
 def _command_scope(
     command: OperationName, env: str, *, show_unchanged: bool = False, compact: bool = False
@@ -290,15 +356,17 @@ def _command_scope(
     try:
         yield session
         if session.prepared and not session.cancelled:
-            session.emit(getattr(signals, f"after_{command}"))
-            if session.completion is not None:
-                session.completion()
+            _complete_operation(session)
     except (KeyboardInterrupt, asyncio.CancelledError, Abort):
         session.cancel("interrupted")
         raise
     except BaseException as error:
+        session.fail(error)
         session.notify_failure(error)
-        if session.failed_completion is not None:
+        if session.completion_emitted:
+            _diagnostic(error, handler=session.failure_handler)
+            error._stelvio_lifecycle_reported = True  # noqa: SLF001
+        elif session.failed_completion is not None:
             try:
                 session.failed_completion(session.failure or error)
                 error._stelvio_lifecycle_reported = True  # noqa: SLF001

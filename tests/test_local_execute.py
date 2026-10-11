@@ -79,8 +79,11 @@ def test_local_execute_resolves_bucket_properties_after_cleanup(phase_app, local
 
     phase_app.local_execute(execute)
     phase_app.on(signals.after_deploy)(lambda event: order.append("last"))
+    local_pipeline.commands.RichDeploymentHandler.return_value.show_completion.side_effect = (
+        lambda: order.append("completion")
+    )
     local_pipeline.commands.run_deploy("test")
-    assert order == ["signal", "local", "last"]
+    assert order == ["signal", "last", "completion", "local"]
     assert len(received) == 1
     assert isinstance(received[0].my_bucket.bucket_arn, str)
     assert received[0].my_bucket.bucket_arn == f"arn:aws:s3:::{received[0].my_bucket.bucket_name}"
@@ -160,7 +163,7 @@ def test_local_callback_error_policy_preserves_deployment(
         assert raised.value is original
         assert order == ["broken"]
         assert len(errors) == 1
-        assert errors[0].phase == "after_deploy"
+        assert errors[0].phase == "local_execute"
         assert errors[0].handler.endswith("broken")
     else:
         local_pipeline.commands.run_deploy("test")
@@ -355,12 +358,20 @@ def test_local_execution_guide_examples_work_before_generated_types_exist(
         "stelvio.command_run._create_stack",
         lambda *args: PulumiStack(namespace["app"]._get_pulumi_program_func()),
     )
+
+    def answer(prompt):
+        local_pipeline.commands.RichDeploymentHandler.return_value.show_completion.assert_called_once()
+        return "n"
+
+    user_input = Mock(side_effect=answer)
+    monkeypatch.setattr("builtins.input", user_input)
     local_pipeline.commands.run_deploy("test")
     captured = capsys.readouterr()
     lines = captured.err.splitlines()
-    assert len(lines) == 2
+    assert len(lines) == 3
     bucket_name = lines[0].removeprefix("Bucket ready: ")
-    assert lines == [f"Bucket ready: {bucket_name}", f"arn:aws:s3:::{bucket_name}"]
+    assert lines == [f"Bucket ready: {bucket_name}", "Answer: n", f"arn:aws:s3:::{bucket_name}"]
+    user_input.assert_called_once_with(f"Use bucket {bucket_name}? [y/N]: ")
     assert captured.out == ""
     assert (local_pipeline.root / "stlv_local.py").exists()
 
@@ -405,7 +416,9 @@ def test_local_execute_preserves_machine_output_and_exit_status(
         assert [payload["event"] for payload in payloads] == ["start", "summary"]
         summaries = payloads[1:]
     assert len(summaries) == 1
-    assert summaries[0]["status"] == ("failed" if outcome == "fail" else "success")
+    assert summaries[0]["status"] == "success"
+    assert summaries[0]["exit_code"] == 0
+    assert result.output.index('"status"') < result.output.index("local ran")
     assert "local ran" in result.stderr
 
 
@@ -435,7 +448,7 @@ def test_duplicate_local_registration_retains_first_error_policy(phase_app, loca
     phase_app.local_execute(execute, errors="fail")
     phase_app.on(signals.after_deploy)(lambda event: calls.append("after"))
     local_pipeline.commands.run_deploy("test")
-    assert calls == ["local", "after"]
+    assert calls == ["after", "local"]
 
 
 def test_interrupted_local_callback_cancels_after_completed_deployment(phase_app, local_pipeline):
@@ -454,7 +467,7 @@ def test_interrupted_local_callback_cancels_after_completed_deployment(phase_app
     with raises(KeyboardInterrupt, match=""):
         local_pipeline.commands.run_deploy("test")
     assert len(cancelled) == 1
-    assert (cancelled[0].reason, cancelled[0].phase) == ("interrupted", "after_deploy")
+    assert (cancelled[0].reason, cancelled[0].phase) == ("interrupted", "local_execute")
     assert errors == []
     following.assert_not_called()
     assert not local_pipeline.home.file_exists("lock/demo/test.json")
@@ -467,3 +480,27 @@ def test_interrupted_local_callback_cancels_after_completed_deployment(phase_app
     assert len(records) == 1
     assert records[0]["time_completed"] is not None
     assert records[0]["errors"] is None
+
+
+@mark.parametrize("failure", ["after_deploy", "completion"])
+def test_failure_before_completion_suppresses_queued_local_callbacks(
+    phase_app, local_pipeline, failure
+):
+    phase_app.run(lambda: None)
+    callback = Mock()
+    phase_app.local_execute(callback)
+    original = ValueError("finalization failed")
+    if failure == "after_deploy":
+        phase_app.on(signals.after_deploy)(Mock(side_effect=original))
+    else:
+        handler = local_pipeline.commands.RichDeploymentHandler.return_value
+        handler.show_completion.side_effect = original
+    errors = []
+    phase_app.on(signals.on_error)(errors.append)
+    with raises(ValueError, match="finalization failed") as raised:
+        local_pipeline.commands.run_deploy("test")
+    assert raised.value is original
+    callback.assert_not_called()
+    assert len(errors) == 1
+    assert errors[0].phase == failure
+    assert not local_pipeline.home.file_exists("lock/demo/test.json")

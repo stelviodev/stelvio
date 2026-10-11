@@ -4,7 +4,7 @@
 
 ### Local Execution
 
-- **Run local tasks after deployment.** `@app.local_execute` provides resolved link properties with generated IDE types.
+- **Run local tasks after deployment output finishes.** `@app.local_execute` provides resolved link properties with generated IDE types and supports blocking prompts without spinner redraws.
 
     → [Local Execution](concepts/local-execution.md)
 
