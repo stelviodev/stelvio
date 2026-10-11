@@ -2,7 +2,6 @@ import json
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any
-from unittest.mock import patch
 
 import pulumi
 import pytest
@@ -16,13 +15,14 @@ from stelvio.aws.dynamo_db import (
     LocalIndex,
     StreamView,
 )
-from stelvio.aws.dynamo_db.dynamo_db import TABLE_NAME_MAX_LENGTH, _convert_projection
+from stelvio.aws.dynamo_db.dynamo_db import _convert_projection
 from stelvio.aws.function import Function, FunctionConfig
 from stelvio.aws.permission import AwsPermission
 from stelvio.link import Link
 
 from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
+from ..conftest import assert_hash_truncated
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tn
 from ..subscription_test_helpers import verify_stelvio_function_for_subscription
 
@@ -1082,20 +1082,18 @@ def test_subscription_customize_reaches_mapping_and_function(pulumi_mocks):
     )
 
 
-@patch("stelvio.aws.dynamo_db.dynamo_db.resource_name", return_value="safe-table-name")
-@pulumi.runtime.test
-def test_table_uses_resource_name(mock_resource_name, pulumi_mocks):
-    table = DynamoTable("my-table", fields={"id": FieldType.STRING}, partition_key="id")
+def test_table_long_name_truncates_logical_name(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return DynamoTable(
+            "t" * 250, fields={"id": FieldType.STRING}, partition_key="id"
+        ).resources
 
-    def check_resource_name_usage(_):
-        # Verify resource_name was called with correct parameters
-        mock_resource_name.assert_called_once_with("my-table", limit=TABLE_NAME_MAX_LENGTH)
+    deploy()
 
-        # Verify Table was actually created with the resource_name return value
-        tables = pulumi_mocks.created_dynamo_tables("safe-table-name")
-        assert len(tables) == 1
-
-    table.arn.apply(check_resource_name_usage)
+    [table] = pulumi_mocks.created(R.DYNAMO_TABLE)
+    assert_hash_truncated(table.name, 247)  # DynamoDB 255 minus the 8-char Pulumi suffix
+    pulumi_mocks.assert_res_counts({R.DYNAMO_TABLE: 1})
 
 
 @pulumi.runtime.test
