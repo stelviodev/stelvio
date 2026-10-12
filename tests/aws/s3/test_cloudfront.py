@@ -1,3 +1,4 @@
+import json
 import re
 
 import pulumi
@@ -9,7 +10,7 @@ from stelvio.aws.s3 import Bucket, S3StaticWebsite
 
 from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import R, provider_urn, tid
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, provider_urn, tid, tn
 
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
@@ -80,7 +81,6 @@ def test_cloudfront_distribution_with_custom_price_class(
     assert hasattr(resources, "function_associations")
 
 
-@pulumi.runtime.test
 def test_cloudfront_distribution_creates_all_resources(
     pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
 ):
@@ -93,38 +93,113 @@ def test_cloudfront_distribution_creates_all_resources(
     )
 
     # Act
-    resources = distribution.resources
+    @pulumi.runtime.test
+    def deploy():
+        return distribution.resources
 
-    # Assert - verify all AWS resources are created through mocks
-    def check_resources(_):
-        # CloudFront Distribution
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
+    deploy()
 
-        # Origin Access Control
-        oacs = pulumi_mocks.created_origin_access_controls()
-        assert len(oacs) == 1
-
-        # S3 Bucket Policy
-        bucket_policies = pulumi_mocks.created_bucket_policies()
-        assert len(bucket_policies) == 1
-
-        # ACM Certificate (from AcmValidatedDomain)
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-
-        # DNS Records (cert validation + distribution CNAME)
-        dns_records = pulumi_mocks.created_dns_records()
-        assert len(dns_records) == 2
-
-    pulumi.Output.all(
-        distribution_id=resources.distribution.id,
-        oac_id=resources.origin_access_control.id,
-        bucket_policy_id=resources.bucket_policy.id,
-        cert_arn=resources.acm_validated_domain.resources.certificate.arn,
-        cert_validation=resources.acm_validated_domain.resources.cert_validation.id,
-        record_name=resources.record.name,
-    ).apply(check_resources)
+    # Assert
+    certificate_id = tid(TP + "test-all-resources-acm-validated-domain-certificate")
+    certificate_arn = f"arn:aws:acm:{DEFAULT_REGION}:{ACCOUNT_ID}:certificate/{certificate_id}"
+    pulumi_mocks.assert_res(
+        "test-all-resources",
+        R.DISTRIBUTION,
+        {
+            "aliases": ["all-resources.example.com"],
+            "enabled": True,
+            "isIpv6Enabled": True,
+            "priceClass": "PriceClass_100",
+            "defaultRootObject": "index.html",
+            "origins": [
+                {
+                    "originId": "test-all-resources-S3-Origin",
+                    "domainName": f"{tn(TP + 'test-bucket')}.s3.{DEFAULT_REGION}.amazonaws.com",
+                    "originAccessControlId": tid(TP + "test-all-resources-oac"),
+                }
+            ],
+            "defaultCacheBehavior": {
+                "targetOriginId": "test-all-resources-S3-Origin",
+                "allowedMethods": ["GET", "HEAD", "OPTIONS"],
+                "cachedMethods": ["GET", "HEAD"],
+                "cachePolicyId": tid(TP + "test-all-resources-cache-policy"),
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "functionAssociations": [],
+            },
+            "customErrorResponses": [
+                {
+                    "errorCode": 403,
+                    "responseCode": 404,
+                    "responsePagePath": "/error.html",
+                    "errorCachingMinTtl": 0,
+                },
+                {
+                    "errorCode": 404,
+                    "responseCode": 404,
+                    "responsePagePath": "/error.html",
+                    "errorCachingMinTtl": 300,
+                },
+            ],
+            "restrictions": {"geoRestriction": {"restrictionType": "none"}},
+            "viewerCertificate": {
+                "acmCertificateArn": certificate_arn,
+                "sslSupportMethod": "sni-only",
+                "minimumProtocolVersion": "TLSv1.2_2021",
+            },
+        },
+    )
+    pulumi_mocks.assert_res(
+        "test-all-resources-cache-policy",
+        R.CACHE_POLICY,
+        {
+            "comment": "Cache policy for test-all-resources",
+            "minTtl": 0,
+            "defaultTtl": 300,
+            "maxTtl": 3600,
+            "parametersInCacheKeyAndForwardedToOrigin": {
+                "cookiesConfig": {"cookieBehavior": "none"},
+                "headersConfig": {
+                    "headerBehavior": "whitelist",
+                    "headers": {"items": ["If-Modified-Since"]},
+                },
+                "queryStringsConfig": {"queryStringBehavior": "none"},
+                "enableAcceptEncodingGzip": True,
+                "enableAcceptEncodingBrotli": True,
+            },
+        },
+    )
+    pulumi_mocks.assert_res(
+        "test-all-resources-cloudfront-record",
+        R.CLOUDFLARE_RECORD,
+        {
+            "zoneId": "test-zone-id",
+            "name": "all-resources.example.com",
+            "type": "CNAME",
+            "content": f"{tid(TP + 'test-all-resources')}.cloudfront.net",
+            "ttl": 1,
+        },
+    )
+    pulumi_mocks.assert_res(
+        "test-all-resources-acm-validated-domain-certificate",
+        R.CERTIFICATE,
+        {"domainName": "all-resources.example.com"},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.DISTRIBUTION: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.CACHE_POLICY: 1,
+            R.BUCKET_POLICY: 1,
+            R.CERTIFICATE: 1,
+            R.CERTIFICATE_VALIDATION: 1,
+            # cert validation + distribution CNAME
+            R.CLOUDFLARE_RECORD: 2,
+        }
+    )
 
 
 @pulumi.runtime.test
@@ -185,7 +260,6 @@ def test_cloudfront_distribution_component_registry(
     assert "test-registry-cloudfront" in component_registry._registered_names
 
 
-@pulumi.runtime.test
 def test_cloudfront_distribution_origin_access_control_config(
     pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
 ):
@@ -198,19 +272,20 @@ def test_cloudfront_distribution_origin_access_control_config(
     )
 
     # Act
-    resources = distribution.resources
+    @pulumi.runtime.test
+    def deploy():
+        return distribution.resources
 
-    # Assert - verify OAC configuration
-    def check_oac(_):
-        oacs = pulumi_mocks.created_origin_access_controls()
-        assert len(oacs) == 1
+    deploy()
 
-        oac_resource = oacs[0]
-        assert oac_resource.inputs.get("originAccessControlOriginType") == "s3"
-        assert oac_resource.inputs.get("signingBehavior") == "always"
-        assert oac_resource.inputs.get("signingProtocol") == "sigv4"
-
-    resources.origin_access_control.id.apply(check_oac)
+    # Assert
+    [oac] = pulumi_mocks.created(R.ORIGIN_ACCESS_CONTROL)
+    assert oac.inputs == {
+        "description": "Origin Access Control for test-oac-config",
+        "originAccessControlOriginType": "s3",
+        "signingBehavior": "always",
+        "signingProtocol": "sigv4",
+    }
 
 
 @pulumi.runtime.test
@@ -237,35 +312,6 @@ def test_cloudfront_distribution_with_different_price_classes(
         assert hasattr(resources, "distribution")
 
 
-@pulumi.runtime.test
-def test_cloudfront_distribution_custom_error_responses(
-    pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
-):
-    """Test that CloudFront distribution includes custom error responses"""
-    # Arrange
-    distribution = CloudFrontDistribution(
-        name="test-error-responses",
-        bucket=mock_s3_bucket,
-        custom_domain="errors.example.com",
-    )
-
-    # Act
-    resources = distribution.resources
-
-    # Assert - verify distribution is created (error responses are configured internally)
-    def check_distribution(_):
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-
-        # The actual error response configuration is tested through the mock creation
-        distribution_resource = distributions[0]
-        assert distribution_resource.inputs.get("enabled") is True
-        assert distribution_resource.inputs.get("defaultRootObject") == "index.html"
-
-    resources.distribution.id.apply(check_distribution)
-
-
-@pulumi.runtime.test
 def test_cloudfront_distribution_s3_bucket_policy_creation(
     pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
 ):
@@ -278,18 +324,31 @@ def test_cloudfront_distribution_s3_bucket_policy_creation(
     )
 
     # Act
-    resources = distribution.resources
+    @pulumi.runtime.test
+    def deploy():
+        return distribution.resources
 
-    # Assert - verify bucket policy is created
-    def check_bucket_policy(_):
-        bucket_policies = pulumi_mocks.created_bucket_policies()
-        assert len(bucket_policies) == 1
+    deploy()
 
-        # Verify the bucket policy is associated with the correct bucket
-        bucket_policy_resource = bucket_policies[0]
-        assert bucket_policy_resource.inputs.get("bucket") is not None
-
-    resources.bucket_policy.id.apply(check_bucket_policy)
+    # Assert
+    distribution_arn = (
+        f"arn:aws:cloudfront::{ACCOUNT_ID}:distribution/{tid(TP + 'test-bucket-policy')}"
+    )
+    [policy] = pulumi_mocks.created(R.BUCKET_POLICY)
+    assert policy.inputs["bucket"] == tid(TP + "test-bucket")
+    assert json.loads(policy.inputs["policy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "AllowCloudFrontServicePrincipal",
+                "Effect": "Allow",
+                "Principal": {"Service": "cloudfront.amazonaws.com"},
+                "Action": "s3:GetObject",
+                "Resource": f"arn:aws:s3:::{tn(TP + 'test-bucket')}/*",
+                "Condition": {"StringEquals": {"AWS:SourceArn": distribution_arn}},
+            }
+        ],
+    }
 
 
 @pulumi.runtime.test
@@ -307,7 +366,6 @@ def test_cloudfront_distribution_raises_without_dns(
     assert "dns" in str(exc_info.value).lower() or "not configured" in str(exc_info.value).lower()
 
 
-@pulumi.runtime.test
 def test_custom_domain_acm_uses_us_east_1_provider(
     pulumi_mocks, app_context_with_dns_eu_west, component_registry
 ):
@@ -317,39 +375,29 @@ def test_custom_domain_acm_uses_us_east_1_provider(
     region used for other components.
     """
     bucket = Bucket(name="test-bucket")
-    _ = bucket.resources
-
     distribution = CloudFrontDistribution(
         name="test-cf-acm",
         bucket=bucket,
         custom_domain="cdn.example.com",
     )
-    resources = distribution.resources
 
-    def check_resources(_):
-        # Verify a us-east-1 provider was created
-        providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
-        assert len(us_east_1_providers) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, distribution.resources]
 
-        # Verify ACM certificate uses the us-east-1 provider
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-        cert = certificates[0]
-        assert cert.provider == provider_urn("stelvio-aws-us-east-1")
+    deploy()
 
-        # Verify certificate validation also uses the us-east-1 provider
-        validations = pulumi_mocks.created_certificate_validations()
-        assert len(validations) == 1
-        assert validations[0].provider == provider_urn("stelvio-aws-us-east-1")
-
-    pulumi.Output.all(
-        dist_id=resources.distribution.id,
-        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
-    ).apply(check_resources)
+    providers = pulumi_mocks.created(R.AWS_PROVIDER)
+    assert {p.name: p.inputs["region"] for p in providers} == {
+        "stelvio-aws": "eu-west-1",
+        "stelvio-aws-us-east-1": "us-east-1",
+    }
+    [cert] = pulumi_mocks.created(R.CERTIFICATE)
+    assert cert.provider == provider_urn("stelvio-aws-us-east-1")
+    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
+    assert validation.provider == provider_urn("stelvio-aws-us-east-1")
 
 
-@pulumi.runtime.test
 def test_custom_domain_acm_skips_provider_when_already_us_east_1(
     pulumi_mocks, app_context_with_dns, component_registry
 ):
@@ -359,37 +407,24 @@ def test_custom_domain_acm_skips_provider_when_already_us_east_1(
     can use the default provider — no explicit provider is needed.
     """
     bucket = Bucket(name="test-bucket")
-    _ = bucket.resources
-
     distribution = CloudFrontDistribution(
         name="test-cf-acm-skip",
         bucket=bucket,
         custom_domain="cdn.example.com",
     )
-    resources = distribution.resources
 
-    def check_resources(_):
-        # Verify no extra us-east-1 provider was created (default is already us-east-1)
-        providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
-        assert len(us_east_1_providers) == 0, (
-            "Should not create a separate us-east-1 provider when region is already us-east-1"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, distribution.resources]
 
-        # Verify ACM certificate does not use a separate us-east-1 provider
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-        assert certificates[0].provider == provider_urn("stelvio-aws")
+    deploy()
 
-        # Verify certificate validation also does not use a separate us-east-1 provider
-        validations = pulumi_mocks.created_certificate_validations()
-        assert len(validations) == 1
-        assert validations[0].provider == provider_urn("stelvio-aws")
-
-    pulumi.Output.all(
-        dist_id=resources.distribution.id,
-        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
-    ).apply(check_resources)
+    providers = pulumi_mocks.created(R.AWS_PROVIDER)
+    assert {p.name: p.inputs["region"] for p in providers} == {"stelvio-aws": "us-east-1"}
+    [cert] = pulumi_mocks.created(R.CERTIFICATE)
+    assert cert.provider == provider_urn("stelvio-aws")
+    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
+    assert validation.provider == provider_urn("stelvio-aws")
 
 
 _CUSTOM_DOMAIN_COMPONENTS = [
