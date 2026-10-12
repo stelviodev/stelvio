@@ -1,3 +1,5 @@
+import json
+
 import pulumi
 import pytest
 
@@ -27,23 +29,32 @@ def test_bucket_properties(pulumi_mocks):
     pulumi.Output.all(bucket.resources.bucket.id, bucket.arn).apply(check_resources)
 
 
-@pulumi.runtime.test
 def test_s3_bucket_basic(pulumi_mocks):
     # Arrange
     bucket = Bucket("my-bucket")
 
     # Act
-    _ = bucket.resources
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "my-bucket")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
-        # S3 buckets have minimal required configuration by default
-        assert created_bucket.name == TP + "my-bucket"
-
-    bucket.resources.bucket.id.apply(check_resources)
+    pulumi_mocks.assert_res("my-bucket", R.BUCKET, {})
+    pulumi_mocks.assert_res(
+        "my-bucket-pab",
+        R.BUCKET_PUBLIC_ACCESS_BLOCK,
+        {
+            "bucket": tid(TP + "my-bucket"),
+            "blockPublicAcls": True,
+            "blockPublicPolicy": True,
+            "ignorePublicAcls": True,
+            "restrictPublicBuckets": True,
+        },
+    )
+    pulumi_mocks.assert_res_counts({R.BUCKET: 1, R.BUCKET_PUBLIC_ACCESS_BLOCK: 1})
+    assert bucket.resources.bucket_policy is None
 
 
 @pulumi.runtime.test
@@ -134,61 +145,25 @@ def test_s3_bucket_link_permissions_structure(pulumi_mocks):
     bucket.arn.apply(check_permissions_structure)
 
 
-@pulumi.runtime.test
 def test_multiple_s3_buckets(pulumi_mocks):
     # Arrange
     bucket1 = Bucket("bucket-one")
     bucket2 = Bucket("bucket-two")
 
     # Act
-    _ = bucket1.resources
-    _ = bucket2.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket1.resources, bucket2.resources]
+
+    deploy()
 
     # Assert
-    def check_multiple_buckets(_):
-        bucket1_resources = pulumi_mocks.created_s3_buckets(TP + "bucket-one")
-        bucket2_resources = pulumi_mocks.created_s3_buckets(TP + "bucket-two")
-
-        assert len(bucket1_resources) == 1
-        assert len(bucket2_resources) == 1
-
-        assert bucket1_resources[0].name == TP + "bucket-one"
-        assert bucket2_resources[0].name == TP + "bucket-two"
-
-    pulumi.Output.all(bucket1.resources.bucket.id, bucket2.resources.bucket.id).apply(
-        check_multiple_buckets
-    )
-
-
-@pulumi.runtime.test
-def test_s3_bucket_name_validation(pulumi_mocks):
-    # Test that bucket names are handled correctly
-    # Note: AWS S3 has strict naming rules, but we're testing Stelvio's handling
-
-    # Arrange
-    bucket = Bucket("valid-bucket-name")
-
-    # Act
-    _ = bucket.resources
-
-    # Assert
-    def check_bucket_name(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "valid-bucket-name")
-        assert len(buckets) == 1
-        created_bucket = buckets[0]
-
-        # The bucket name should be prefixed by the context
-        assert created_bucket.name == TP + "valid-bucket-name"
-
-    bucket.resources.bucket.id.apply(check_bucket_name)
+    pulumi_mocks.assert_res("bucket-one", R.BUCKET)
+    pulumi_mocks.assert_res("bucket-two", R.BUCKET)
 
 
 @pytest.mark.parametrize("versioning_enabled", [True, False])
 def test_s3_bucket_versioning(pulumi_mocks, versioning_enabled):
-    # Versioning is its own BucketVersioning resource, created only when enabled, and
-    # it isn't exposed on BucketResources — so there's no output to gate on. Deploy under
-    # the pulumi test runtime; the wrapper returns only after every resource registration
-    # settled, so asserts below run as plain synchronous code.
     @pulumi.runtime.test
     def deploy():
         return Bucket("test-bucket", versioning=versioning_enabled).resources
@@ -213,42 +188,6 @@ def test_s3_bucket_versioning(pulumi_mocks, versioning_enabled):
         pulumi_mocks.assert_no_res(R.BUCKET_VERSIONING)
 
 
-@pulumi.runtime.test
-def test_s3_bucket_access_none_pab_created_with_true_flags(pulumi_mocks):
-    # Test that when access=None, PAB is created with all blocking flags set to True
-    # and no bucket policy is created
-
-    # Arrange
-    bucket = Bucket("test-bucket", access=None)
-
-    # Act
-    _ = bucket.resources
-
-    # Assert
-    def check_access_configuration(_):
-        # Check Public Access Block configuration
-        pabs = pulumi_mocks.created_s3_public_access_blocks(TP + "test-bucket-pab")
-        assert len(pabs) == 1
-        pab = pabs[0]
-
-        # All blocking flags should be True (using camelCase keys)
-        assert pab.inputs["blockPublicAcls"] is True
-        assert pab.inputs["blockPublicPolicy"] is True
-        assert pab.inputs["ignorePublicAcls"] is True
-        assert pab.inputs["restrictPublicBuckets"] is True
-
-        # No bucket policy should be created
-        policies = pulumi_mocks.created_bucket_policies(TP + "test-bucket-policy")
-        assert len(policies) == 0
-
-        # Verify that bucket_policy in resources is None
-        assert bucket.resources.bucket_policy is None
-
-    # Use the PAB resource ID to trigger the check after all resources are created
-    bucket.resources.public_access_block.id.apply(check_access_configuration)
-
-
-@pulumi.runtime.test
 def test_s3_bucket_access_public_pab_created_with_false_flags_and_policy(pulumi_mocks):
     # Test that when access="public", PAB is created with all blocking flags set to False
     # and a bucket policy is created with proper values
@@ -257,59 +196,36 @@ def test_s3_bucket_access_public_pab_created_with_false_flags_and_policy(pulumi_
     bucket = Bucket("test-bucket", access="public")
 
     # Act
-    _ = bucket.resources
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
 
     # Assert
-    def check_access_configuration(_):
-        # Check Public Access Block configuration
-        pabs = pulumi_mocks.created_s3_public_access_blocks(TP + "test-bucket-pab")
-        assert len(pabs) == 1
-        pab = pabs[0]
-
-        # All blocking flags should be False for public access (using camelCase keys)
-        assert pab.inputs["blockPublicAcls"] is False
-        assert pab.inputs["blockPublicPolicy"] is False
-        assert pab.inputs["ignorePublicAcls"] is False
-        assert pab.inputs["restrictPublicBuckets"] is False
-
-        # Bucket policy should be created
-        policies = pulumi_mocks.created_bucket_policies(TP + "test-bucket-policy")
-        assert len(policies) == 1
-        policy = policies[0]
-
-        # Verify that bucket_policy in resources is not None
-        assert bucket.resources.bucket_policy is not None
-
-        # Check that policy is attached to the correct bucket
-        # The bucket ID from the policy should match the generated test ID
-        bucket_id_from_policy = policy.inputs["bucket"]
-        # In the mock environment, bucket ID should be the test ID
-        expected_bucket_id = tid(TP + "test-bucket")
-        assert bucket_id_from_policy == expected_bucket_id
-
-        # Policy should contain the correct JSON structure for public read access
-        import json
-
-        policy_json = policy.inputs["policy"]
-        policy_doc = json.loads(policy_json)
-
-        assert len(policy_doc) == 1  # Should have one statement
-        statement = policy_doc[0]
-
-        assert statement["effect"] == "Allow"
-        assert statement["principals"] == [{"type": "*", "identifiers": ["*"]}]
-        assert statement["actions"] == ["s3:GetObject"]
-
-        # Resource should reference the bucket ARN with /*
-        expected_bucket_arn = f"arn:aws:s3:::{tn(TP + 'test-bucket')}"
-        expected_resource = f"{expected_bucket_arn}/*"
-        assert statement["resources"] == [expected_resource]
-
-    # Use the bucket policy ID and PAB ID to trigger the check after all resources are created
-    pulumi.Output.all(
-        bucket.resources.bucket_policy.id,
-        bucket.resources.public_access_block.id,
-    ).apply(check_access_configuration)
+    pulumi_mocks.assert_res(
+        "test-bucket-pab",
+        R.BUCKET_PUBLIC_ACCESS_BLOCK,
+        {
+            "bucket": tid(TP + "test-bucket"),
+            "blockPublicAcls": False,
+            "blockPublicPolicy": False,
+            "ignorePublicAcls": False,
+            "restrictPublicBuckets": False,
+        },
+    )
+    policy = pulumi_mocks.assert_res(
+        "test-bucket-policy", R.BUCKET_POLICY, {"bucket": tid(TP + "test-bucket")}, partial=True
+    )
+    assert bucket.resources.bucket_policy is not None
+    assert json.loads(policy.inputs["policy"]) == [
+        {
+            "effect": "Allow",
+            "principals": [{"type": "*", "identifiers": ["*"]}],
+            "actions": ["s3:GetObject"],
+            "resources": [f"arn:aws:s3:::{tn(TP + 'test-bucket')}/*"],
+        }
+    ]
 
 
 def test_bucket_lets_pulumi_name_it(pulumi_mocks):
