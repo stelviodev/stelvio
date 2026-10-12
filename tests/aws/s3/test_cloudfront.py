@@ -7,6 +7,7 @@ import pytest
 from stelvio.aws.cloudfront import CloudFrontDistribution, Router
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.s3 import Bucket, S3StaticWebsite
+from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
 from ..conftest import assert_urn
@@ -27,58 +28,26 @@ def mock_s3_bucket_no_dns(pulumi_mocks, app_context_without_dns):
     return Bucket(name="test-bucket")
 
 
-@pulumi.runtime.test
-def test_cloudfront_distribution_component_creation(
-    pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
+@pytest.mark.parametrize("price_class", ["PriceClass_100", "PriceClass_200", "PriceClass_All"])
+def test_cloudfront_distribution_price_class(
+    price_class, pulumi_mocks, app_context_with_dns, mock_s3_bucket
 ):
-    """Test CloudFrontDistribution component can be instantiated and configured properly"""
-    # Arrange
     distribution = CloudFrontDistribution(
-        name="test-cloudfront",
+        name="test-price",
         bucket=mock_s3_bucket,
-        custom_domain="cdn.example.com",
+        custom_domain="price.example.com",
+        price_class=price_class,
     )
 
-    # Act
-    resources = distribution.resources
+    @pulumi.runtime.test
+    def deploy():
+        return distribution.resources
 
-    # Assert - verify component properties and configuration
-    assert distribution.name == "test-cloudfront"
-    assert distribution.custom_domain == "cdn.example.com"
+    deploy()
 
-    # Verify resources object exists and has expected attributes
-    assert hasattr(resources, "distribution")
-    assert hasattr(resources, "origin_access_control")
-    # assert hasattr(resources, "viewer_request_function")
-    assert hasattr(resources, "acm_validated_domain")
-    assert hasattr(resources, "record")
-    assert hasattr(resources, "function_associations")
-
-
-@pulumi.runtime.test
-def test_cloudfront_distribution_with_custom_price_class(
-    pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
-):
-    """Test CloudFrontDistribution with custom price class"""
-    # Arrange
-    distribution = CloudFrontDistribution(
-        name="test-cloudfront-custom",
-        bucket=mock_s3_bucket,
-        custom_domain="premium-cdn.example.com",
-        price_class="PriceClass_All",
+    pulumi_mocks.assert_res(
+        "test-price", R.DISTRIBUTION, {"priceClass": price_class}, partial=True
     )
-
-    # Act
-    resources = distribution.resources
-
-    # Assert
-    assert distribution.price_class == "PriceClass_All"
-    assert distribution.custom_domain == "premium-cdn.example.com"
-
-    # Verify resources exist
-    assert hasattr(resources, "distribution")
-    assert hasattr(resources, "origin_access_control")
-    assert hasattr(resources, "function_associations")
 
 
 def test_cloudfront_distribution_creates_all_resources(
@@ -288,30 +257,6 @@ def test_cloudfront_distribution_origin_access_control_config(
     }
 
 
-@pulumi.runtime.test
-def test_cloudfront_distribution_with_different_price_classes(
-    pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
-):
-    """Test CloudFrontDistribution with all supported price classes"""
-    price_classes = ["PriceClass_100", "PriceClass_200", "PriceClass_All"]
-
-    for i, price_class in enumerate(price_classes):
-        # Arrange
-        distribution = CloudFrontDistribution(
-            name=f"test-price-{i}",
-            bucket=mock_s3_bucket,
-            custom_domain=f"price-{i}.example.com",
-            price_class=price_class,
-        )
-
-        # Act
-        resources = distribution.resources
-
-        # Assert
-        assert distribution.price_class == price_class
-        assert hasattr(resources, "distribution")
-
-
 def test_cloudfront_distribution_s3_bucket_policy_creation(
     pulumi_mocks, app_context_with_dns, component_registry, mock_s3_bucket
 ):
@@ -351,19 +296,15 @@ def test_cloudfront_distribution_s3_bucket_policy_creation(
     }
 
 
-@pulumi.runtime.test
-def test_cloudfront_distribution_raises_without_dns(
-    pulumi_mocks, mock_s3_bucket_no_dns, component_registry
-):
-    from stelvio.dns import DnsProviderNotConfiguredError
+def test_cloudfront_distribution_raises_without_dns(mock_s3_bucket_no_dns):
+    distribution = CloudFrontDistribution(
+        name="test-no-dns",
+        bucket=mock_s3_bucket_no_dns,
+        custom_domain="cdn-nodns.example.com",
+    )
 
-    with pytest.raises(DnsProviderNotConfiguredError) as exc_info:
-        CloudFrontDistribution(
-            name="test-no-dns",
-            bucket=mock_s3_bucket_no_dns,
-            custom_domain="cdn-nodns.example.com",
-        )._create_resources()
-    assert "dns" in str(exc_info.value).lower() or "not configured" in str(exc_info.value).lower()
+    with pytest.raises(DnsProviderNotConfiguredError, match="DNS not configured"):
+        _ = distribution.resources
 
 
 def test_custom_domain_acm_uses_us_east_1_provider(
