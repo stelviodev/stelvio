@@ -125,7 +125,19 @@ def test_create_resources_with_root_path(pulumi_mocks):
 
     deploy()
 
-    assert len(pulumi_mocks.created(R.DISTRIBUTION)) == 1
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    assert distribution.inputs["defaultCacheBehavior"] == {
+        "targetOriginId": f"arn:aws:s3:::{tn(TP + 'test-bucket')}",
+        "allowedMethods": ["GET", "HEAD", "OPTIONS"],
+        "cachedMethods": ["GET", "HEAD"],
+        "compress": True,
+        "viewerProtocolPolicy": "redirect-to-https",
+        "forwardedValues": {"queryString": False, "cookies": {"forward": "none"}},
+        "minTtl": 0,
+        "defaultTtl": 0,
+        "maxTtl": 0,
+        "functionAssociations": [],
+    }
     # When root path exists, there should be no default 404 function
     assert pulumi_mocks.created(R.CLOUDFRONT_FUNCTION, TP + "test-router-default-404") == []
 
