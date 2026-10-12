@@ -7,7 +7,12 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import R
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid
+
+CERT_ARN = (
+    f"arn:aws:acm:{DEFAULT_REGION}:{ACCOUNT_ID}:certificate/"
+    f"{tid(f'{TP}users-acm-validated-domain-certificate')}"
+)
 
 # =========================================================================
 # Domain validation
@@ -64,15 +69,16 @@ def test_validation_via_config_dataclass():
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_no_domain_creates_no_domain_resource(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        domains = pulumi_mocks.created_user_pool_domains()
-        assert len(domains) == 0
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_no_res(R.USER_POOL_DOMAIN)
 
 
 @pulumi.runtime.test
@@ -92,52 +98,61 @@ def test_no_domain_resources_are_none(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_prefix_domain_creates_domain_resource(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], domain="myapp-auth")
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs["domain"] == "myapp-auth"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain",
+        R.USER_POOL_DOMAIN,
+        {"domain": "myapp-auth", "userPoolId": tid(f"{TP}users")},
+    )
+    pulumi_mocks.assert_res_counts({R.USER_POOL: 1, R.USER_POOL_DOMAIN: 1})
 
 
-@pulumi.runtime.test
 def test_prefix_domain_references_pool_id(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], domain="myapp-auth")
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs.get("userPoolId") is not None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain", R.USER_POOL_DOMAIN, {"userPoolId": tid(f"{TP}users")}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_prefix_domain_no_certificate_arn(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], domain="myapp-auth")
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs.get("certificateArn") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain", R.USER_POOL_DOMAIN, {"certificateArn": None}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_prefix_domain_no_acm_resources(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], domain="myapp-auth")
-    resources = pool.resources
 
-    def check(_):
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 0
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_no_res(R.CERTIFICATE)
 
 
 @pulumi.runtime.test
@@ -169,77 +184,71 @@ def test_prefix_domain_resources_populated(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_custom_domain_creates_domain_resource(pulumi_mocks, app_context_with_dns):
     pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs["domain"] == "auth.myapp.com"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pulumi.Output.all(
-        domain_id=resources.user_pool_domain.domain,
-        cert_id=resources.acm_validated_domain.resources.cert_validation.id,
-        dns_id=resources.domain_record.pulumi_resource.id,
-    ).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain", R.USER_POOL_DOMAIN, {"domain": "auth.myapp.com"}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_custom_domain_has_certificate_arn(pulumi_mocks, app_context_with_dns):
     pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs.get("certificateArn") is not None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pulumi.Output.all(
-        domain_id=resources.user_pool_domain.domain,
-        cert_id=resources.acm_validated_domain.resources.cert_validation.id,
-    ).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain", R.USER_POOL_DOMAIN, {"certificateArn": CERT_ARN}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_custom_domain_creates_acm_certificate(pulumi_mocks, app_context_with_dns):
     pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
-    resources = pool.resources
 
-    def check(_):
-        certs = [
-            cert
-            for cert in pulumi_mocks.created_certificates()
-            if cert.inputs.get("domainName") == "auth.myapp.com"
-        ]
-        assert len(certs) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pulumi.Output.all(
-        domain_id=resources.user_pool_domain.domain,
-        cert_id=resources.acm_validated_domain.resources.cert_validation.id,
-    ).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-acm-validated-domain-certificate",
+        R.CERTIFICATE,
+        {"domainName": "auth.myapp.com"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_custom_domain_creates_dns_record(pulumi_mocks, app_context_with_dns):
     pool = UserPool("users", usernames=["email"], domain="auth.myapp.com")
-    resources = pool.resources
 
-    def check(_):
-        domain_records = [
-            record
-            for record in app_context_with_dns.created_records
-            if record[0] == f"{TP}users-domain-record"
-        ]
-        assert len(domain_records) == 1
-        _, dns_name, record_type, _, ttl = domain_records[0]
-        assert dns_name == "auth.myapp.com"
-        assert record_type == "CNAME"
-        assert ttl == 3600
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pulumi.Output.all(
-        domain_id=resources.user_pool_domain.domain,
-        dns_id=resources.domain_record.pulumi_resource.id,
-    ).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain-record",
+        R.CLOUDFLARE_RECORD,
+        {
+            "name": "auth.myapp.com",
+            "type": "CNAME",
+            "content": "d111111abcdef8.cloudfront.net",  # the domain's cloudfrontDistribution
+            "ttl": 3600,
+        },
+        partial=True,
+    )
 
 
 def test_custom_domain_record_customize(pulumi_mocks, app_context_with_dns):
@@ -321,17 +330,19 @@ def test_custom_domain_without_dns_raises_error():
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_prefix_domain_works_without_dns(pulumi_mocks):
     """Prefix domains don't need DNS — they use Amazon's cognito subdomain."""
     pool = UserPool("users", usernames=["email"], domain="myapp-auth")
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs["domain"] == "myapp-auth"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain", R.USER_POOL_DOMAIN, {"domain": "myapp-auth"}, partial=True
+    )
 
 
 # =========================================================================
@@ -339,15 +350,18 @@ def test_prefix_domain_works_without_dns(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_domain_via_config_dict(pulumi_mocks):
     pool = UserPool("users", config={"usernames": ["email"], "domain": "myapp-auth"})
-    resources = pool.resources
 
-    def check(_):
-        pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain", R.USER_POOL_DOMAIN, {"domain": "myapp-auth"}, partial=True
+    )
 
 
 # =========================================================================
@@ -355,7 +369,6 @@ def test_domain_via_config_dict(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_customization_overrides_domain_config(pulumi_mocks):
     pool = UserPool(
         "users",
@@ -363,17 +376,21 @@ def test_customization_overrides_domain_config(pulumi_mocks):
         domain="myapp-auth",
         customize={"user_pool_domain": {"managed_login_version": 2}},
     )
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs["domain"] == "myapp-auth"
-        assert domain.inputs["managedLoginVersion"] == 2
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain",
+        R.USER_POOL_DOMAIN,
+        {"domain": "myapp-auth", "managedLoginVersion": 2},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_customization_overrides_domain(pulumi_mocks):
     pool = UserPool(
         "users",
@@ -381,10 +398,13 @@ def test_customization_overrides_domain(pulumi_mocks):
         domain="myapp-auth",
         customize={"user_pool_domain": {"domain": "override-auth"}},
     )
-    resources = pool.resources
 
-    def check(_):
-        domain = pulumi_mocks.assert_user_pool_domain_created(TP + "users-domain")
-        assert domain.inputs["domain"] == "override-auth"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    resources.user_pool_domain.domain.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-domain", R.USER_POOL_DOMAIN, {"domain": "override-auth"}, partial=True
+    )
