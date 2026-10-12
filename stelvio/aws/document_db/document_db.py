@@ -295,6 +295,9 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 "engine": "docdb",
                 "master_username": "stelvio",
                 "manage_master_user_password": True,
+                # Linked Functions receive the new password on deploy, so it cannot
+                # wait for the cluster's next maintenance window.
+                **({"apply_immediately": True} if self.config.password is not None else {}),
                 "storage_encrypted": True,
                 "port": 27017,
                 "backup_retention_period": 7,

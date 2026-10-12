@@ -58,6 +58,12 @@ def _with_reconnect(role: str, uri: str, operation):
 
 def main(event, context):
     writer_uri = Resources.todos.connection_uri
+    if event.get("operation") == "connect":
+        with _connect(writer_uri) as client:
+            return {
+                "username": Resources.todos.username,
+                "mongo_ok": client.admin.command("ping").get("ok") == 1,
+            }
     if event.get("operation") == "write":
         document = event["document"]
         collection = clients["writer"].stelvio_test.documents

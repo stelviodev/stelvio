@@ -451,10 +451,11 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
             **({"manageMasterUserPassword": True} if tc.password is None else {}),
             **(
                 {
+                    "applyImmediately": True,
                     "masterPassword": {
                         rpc._special_sig_key: rpc._special_secret_sig,
                         "value": tc.password,
-                    }
+                    },
                 }
                 if tc.password is not None
                 else {}
@@ -587,6 +588,36 @@ def test_document_db(pulumi_mocks, tc):
 
     deploy()
     verify_document_db(pulumi_mocks, tc)
+
+
+@mark.parametrize("mode", ["local", "global-dict", "global-callable"])
+def test_document_db_supplied_password_customized_apply_immediately(pulumi_mocks, mode):
+    override = {"apply_immediately": False}
+    if mode.startswith("global"):
+        _set_app_context(
+            customize={
+                DocumentDb: {
+                    "cluster": (
+                        (lambda props: props | override) if mode == "global-callable" else override
+                    )
+                }
+            }
+        )
+
+    @pulumi.runtime.test
+    def deploy():
+        return DocumentDb(
+            DB_NAME,
+            vpc=Vpc(VPC_NAME),
+            password="supplied-password",  # noqa: S106 — test credential
+            customize={"cluster": override} if mode == "local" else None,
+        ).resources
+
+    deploy()
+    pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER, {"applyImmediately": False}, partial=True)
+    pulumi_mocks.assert_res_counts(
+        _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.SECRET_ROTATION: 0})
+    )
 
 
 def test_document_db_uses_all_three_isolated_subnets(pulumi_mocks):

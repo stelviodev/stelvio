@@ -32,13 +32,15 @@ pytestmark = pytest.mark.integration_vpc
 
 
 def test_document_db_supplied_credentials(stelvio_env, project_dir):
+    password = "StelvioTestPassword282"  # noqa: S105 — test credential
+
     def infra():
         vpc = Vpc("net", az=2)
         db = DocumentDb(
             "todos",
             vpc=vpc,
             username="appuser",
-            password=Output.secret("StelvioTestPassword282"),
+            password=Output.secret(password),
         )
         fn = Function(
             "client",
@@ -82,7 +84,7 @@ def test_document_db_supplied_credentials(stelvio_env, project_dir):
         "STLV_TODOS_READER_HOST": cluster["ReaderEndpoint"],
         "STLV_TODOS_PORT": str(cluster["Port"]),
         "STLV_TODOS_USERNAME": "appuser",
-        "STLV_TODOS_PASSWORD": "StelvioTestPassword282",
+        "STLV_TODOS_PASSWORD": password,
         "STLV_TODOS_REPLICA_SET": "rs0",
         "STLV_TODOS_CA_FILE": "stlv_docdb_ca.pem",
         "STLV_TODOS_CONNECTION_URI": (
@@ -98,6 +100,27 @@ def test_document_db_supplied_credentials(stelvio_env, project_dir):
         outputs["function_client_role_name"],
         expected_actions=[],
         expected_resources=[],
+    )
+
+    password = "StelvioUpdatedPassword282"  # noqa: S105 — test credential
+    updated = stelvio_env.deploy(infra)
+    assert updated["document_db_todos_cluster_id"] == outputs["document_db_todos_cluster_id"]
+    assert invoke_lambda(updated["function_client_arn"], {"operation": "connect"}) == {
+        "username": "appuser",
+        "mongo_ok": True,
+    }
+    assert invoke_lambda(
+        updated["function_client_arn"],
+        {"operation": "read", "id": document["_id"]},
+    ) == {"document": document}
+    updated_document = document | {"value": 331}
+    assert invoke_lambda(
+        updated["function_client_arn"],
+        {"operation": "write", "document": updated_document},
+    ) == {"document": updated_document}
+    updated_env = assert_lambda_function(updated["function_client_arn"])
+    assert {k: v for k, v in updated_env.items() if k.startswith("STLV_TODOS_")} == (
+        expected_env | {"STLV_TODOS_PASSWORD": password}
     )
 
 
