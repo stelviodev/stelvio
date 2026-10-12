@@ -71,6 +71,7 @@ Stelvio provides high-level components for the most common AWS services:
 - **[Scheduled Tasks](https://stelvio.dev/docs/components/aws/cron/)** (EventBridge Cron)
 - **[Object Storage](https://stelvio.dev/docs/components/aws/s3/)** (S3)
 - **[NoSQL Database](https://stelvio.dev/docs/components/aws/dynamo-db/)** (DynamoDB)
+- **[DocumentDB](https://stelvio.dev/docs/components/aws/document-db/)** (Amazon DocumentDB)
 - **[Message Queues](https://stelvio.dev/docs/components/aws/queues/)** (SQS)
 - **[Pub/Sub Topics](https://stelvio.dev/docs/components/aws/topics/)** (SNS)
 - **[Email](https://stelvio.dev/docs/components/aws/email/)** (SES)

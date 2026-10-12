@@ -30,15 +30,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
         runs-on: ["ubuntu-latest", "ubuntu-22.04-arm"]
         experimental: [false]
         timeout-minutes: [10]
-        include:
-          - python-version: "3.15"
-            runs-on: "ubuntu-22.04-arm"
-            experimental: true
-            timeout-minutes: 30
+        # Enable when 3.16 becomes available
+        # include:
+        #   - python-version: "3.16"
+        #     runs-on: "ubuntu-22.04-arm"
+        #     experimental: true
+        #     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install uv

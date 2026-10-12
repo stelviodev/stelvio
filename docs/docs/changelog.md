@@ -2,6 +2,12 @@
 
 ## 0.11.0b8 (2026-MM-DD)
 
+### DocumentDB
+
+- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
+
+    → [DocumentDB Guide](components/aws/document-db.md)
+
 ### Bug Fixes
 
 - **`stlv deploy` does not truncate progress for larger resource trees.** Fix [#313](https://github.com/stelviodev/stelvio/issues/313) by reserving space for the progress footer beneath the resource tree.
