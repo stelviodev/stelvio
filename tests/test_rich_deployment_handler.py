@@ -635,6 +635,31 @@ def test_vpc_children_use_the_registered_label():
         """)
 
 
+def test_document_db_instances_render_numbered_suffix():
+    """Instance children keep the default suffix: `todos-1` -> `1`."""
+    instance = "aws:docdb/clusterInstance:ClusterInstance"
+    parent = _component_urn("DocumentDb", "todos")
+    events = [
+        _pre_event(
+            _resource_urn(instance, "myapp-dev-todos-1", "DocumentDb"),
+            instance,
+            parent_urn=parent,
+        ),
+        _pre_event(
+            _resource_urn(instance, "myapp-dev-todos-2", "DocumentDb"),
+            instance,
+            parent_urn=parent,
+        ),
+        _summary_event(),
+    ]
+    assert rendered(events, operation="preview") == dedent("""
+        + DocumentDb todos  (2 to create)
+            + DocumentDB Instance (1)
+            + DocumentDB Instance (2)
+
+        """)
+
+
 def test_function_attachments_use_the_registered_label():
     assert ComponentRegistry.get_child_label("Function") is _function_child_label
     attachment = "aws:iam/rolePolicyAttachment:RolePolicyAttachment"
@@ -2755,6 +2780,19 @@ def test_replacement_warning_shown_in_render():
             """),
         ),
         (
+            "DocumentDb",
+            "todos",
+            "aws:docdb/cluster:Cluster",
+            "todos-cluster",
+            dedent("""
+            ± DocumentDb todos  (1 to replace)
+                ± DocumentDB Cluster
+                    !! Replacement recreates resource; data may be lost.
+
+            ⠋ Analyzing differences  0/1 complete  0s
+            """),
+        ),
+        (
             "UserPool",
             "users",
             "aws:cognito/userPool:UserPool",
@@ -2768,7 +2806,7 @@ def test_replacement_warning_shown_in_render():
             """),
         ),
     ],
-    ids=["dynamo-table", "s3-bucket", "s3-bucket-v2", "sqs-queue", "user-pool"],
+    ids=["dynamo-table", "s3-bucket", "s3-bucket-v2", "sqs-queue", "docdb-cluster", "user-pool"],
 )
 def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
     component_type, comp_name, res_type, res_name, frame
@@ -2783,18 +2821,31 @@ def test_replacement_warning_shown_for_replace_operation_without_detailed_diff(
     assert rendered(events, operation="preview") == frame
 
 
-def test_no_data_loss_warning_for_non_data_resource_replacement():
-    parent_urn = _component_urn("Function", "api")
-    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
-    events = [
-        _pre_event(
-            res_urn, "aws:lambda/function:Function", op=OpType.REPLACE, parent_urn=parent_urn
+@mark.parametrize(
+    ("component", "resource_type", "resource_label"),
+    [
+        ("Function", "aws:lambda/function:Function", "Lambda Function"),
+        ("DocumentDb", "aws:docdb/clusterInstance:ClusterInstance", "DocumentDB Instance"),
+        (
+            "DocumentDb",
+            "aws:secretsmanager/secretRotation:SecretRotation",
+            "Secret Rotation",
         ),
+    ],
+    ids=["function", "docdb-instance", "secret-rotation"],
+)
+def test_no_data_loss_warning_for_non_data_resource_replacement(
+    component, resource_type, resource_label
+):
+    parent_urn = _component_urn(component, "api")
+    res_urn = _resource_urn(resource_type, "api-resource", component)
+    events = [
+        _pre_event(res_urn, resource_type, op=OpType.REPLACE, parent_urn=parent_urn),
     ]
 
-    assert rendered(events, operation="preview") == dedent("""
-        ± Function api  (1 to replace)
-            ± Lambda Function
+    assert rendered(events, operation="preview") == dedent(f"""
+        ± {component} api  (1 to replace)
+            ± {resource_label}
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
@@ -3198,17 +3249,24 @@ def test_compact_shows_replacement_warning():
         """)
 
 
-def test_compact_hides_data_loss_warning_for_non_data_replacement():
-    parent_urn = _component_urn("Function", "api")
-    res_urn = _resource_urn("aws:lambda/function:Function", "api-fn", "Function")
+@mark.parametrize(
+    ("component", "resource_type"),
+    [
+        ("Function", "aws:lambda/function:Function"),
+        ("DocumentDb", "aws:docdb/clusterInstance:ClusterInstance"),
+        ("DocumentDb", "aws:secretsmanager/secretRotation:SecretRotation"),
+    ],
+    ids=["function", "docdb-instance", "secret-rotation"],
+)
+def test_compact_hides_data_loss_warning_for_non_data_replacement(component, resource_type):
+    parent_urn = _component_urn(component, "api")
+    res_urn = _resource_urn(resource_type, "api-resource", component)
     events = [
-        _pre_event(
-            res_urn, "aws:lambda/function:Function", op=OpType.REPLACE, parent_urn=parent_urn
-        ),
+        _pre_event(res_urn, resource_type, op=OpType.REPLACE, parent_urn=parent_urn),
     ]
 
-    assert rendered(events, operation="preview", compact=True) == dedent("""
-        ± Function api  (1 resource to replace)
+    assert rendered(events, operation="preview", compact=True) == dedent(f"""
+        ± {component} api  (1 resource to replace)
 
         ⠋ Analyzing differences  0/1 complete  0s
         """)
@@ -5139,6 +5197,45 @@ def test_preview_render_shows_resource_error_inline():
 
         ⠋ Analyzing differences  1/1 complete  0s
         """)
+
+
+def test_instance_class_capacity_error_keeps_aws_text_and_prints_the_fix():
+    parent_urn = _component_urn("DocumentDb", "todos")
+    res_urn = _resource_urn("aws:docdb/clusterInstance:ClusterInstance", "todos-1", "DocumentDb")
+    aws_error = (
+        "Please first create at least one new subnet; "
+        "choose from these availability zones: us-east-1f."
+    )
+    events = [
+        _pre_event(
+            res_urn,
+            "aws:docdb/clusterInstance:ClusterInstance",
+            op=OpType.CREATE,
+            parent_urn=parent_urn,
+        ),
+        _diagnostic_event(aws_error, res_urn, timestamp=1001),
+    ]
+
+    detail = "\n".join(
+        "        " + line
+        for line in (
+            aws_error,
+            (
+                "AWS has no capacity for this instance class "
+                "in your Vpc's availability zones right now."
+            ),
+            "Set a different `instance_class` and deploy again, or try later.",
+            "Docs: https://stelvio.dev/docs/components/aws/document-db/#instance-class-capacity",
+        )
+    )
+    assert rendered(events, operation="preview", width=160) == (
+        "\n"
+        "✗ DocumentDb todos  (1 to create)\n"
+        "    ✗ DocumentDB Instance\n"
+        f"{detail}\n"
+        "\n"
+        "⠋ Analyzing differences  1/1 complete  0s\n"
+    )
 
 
 def test_failed_component_summary_shows_all_children_for_context():

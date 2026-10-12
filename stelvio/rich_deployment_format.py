@@ -148,11 +148,31 @@ def format_child_resource_line(
     return line
 
 
+# AWS tells RDS/DocumentDB users to add a subnet in a listed zone. Stelvio already
+# chose the Vpc's zones, and the cluster's zone list is fixed once it exists.
+_INSTANCE_CLASS_CAPACITY_PHRASE = "create at least one new subnet"
+_INSTANCE_CLASS_CAPACITY_HINT = (
+    "AWS has no capacity for this instance class in your Vpc's availability zones right now.",
+    "Set a different `instance_class` and deploy again, or try later.",
+    "Docs: https://stelvio.dev/docs/components/aws/document-db/#instance-class-capacity",
+)
+
+
 def format_child_error_line(error: str, indent: int = 1) -> Text:
-    """Format an error message indented under a child resource."""
+    """Format an error message indented under a child resource.
+
+    A capacity failure keeps AWS's text and adds the fix under it: another
+    instance class, or try later.
+    """
     line = Text()
-    line.append("    " * (indent + 1))
+    pad = "    " * (indent + 1)
+    line.append(pad)
     line.append(error, style="red")
+    if _INSTANCE_CLASS_CAPACITY_PHRASE in error.lower():
+        for hint in _INSTANCE_CLASS_CAPACITY_HINT:
+            line.append("\n")
+            line.append(pad)
+            line.append(hint, style="yellow")
     return line
 
 

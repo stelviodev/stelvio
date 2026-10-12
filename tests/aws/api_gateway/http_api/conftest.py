@@ -1,6 +1,4 @@
-from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, tid
-
-TP = "test-test-"
+from ...pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, TP, tid
 
 # PulumiTestMocks use tid(name) as the API id (no truncation — ids must be unique).
 HTTP_API_ID = tid(TP + "my-api")
