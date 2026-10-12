@@ -581,17 +581,8 @@ class PulumiTestMocks(Mocks):
     def created_user_pools(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.USER_POOL, name)
 
-    def created_user_pool_clients(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.USER_POOL_CLIENT, name)
-
-    def created_identity_providers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.IDENTITY_PROVIDER, name)
-
     def created_identity_pools(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.IDENTITY_POOL, name)
-
-    def created_user_pool_domains(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.USER_POOL_DOMAIN, name)
 
     # SES resource helpers
     def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
@@ -697,66 +688,6 @@ class PulumiTestMocks(Mocks):
             f"Expected exactly 1 function named '{name}', found {len(functions)}"
         )
         return functions[0]
-
-    def assert_user_pool_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one Cognito user pool with the given name exists and return it."""
-        pools = self.created_user_pools(name)
-        assert len(pools) == 1, f"Expected exactly 1 user pool named '{name}', found {len(pools)}"
-        return pools[0]
-
-    def assert_user_pool_client_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one Cognito user pool client with the given name exists and return it."""
-        clients = self.created_user_pool_clients(name)
-        assert len(clients) == 1, (
-            f"Expected exactly 1 user pool client named '{name}', found {len(clients)}"
-        )
-        return clients[0]
-
-    def assert_identity_provider_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one Cognito identity provider with the given name exists."""
-        providers = self.created_identity_providers(name)
-        assert len(providers) == 1, (
-            f"Expected exactly 1 identity provider named '{name}', found {len(providers)}"
-        )
-        return providers[0]
-
-    def assert_identity_pool_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one Cognito identity pool with the given name exists."""
-        pools = self.created_identity_pools(name)
-        assert len(pools) == 1, (
-            f"Expected exactly 1 identity pool named '{name}', found {len(pools)}"
-        )
-        return pools[0]
-
-    def assert_role_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one IAM role with the given name exists and return it."""
-        roles = self.created_roles(name)
-        assert len(roles) == 1, f"Expected exactly 1 role named '{name}', found {len(roles)}"
-        return roles[0]
-
-    def assert_role_policy_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one IAM role policy with the given name exists and return it."""
-        policies = self.created_role_policies(name)
-        assert len(policies) == 1, (
-            f"Expected exactly 1 role policy named '{name}', found {len(policies)}"
-        )
-        return policies[0]
-
-    def assert_roles_attachment_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one identity pool roles attachment with the given name exists."""
-        attachments = self.created(R.IDENTITY_POOL_ROLE_ATTACHMENT, name)
-        assert len(attachments) == 1, (
-            f"Expected exactly 1 roles attachment named '{name}', found {len(attachments)}"
-        )
-        return attachments[0]
-
-    def assert_user_pool_domain_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one Cognito user pool domain with the given name exists."""
-        domains = self.created_user_pool_domains(name)
-        assert len(domains) == 1, (
-            f"Expected exactly 1 user pool domain named '{name}', found {len(domains)}"
-        )
-        return domains[0]
 
 
 class MockDns:
