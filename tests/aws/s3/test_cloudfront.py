@@ -307,67 +307,6 @@ def test_cloudfront_distribution_raises_without_dns(mock_s3_bucket_no_dns):
         _ = distribution.resources
 
 
-def test_custom_domain_acm_uses_us_east_1_provider(
-    pulumi_mocks, app_context_with_dns_eu_west, component_registry
-):
-    """Test that ACM certificate is created with a us-east-1 provider for CloudFront.
-
-    CloudFront requires ACM certificates to be in us-east-1 regardless of the
-    region used for other components.
-    """
-    bucket = Bucket(name="test-bucket")
-    distribution = CloudFrontDistribution(
-        name="test-cf-acm",
-        bucket=bucket,
-        custom_domain="cdn.example.com",
-    )
-
-    @pulumi.runtime.test
-    def deploy():
-        return [bucket.resources, distribution.resources]
-
-    deploy()
-
-    providers = pulumi_mocks.created(R.AWS_PROVIDER)
-    assert {p.name: p.inputs["region"] for p in providers} == {
-        "stelvio-aws": "eu-west-1",
-        "stelvio-aws-us-east-1": "us-east-1",
-    }
-    [cert] = pulumi_mocks.created(R.CERTIFICATE)
-    assert cert.provider == provider_urn("stelvio-aws-us-east-1")
-    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
-    assert validation.provider == provider_urn("stelvio-aws-us-east-1")
-
-
-def test_custom_domain_acm_skips_provider_when_already_us_east_1(
-    pulumi_mocks, app_context_with_dns, component_registry
-):
-    """Test that no redundant us-east-1 provider is created when region is already us-east-1.
-
-    When the user's configured region is us-east-1, CloudFront ACM certificates
-    can use the default provider — no explicit provider is needed.
-    """
-    bucket = Bucket(name="test-bucket")
-    distribution = CloudFrontDistribution(
-        name="test-cf-acm-skip",
-        bucket=bucket,
-        custom_domain="cdn.example.com",
-    )
-
-    @pulumi.runtime.test
-    def deploy():
-        return [bucket.resources, distribution.resources]
-
-    deploy()
-
-    providers = pulumi_mocks.created(R.AWS_PROVIDER)
-    assert {p.name: p.inputs["region"] for p in providers} == {"stelvio-aws": "us-east-1"}
-    [cert] = pulumi_mocks.created(R.CERTIFICATE)
-    assert cert.provider == provider_urn("stelvio-aws")
-    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
-    assert validation.provider == provider_urn("stelvio-aws")
-
-
 _CUSTOM_DOMAIN_COMPONENTS = [
     pytest.param(
         lambda domain: CloudFrontDistribution("cdn", Bucket("b"), custom_domain=domain),
@@ -451,3 +390,48 @@ def test_empty_custom_domain_deploys_without_a_domain(
     assert mock_dns.created_records == []
     [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
     assert "aliases" not in distribution.inputs
+
+
+@pytest.mark.parametrize("build", _CUSTOM_DOMAIN_COMPONENTS)
+def test_custom_domain_acm_uses_us_east_1_provider(
+    build, pulumi_mocks, app_context_with_dns_eu_west
+):
+    """CloudFront requires ACM certificates in us-east-1, whatever region the app uses."""
+    component = build("cdn.example.com")
+
+    @pulumi.runtime.test
+    def deploy():
+        return component.resources
+
+    deploy()
+
+    providers = pulumi_mocks.created(R.AWS_PROVIDER)
+    assert {p.name: p.inputs["region"] for p in providers} == {
+        "stelvio-aws": "eu-west-1",
+        "stelvio-aws-us-east-1": "us-east-1",
+    }
+    [cert] = pulumi_mocks.created(R.CERTIFICATE)
+    assert cert.provider == provider_urn("stelvio-aws-us-east-1")
+    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
+    assert validation.provider == provider_urn("stelvio-aws-us-east-1")
+
+
+@pytest.mark.parametrize("build", _CUSTOM_DOMAIN_COMPONENTS)
+def test_custom_domain_acm_skips_provider_when_already_us_east_1(
+    build, pulumi_mocks, app_context_with_dns
+):
+    """No extra us-east-1 provider when the app region already is us-east-1."""
+    component = build("cdn.example.com")
+
+    @pulumi.runtime.test
+    def deploy():
+        return component.resources
+
+    deploy()
+
+    providers = pulumi_mocks.created(R.AWS_PROVIDER)
+    assert {p.name: p.inputs["region"] for p in providers} == {"stelvio-aws": "us-east-1"}
+    [cert] = pulumi_mocks.created(R.CERTIFICATE)
+    assert cert.provider == provider_urn("stelvio-aws")
+    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
+    assert validation.provider == provider_urn("stelvio-aws")

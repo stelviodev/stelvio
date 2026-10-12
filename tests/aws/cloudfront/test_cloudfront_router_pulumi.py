@@ -9,7 +9,7 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, provider_urn, tid, tn
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 
 
 def test_create_resources_with_s3_bucket(pulumi_mocks):
@@ -370,59 +370,6 @@ def test_full_router_with_mixed_origins(
         TP + "static-bucket-oac-1": "s3",
         TP + "api-function-oac-2": "lambda",
     }
-
-
-def test_custom_domain_acm_uses_us_east_1_provider(pulumi_mocks, app_context_with_dns_eu_west):
-    """Test that ACM certificate is created with a us-east-1 provider for CloudFront.
-
-    CloudFront requires ACM certificates to be in us-east-1 regardless of the
-    region used for other components.
-    """
-    bucket = Bucket("test-bucket")
-    router = Router(name="test-router", custom_domain="cdn.example.com")
-    router.route("/", bucket)
-
-    @pulumi.runtime.test
-    def deploy():
-        return [bucket.resources, router.resources]
-
-    deploy()
-
-    providers = pulumi_mocks.created(R.AWS_PROVIDER)
-    assert {p.name: p.inputs["region"] for p in providers} == {
-        "stelvio-aws": "eu-west-1",
-        "stelvio-aws-us-east-1": "us-east-1",
-    }
-    [cert] = pulumi_mocks.created(R.CERTIFICATE)
-    assert cert.provider == provider_urn("stelvio-aws-us-east-1")
-    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
-    assert validation.provider == provider_urn("stelvio-aws-us-east-1")
-
-
-def test_custom_domain_acm_skips_provider_when_already_us_east_1(
-    pulumi_mocks, app_context_with_dns
-):
-    """Test that no redundant us-east-1 provider is created when region is already us-east-1.
-
-    When the user's configured region is us-east-1, CloudFront ACM certificates
-    can use the default provider — no explicit provider is needed.
-    """
-    bucket = Bucket("test-bucket")
-    router = Router(name="test-router", custom_domain="cdn.example.com")
-    router.route("/", bucket)
-
-    @pulumi.runtime.test
-    def deploy():
-        return [bucket.resources, router.resources]
-
-    deploy()
-
-    providers = pulumi_mocks.created(R.AWS_PROVIDER)
-    assert {p.name: p.inputs["region"] for p in providers} == {"stelvio-aws": "us-east-1"}
-    [cert] = pulumi_mocks.created(R.CERTIFICATE)
-    assert cert.provider == provider_urn("stelvio-aws")
-    [validation] = pulumi_mocks.created(R.CERTIFICATE_VALIDATION)
-    assert validation.provider == provider_urn("stelvio-aws")
 
 
 def test_router_function_and_url_routes(pulumi_mocks, project_cwd):
