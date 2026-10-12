@@ -15,12 +15,38 @@ from .assert_vpc import get_security_group
 # A failed upgrade may leave its snapshot still being created; allow ten minutes.
 _SNAPSHOT_READY_ATTEMPTS = 60
 _SNAPSHOT_READY_INTERVAL = 10
+# Observe the reboot starting for up to two minutes, then allow ten minutes to finish.
+_INSTANCE_REBOOT_STARTED_TIMEOUT = 120
+_INSTANCE_REBOOT_POLL_INTERVAL = 2
+_INSTANCE_REBOOT_AVAILABLE_ATTEMPTS = 60
+_INSTANCE_REBOOT_AVAILABLE_INTERVAL = 10
 
 
 def disable_document_db_deletion_protection(cluster_id: str) -> None:
     """Allow fixture teardown even when the protection-enabling deployment failed."""
     client = _boto3_session().client("docdb")
     client.modify_db_cluster(DBClusterIdentifier=cluster_id, DeletionProtection=False)
+
+
+def reboot_document_db_instance(instance_id: str) -> None:
+    """Restart an instance and wait for the restart to complete."""
+    client = _boto3_session().client("docdb")
+    instance = client.reboot_db_instance(DBInstanceIdentifier=instance_id)["DBInstance"]
+    deadline = time.monotonic() + _INSTANCE_REBOOT_STARTED_TIMEOUT
+    # An immediate "available" response could precede the reboot. Observe its
+    # transitional state before the availability waiter can accept completion.
+    while instance["DBInstanceStatus"] != "rebooting":
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"DocumentDB instance {instance_id} did not start rebooting")
+        time.sleep(_INSTANCE_REBOOT_POLL_INTERVAL)
+        instance = client.describe_db_instances(DBInstanceIdentifier=instance_id)["DBInstances"][0]
+    client.get_waiter("db_instance_available").wait(
+        DBInstanceIdentifier=instance_id,
+        WaiterConfig={
+            "Delay": _INSTANCE_REBOOT_AVAILABLE_INTERVAL,
+            "MaxAttempts": _INSTANCE_REBOOT_AVAILABLE_ATTEMPTS,
+        },
+    )
 
 
 def assert_document_db_cluster(  # noqa: C901, PLR0913

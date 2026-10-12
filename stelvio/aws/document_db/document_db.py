@@ -356,6 +356,11 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # The provider's conflict check treats even False as a configured value.
             # Omit it to disable management without conflicting with the password.
             cluster_props.pop("manage_master_user_password")
+        ignore_changes = ["availability_zones"]
+        # AWS cannot remove the scaling range in place. Retain the previous range
+        # when no range is supplied so returning to provisioned instances is safe.
+        if cluster_props.get("serverless_v2_scaling_configuration") is None:
+            ignore_changes.append("serverless_v2_scaling_configuration")
         cluster = Cluster(
             cluster_name,
             **cluster_props,
@@ -364,7 +369,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # the pad so a default 2-AZ Vpc does not recreate the database.
             opts=ResourceOptions.merge(
                 self._resource_opts(),
-                ResourceOptions(ignore_changes=["availability_zones"]),
+                ResourceOptions(ignore_changes=ignore_changes),
             ),
         )
         # After the cluster so from_port/to_port follow cluster.port (including customize).

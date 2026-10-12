@@ -18,6 +18,7 @@ from .assert_document_db import (
     assert_security_group_ingress,
     delete_document_db_upgrade_snapshots,
     disable_document_db_deletion_protection,
+    reboot_document_db_instance,
 )
 from .assert_helpers import (
     assert_lambda_function,
@@ -458,6 +459,7 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
 
 
 def test_document_db_serverless_capacity_update(stelvio_env, project_dir):
+    instance_class = "serverless"
     scaling = None
 
     def infra():
@@ -465,11 +467,14 @@ def test_document_db_serverless_capacity_update(stelvio_env, project_dir):
         db = DocumentDb(
             "todos",
             vpc=vpc,
-            instance_class="serverless",
+            instance_class=instance_class,
             serverless_scaling=scaling,
             username="appuser",
             password=Output.secret("StelvioServerlessTestPassword"),
-            customize={"cluster": {"apply_immediately": True}},
+            customize={
+                "cluster": {"apply_immediately": True},
+                "instance": {"apply_immediately": True},
+            },
         )
         fn = Function(
             "client",
@@ -504,6 +509,22 @@ def test_document_db_serverless_capacity_update(stelvio_env, project_dir):
 
     scaling = {"min_capacity": 1, "max_capacity": 8}
     updated = stelvio_env.deploy(infra)
+    assert_document_db_cluster(
+        cluster_id,
+        serverless_scaling={"MinCapacity": 1, "MaxCapacity": 8},
+    )
+    # AWS requires restarting each serverless instance after a maximum change.
+    for instance_id in instance_ids:
+        reboot_document_db_instance(instance_id)
+    assert (
+        assert_document_db_instances(
+            cluster_id,
+            instance_count=1,
+            instance_class="db.serverless",
+            engine_version="8.0.0",
+        )
+        == instance_ids
+    )
     assert invoke_lambda(
         updated["function_client_arn"],
         {
@@ -529,6 +550,15 @@ def test_document_db_serverless_capacity_update(stelvio_env, project_dir):
     for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
         key = f"document_db_todos_{field}"
         assert updated[key] == original[key]
+
+    instance_class = "r6g.large"
+    scaling = None
+    provisioned = stelvio_env.deploy(infra)
+    for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
+        key = f"document_db_todos_{field}"
+        assert provisioned[key] == original[key]
+    # AWS retains the configured range even after the last serverless instance
+    # becomes provisioned; omitting it must not recreate the cluster.
     assert_document_db_cluster(
         cluster_id,
         serverless_scaling={"MinCapacity": 1, "MaxCapacity": 8},
@@ -537,8 +567,22 @@ def test_document_db_serverless_capacity_update(stelvio_env, project_dir):
         assert_document_db_instances(
             cluster_id,
             instance_count=1,
-            instance_class="db.serverless",
+            instance_class="db.r6g.large",
             engine_version="8.0.0",
         )
         == instance_ids
     )
+    for preserved_document in (document, new_document):
+        assert invoke_lambda(
+            provisioned["function_client_arn"],
+            {"operation": "read", "id": preserved_document["_id"]},
+        ) == {"document": preserved_document}
+    provisioned_document = {"_id": "after-provisioned-migration", "value": 44}
+    assert invoke_lambda(
+        provisioned["function_client_arn"],
+        {"operation": "write", "document": provisioned_document},
+    ) == {"document": provisioned_document}
+    assert invoke_lambda(
+        provisioned["function_client_arn"],
+        {"operation": "read", "id": provisioned_document["_id"]},
+    ) == {"document": provisioned_document}

@@ -1597,7 +1597,69 @@ def test_document_db_customization_precedence(pulumi_mocks, values, mode, expect
     )
 
 
-def test_document_db_cluster_ignores_availability_zones_changes(pulumi_mocks):
+@mark.parametrize(
+    ("opts", "customize", "expected_scaling", "expected_ignored"),
+    [
+        param(
+            {},
+            None,
+            None,
+            ["availability_zones", "serverless_v2_scaling_configuration"],
+            id="provisioned-without-range",
+        ),
+        param(
+            {"instance_class": "serverless"},
+            None,
+            {"minCapacity": 0.5, "maxCapacity": 16},
+            ["availability_zones"],
+            id="serverless-default-range",
+        ),
+        *(
+            param(
+                {
+                    "instance_class": instance_class,
+                    "serverless_scaling": {"min_capacity": 1, "max_capacity": 8},
+                },
+                None,
+                {"minCapacity": 1, "maxCapacity": 8},
+                ["availability_zones"],
+                id=f"{instance_class}-explicit-range",
+            )
+            for instance_class in ("t3.medium", "serverless")
+        ),
+        *(
+            param(
+                {
+                    "instance_class": "serverless",
+                    "serverless_scaling": {"min_capacity": 1, "max_capacity": 8},
+                },
+                {
+                    "cluster": (
+                        {"serverless_v2_scaling_configuration": scaling}
+                        if style == "dict"
+                        else lambda props, scaling=scaling: props
+                        | {"serverless_v2_scaling_configuration": scaling}
+                    )
+                },
+                expected_scaling,
+                expected_ignored,
+                id=f"custom-{style}-{'range' if scaling is not None else 'none'}",
+            )
+            for style in ("dict", "callable")
+            for scaling, expected_scaling, expected_ignored in (
+                (
+                    {"min_capacity": 2, "max_capacity": 32},
+                    {"minCapacity": 2, "maxCapacity": 32},
+                    ["availability_zones"],
+                ),
+                (None, None, ["availability_zones", "serverless_v2_scaling_configuration"]),
+            )
+        ),
+    ],
+)
+def test_document_db_cluster_ignores_only_unmanaged_changes(
+    pulumi_mocks, opts, customize, expected_scaling, expected_ignored
+):
     seen: list[list[str] | None] = []
 
     @pulumi.runtime.test
@@ -1607,12 +1669,13 @@ def test_document_db_cluster_ignores_availability_zones_changes(pulumi_mocks):
                 seen.append(args.opts.ignore_changes)
 
         pulumi.runtime.register_stack_transformation(capture)
-        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME)).resources
+        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), customize=customize, **opts).resources
 
     deploy()
-    assert seen == [["availability_zones"]]
+    assert seen == [expected_ignored]
     cluster = pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER)
     assert "availabilityZones" not in cluster.inputs
+    assert cluster.inputs.get("serverlessV2ScalingConfiguration") == expected_scaling
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
