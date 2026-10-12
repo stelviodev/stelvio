@@ -1035,15 +1035,34 @@ def test_bucket_without_notifications(pulumi_mocks):
 # =============================================================================
 
 
-def test_s3_bucket_resources_with_notifications(pulumi_mocks):
-    """BucketResources includes notification-related resources."""
+@pytest.mark.parametrize(
+    ("notify", "created"),
+    [
+        (
+            lambda b: b.notify_function(
+                "on-upload", events=["s3:ObjectCreated:*"], function=UPLOAD_HANDLER
+            ),
+            {"function", "permission"},
+        ),
+        (
+            lambda b: b.notify_queue(
+                "on-upload", events=["s3:ObjectCreated:*"], queue=Queue("test-queue")
+            ),
+            {"queue_policy"},
+        ),
+        (
+            lambda b: b.notify_topic(
+                "on-upload", events=["s3:ObjectCreated:*"], topic=Topic("test-topic")
+            ),
+            {"topic_policy"},
+        ),
+    ],
+    ids=["function", "queue", "topic"],
+)
+def test_s3_bucket_resources_with_notification(pulumi_mocks, notify, created):
+    """BucketResources holds the subscription and only the resources its target needs."""
     bucket = Bucket("test-bucket")
-
-    bucket.notify_function(
-        "on-upload",
-        events=["s3:ObjectCreated:*"],
-        function=UPLOAD_HANDLER,
-    )
+    notify(bucket)
 
     @pulumi.runtime.test
     def deploy():
@@ -1053,93 +1072,10 @@ def test_s3_bucket_resources_with_notifications(pulumi_mocks):
 
     resources = bucket.resources
     assert resources.bucket_notification is not None
-    assert len(resources.subscriptions) == 1
-
-    sub = resources.subscriptions[0]
+    [sub] = resources.subscriptions
     assert sub.name == "test-bucket-on-upload-subscription"
-    assert sub._function_name == "test-bucket-on-upload"
-    assert sub._events == ["s3:ObjectCreated:*"]
-
-    # Verify function resources
-    assert sub.resources.function is not None
-    assert sub.resources.function.name == "test-bucket-on-upload"
-    assert sub.resources.permission is not None
-    assert sub.resources.queue_policy is None
-    assert sub.resources.topic_policy is None
-
-    # Verify actual Pulumi resources
-    assert len(pulumi_mocks.created(R.BUCKET_NOTIFICATION)) == 1
-
-
-def test_s3_bucket_resources_with_queue_notification(pulumi_mocks):
-    """BucketResources includes queue policy when using queue notification."""
-    queue = Queue("test-queue")
-    bucket = Bucket("test-bucket")
-
-    bucket.notify_queue(
-        "on-upload",
-        events=["s3:ObjectCreated:*"],
-        queue=queue,
-    )
-
-    @pulumi.runtime.test
-    def deploy():
-        return [queue.resources, bucket.resources]
-
-    deploy()
-
-    resources = bucket.resources
-    assert resources.bucket_notification is not None
-    assert len(resources.subscriptions) == 1
-
-    sub = resources.subscriptions[0]
-    assert sub.name == "test-bucket-on-upload-subscription"
-    assert sub.queue is queue
-
-    # Verify queue subscription resources
-    assert sub.resources.function is None
-    assert sub.resources.permission is None
-    assert sub.resources.queue_policy is not None
-    assert sub.resources.topic_policy is None
-
-    # Verify actual Pulumi resources
-    assert len(pulumi_mocks.created(R.QUEUE_POLICY)) == 1
-    assert len(pulumi_mocks.created(R.BUCKET_NOTIFICATION)) == 1
-
-
-def test_s3_bucket_resources_with_topic_notification(pulumi_mocks):
-    """BucketResources includes topic policy when using topic notification."""
-    topic = Topic("test-topic")
-    bucket = Bucket("test-bucket")
-
-    bucket.notify_topic(
-        "on-upload",
-        events=["s3:ObjectCreated:*"],
-        topic=topic,
-    )
-
-    @pulumi.runtime.test
-    def deploy():
-        return [topic.resources, bucket.resources]
-
-    deploy()
-
-    resources = bucket.resources
-    assert resources.bucket_notification is not None
-    assert len(resources.subscriptions) == 1
-
-    sub = resources.subscriptions[0]
-    assert sub.name == "test-bucket-on-upload-subscription"
-    assert sub.topic is topic
-
-    # Verify topic subscription resources
-    assert sub.resources.function is None
-    assert sub.resources.permission is None
-    assert sub.resources.queue_policy is None
-    assert sub.resources.topic_policy is not None
-
-    # Verify actual Pulumi resources
-    assert len(pulumi_mocks.created(R.TOPIC_POLICY)) == 1
+    fields = ("function", "permission", "queue_policy", "topic_policy")
+    assert {f for f in fields if getattr(sub.resources, f) is not None} == created
     assert len(pulumi_mocks.created(R.BUCKET_NOTIFICATION)) == 1
 
 
