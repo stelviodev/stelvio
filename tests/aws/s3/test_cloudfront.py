@@ -477,11 +477,12 @@ def test_custom_domain_accepted(build, domain, pulumi_mocks):
 
 
 @pytest.mark.parametrize("build", _CUSTOM_DOMAIN_COMPONENTS)
-def test_wildcard_custom_domain_url_is_the_distribution_domain(
-    build, pulumi_mocks, app_context_with_dns, registered_outputs
+@pytest.mark.parametrize("domain", [None, "*.example.com"])
+def test_url_is_the_distribution_domain_without_a_single_host(
+    build, domain, pulumi_mocks, app_context_with_dns, registered_outputs
 ):
     # `*.example.com` names no single host to open.
-    component = build("*.example.com")
+    component = build(domain)
     urls = []
 
     @pulumi.runtime.test

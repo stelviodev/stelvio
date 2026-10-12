@@ -360,23 +360,6 @@ def test_full_router_with_mixed_origins(
     }
 
 
-def test_router_exports_outputs(pulumi_mocks):
-    """Test that Router exports the expected Pulumi outputs."""
-    bucket = Bucket("test-bucket")
-    router = Router(name="output-test")
-    router.route("/", bucket)
-
-    @pulumi.runtime.test
-    def deploy():
-        return [bucket.resources, router.resources]
-
-    deploy()
-
-    # The router should have exported outputs for domain_name, distribution_id, num_origins
-    # These are verified by checking the distribution was created
-    assert len(pulumi_mocks.created(R.DISTRIBUTION)) == 1
-
-
 def test_custom_domain_acm_uses_us_east_1_provider(pulumi_mocks, app_context_with_dns_eu_west):
     """Test that ACM certificate is created with a us-east-1 provider for CloudFront.
 
