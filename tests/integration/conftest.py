@@ -22,8 +22,8 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 # the single source of truth for test/worker counts.
 #
 #   integration          — standard tests, AWS profile only
-#   integration_vpc      — tests that create a Vpc (4 workers max: account
-#                          quota is 5 VPCs including the default VPC)
+#   integration_vpc      — tests that create a Vpc (4 workers max, capped by
+#                          available VPC quota in run_all.sh)
 #   integration_cf       — CloudFront/Router/S3StaticWebsite, slow teardown
 #   integration_dns      — needs STLV_TEST_DNS_DOMAIN + STLV_TEST_DNS_ZONE_ID
 #                          (optional STLV_TEST_ACM_CERTIFICATE_ARN for a pre-issued

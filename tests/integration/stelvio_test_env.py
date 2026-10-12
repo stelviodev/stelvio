@@ -163,34 +163,32 @@ class StelvioTestEnv:
         return {k: v.value for k, v in result.outputs.items()}
 
     def destroy(self) -> None:
-        """Destroy all resources and clean up. Always safe to call."""
-        if not self._stack:
+        """Destroy resources; raise on exhausted cleanup retries and preserve recovery state."""
+        try:
+            if self._stack:
+                try:
+                    self._stack.destroy(on_output=print)
+                except Exception as first_err:
+                    # State might be out of sync — refresh and retry.
+                    try:
+                        self._stack.refresh(on_output=print)
+                        self._stack.destroy(on_output=print)
+                    except Exception as retry_err:
+                        # Retain the backend so the failed stack can be recovered.
+                        raise RuntimeError(
+                            f"Could not destroy integration stack '{self._stack_name}' "
+                            "after refresh/retry.\n"
+                            f"First error: {first_err}\n"
+                            f"Retry error: {retry_err}\n"
+                            f"State dir: {self._workdir}\n"
+                            "Manual cleanup required; preserved state can be used to recover "
+                            "the stack."
+                        ) from retry_err
+
             if self._workdir and self._workdir.exists():
                 shutil.rmtree(self._workdir, ignore_errors=True)
+        finally:
             self._reset_singletons()
-            return
-
-        try:
-            self._stack.destroy(on_output=print)
-        except Exception as first_err:
-            # State might be out of sync — refresh and retry
-            try:
-                self._stack.refresh(on_output=print)
-                self._stack.destroy(on_output=print)
-            except Exception as retry_err:
-                # Cannot destroy — keep workdir for manual cleanup
-                print(f"CRITICAL: Could not destroy stack '{self._stack_name}'")
-                print(f"First error: {first_err}")
-                print(f"Retry error: {retry_err}")
-                print(f"State dir: {self._workdir}")
-                print("Manual cleanup required. Resources have 'integ-' prefix.")
-                self._reset_singletons()
-                return
-
-        # Destroy succeeded — clean up state
-        if self._workdir and self._workdir.exists():
-            shutil.rmtree(self._workdir, ignore_errors=True)
-        self._reset_singletons()
 
     def _reset_singletons(self) -> None:
         """Reset all Stelvio global state between tests.

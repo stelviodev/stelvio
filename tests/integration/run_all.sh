@@ -5,8 +5,7 @@
 # chosen to balance parallel work within account quotas; tests may not divide
 # evenly across workers. Adjust when adding/removing tests:
 #   integration       — 185 tests / 12 workers  (VPC-creating cases moved out)
-#   integration_vpc   —   10 tests /  4 workers  (account VPC quota is 5,
-#                       including the default VPC)
+#   integration_vpc   —   10 tests / up to 4 workers (remaining regional VPC capacity)
 #   integration_cf    —  14 tests /  7 workers
 #   integration_dns   —  10 tests /  3 workers
 #
@@ -21,6 +20,9 @@ set -euo pipefail
 COMMON_ARGS="-v --tb=short"
 INTEGRATION_DIR="tests/integration"
 
+# Fail before starting any tier if existing VPCs leave no room for another test.
+vpc_workers="$(uv run python -m tests.integration.vpc_capacity)"
+
 pids=()
 exit_code=0
 
@@ -28,8 +30,8 @@ exit_code=0
 uv run pytest "$INTEGRATION_DIR" --integration $COMMON_ARGS -n 12 &
 pids+=($!)
 
-# VPC tier — 4 workers for 10 tests (quota is 5 VPCs including the default VPC)
-uv run pytest "$INTEGRATION_DIR" --integration-vpc $COMMON_ARGS -n 4 &
+# VPC tier — one VPC per worker, capped at 4 and the account's remaining capacity.
+uv run pytest "$INTEGRATION_DIR" --integration-vpc $COMMON_ARGS -n "$vpc_workers" &
 pids+=($!)
 
 # CloudFront tier — 7 workers for 14 tests (slow teardown, mostly waiting on AWS)
