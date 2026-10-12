@@ -522,9 +522,6 @@ class PulumiTestMocks(Mocks):
     def created_certificates(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.CERTIFICATE, name)
 
-    def created_certificate_validations(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.CERTIFICATE_VALIDATION, name)
-
     def created_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.API_DOMAIN_NAME, name)
 
@@ -540,12 +537,6 @@ class PulumiTestMocks(Mocks):
 
     def created_origin_access_controls(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.ORIGIN_ACCESS_CONTROL, name)
-
-    def created_cloudfront_functions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.CLOUDFRONT_FUNCTION, name)
-
-    def created_bucket_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.BUCKET_POLICY, name)
 
     # AWS Provider helpers
     def created_providers(self, name: str | None = None) -> list[MockResourceArgs]:
@@ -575,9 +566,6 @@ class PulumiTestMocks(Mocks):
     def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.TOPIC_SUBSCRIPTION, name)
 
-    def created_topic_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.TOPIC_POLICY, name)
-
     # Cognito resource helpers
     def created_user_pools(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.USER_POOL, name)
@@ -591,10 +579,6 @@ class PulumiTestMocks(Mocks):
 
     def created_configuration_sets(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.CONFIGURATION_SET, name)
-
-    # S3 bucket notification resource helpers
-    def created_bucket_notifications(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.BUCKET_NOTIFICATION, name)
 
     # AppSync resource helpers
     def created_appsync_apis(self, name: str | None = None) -> list[MockResourceArgs]:
