@@ -97,6 +97,7 @@ class R(StrEnum):
     DISTRIBUTION = "aws:cloudfront/distribution:Distribution"
     ORIGIN_ACCESS_CONTROL = "aws:cloudfront/originAccessControl:OriginAccessControl"
     CLOUDFRONT_FUNCTION = "aws:cloudfront/function:Function"
+    CACHE_POLICY = "aws:cloudfront/cachePolicy:CachePolicy"
     # SQS / SNS
     QUEUE = "aws:sqs/queue:Queue"
     QUEUE_POLICY = "aws:sqs/queuePolicy:QueuePolicy"
