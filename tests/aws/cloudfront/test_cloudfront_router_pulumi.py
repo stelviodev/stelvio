@@ -114,7 +114,7 @@ def test_create_resources_no_routes_raises_error(pulumi_mocks):
 
 
 def test_create_resources_with_root_path(pulumi_mocks):
-    """Test that Router handles root path '/' as default cache behavior."""
+    """A '/' route points the default cache behavior at its origin; no 404 function."""
     bucket = Bucket("test-bucket")
     router = Router(name="test-router")
     router.route("/", bucket)
@@ -126,6 +126,8 @@ def test_create_resources_with_root_path(pulumi_mocks):
     deploy()
 
     [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    # A fixed template, not the bucket route's own behavior: that one lands at `//*`, which no
+    # request path matches.
     assert distribution.inputs["defaultCacheBehavior"] == {
         "targetOriginId": f"arn:aws:s3:::{tn(TP + 'test-bucket')}",
         "allowedMethods": ["GET", "HEAD", "OPTIONS"],
@@ -138,6 +140,7 @@ def test_create_resources_with_root_path(pulumi_mocks):
         "maxTtl": 0,
         "functionAssociations": [],
     }
+    assert [b["pathPattern"] for b in distribution.inputs["orderedCacheBehaviors"]] == ["//*"]
     # When root path exists, there should be no default 404 function
     assert pulumi_mocks.created(R.CLOUDFRONT_FUNCTION, TP + "test-router-default-404") == []
 
