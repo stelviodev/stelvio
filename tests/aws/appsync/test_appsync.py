@@ -22,37 +22,33 @@ from .conftest import (
     TP,
     assert_graphql_api_inputs,
     assert_role,
+    deploy_all,
     make_api,
     make_lambda_ds,
-    when_appsync_ready,
 )
 
 
-@pulumi.runtime.test
 def test_appsync_creates_graphql_api(pulumi_mocks, project_cwd):
-    api = make_api()
+    make_api()
 
-    def check_resources(_):
-        assert_graphql_api_inputs(
-            pulumi_mocks,
-            f"{TP}myapi",
-            schema=INLINE_SCHEMA,
-            authenticationType=AUTH_TYPE_COGNITO,
-        )
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert_graphql_api_inputs(
+        pulumi_mocks,
+        f"{TP}myapi",
+        schema=INLINE_SCHEMA,
+        authenticationType=AUTH_TYPE_COGNITO,
+    )
 
 
-@pulumi.runtime.test
 def test_appsync_schema_from_file(pulumi_mocks, project_cwd):
-    api = make_api(schema="schema.graphql")
+    make_api(schema="schema.graphql")
 
-    def check_resources(_):
-        schema = assert_graphql_api_inputs(pulumi_mocks, f"{TP}myapi")["schema"]
-        schema_path = Path(project_cwd) / "schema.graphql"
-        assert schema == schema_path.read_text()
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    schema = assert_graphql_api_inputs(pulumi_mocks, f"{TP}myapi")["schema"]
+    schema_path = Path(project_cwd) / "schema.graphql"
+    assert schema == schema_path.read_text()
 
 
 @pulumi.runtime.test
@@ -121,17 +117,15 @@ def test_none_data_source_accessible_through_resources(pulumi_mocks, project_cwd
 # --- Global customization propagation ---
 
 
-@pulumi.runtime.test
 def test_global_customization_propagates_to_api(pulumi_mocks, project_cwd, clean_registries):
     """Global customization for AppSync propagates to the GraphQL API."""
     create_app_context_with_global_customize({AppSync: {"api": {"xray_enabled": True}}})
-    api = make_api()
+    make_api()
 
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(pulumi_mocks, f"{TP}myapi")
-        assert inputs.get("xrayEnabled") is True
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    inputs = assert_graphql_api_inputs(pulumi_mocks, f"{TP}myapi")
+    assert inputs.get("xrayEnabled") is True
 
 
 @pytest.mark.parametrize(
@@ -142,7 +136,6 @@ def test_global_customization_propagates_to_api(pulumi_mocks, project_cwd, clean
     ],
     ids=["global-propagates", "per-ds-overrides"],
 )
-@pulumi.runtime.test
 def test_data_source_customization_precedence(
     per_ds_customize, expected_path, pulumi_mocks, project_cwd, clean_registries
 ):
@@ -161,10 +154,9 @@ def test_data_source_customization_precedence(
         posts = make_lambda_ds(api)
     api.query("getPost", posts)
 
-    def check_resources(_):
-        assert_role(pulumi_mocks, "ds-posts-role", path=expected_path)
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert_role(pulumi_mocks, "ds-posts-role", path=expected_path)
 
 
 @pytest.mark.parametrize(
@@ -172,35 +164,31 @@ def test_data_source_customization_precedence(
     [{"Team": "platform", "Project": "api"}, None],
     ids=["with-tags", "no-tags"],
 )
-@pulumi.runtime.test
 def test_appsync_tags_on_graphql_api(tags, pulumi_mocks, project_cwd):
     kwargs = {"tags": tags} if tags else {}
-    api = make_api(**kwargs)
+    make_api(**kwargs)
 
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(pulumi_mocks, f"{TP}myapi")
-        if tags:
-            assert inputs["tags"] == tags
-        else:
-            assert "tags" not in inputs
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    inputs = assert_graphql_api_inputs(pulumi_mocks, f"{TP}myapi")
+    if tags:
+        assert inputs["tags"] == tags
+    else:
+        assert "tags" not in inputs
 
 
-@pulumi.runtime.test
 def test_appsync_tags_propagate_to_data_source_role(pulumi_mocks, project_cwd):
     tags = {"Team": "platform"}
     api = make_api(tags=tags)
     posts = make_lambda_ds(api)
     api.query("getPost", posts)
 
-    def check_resources(_):
-        assert_role(pulumi_mocks, "ds-posts-role", tags=tags)
-        fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
-        assert len(fns) == 1
-        assert fns[0].inputs["tags"] == tags
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert_role(pulumi_mocks, "ds-posts-role", tags=tags)
+    fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
+    assert len(fns) == 1
+    assert fns[0].inputs["tags"] == tags
 
 
 def test_appsync_config_dict_matches_dataclass():

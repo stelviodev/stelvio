@@ -22,9 +22,9 @@ from .conftest import (
     assert_data_source_inputs,
     assert_iam_policy,
     assert_role,
+    deploy_all,
     make_api,
     make_data_source,
-    when_appsync_ready,
 )
 
 # --- Data source creation (all types) ---
@@ -41,7 +41,6 @@ from .conftest import (
     ],
     ids=["lambda", "dynamo", "http", "rds", "opensearch"],
 )
-@pulumi.runtime.test
 def test_data_source_creates_correct_type(
     ds_type, expected_type, expected_name, pulumi_mocks, project_cwd
 ):
@@ -50,33 +49,29 @@ def test_data_source_creates_correct_type(
     ds = make_data_source(api, ds_type)
     add_resolver_for_ds(api, ds, ds_type)
 
-    def check_resources(_):
-        ds_inputs = assert_data_source_inputs(
-            pulumi_mocks, ds_type=expected_type, name=expected_name
+    deploy_all()
+
+    ds_inputs = assert_data_source_inputs(pulumi_mocks, ds_type=expected_type, name=expected_name)
+
+    if ds_type == "dynamo":
+        assert "dynamodbConfig" in ds_inputs
+    elif ds_type == "http":
+        assert ds_inputs["httpConfig"]["endpoint"] == "https://api.example.com"
+        assert_role(pulumi_mocks, "ds-ext-role")
+        policies = pulumi_mocks.created_role_policies()
+        assert not [p for p in policies if "ds-ext" in p.name]
+    elif ds_type == "rds":
+        rdb_config = ds_inputs["relationalDatabaseConfig"]
+        assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
+    elif ds_type == "opensearch":
+        assert "opensearchserviceConfig" in ds_inputs
+        assert (
+            ds_inputs["opensearchserviceConfig"]["endpoint"]
+            == "https://search-my-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
         )
-
-        if ds_type == "dynamo":
-            assert "dynamodbConfig" in ds_inputs
-        elif ds_type == "http":
-            assert ds_inputs["httpConfig"]["endpoint"] == "https://api.example.com"
-            assert_role(pulumi_mocks, "ds-ext-role")
-            policies = pulumi_mocks.created_role_policies()
-            assert not [p for p in policies if "ds-ext" in p.name]
-        elif ds_type == "rds":
-            rdb_config = ds_inputs["relationalDatabaseConfig"]
-            assert rdb_config["httpEndpointConfig"]["databaseName"] == "mydb"
-        elif ds_type == "opensearch":
-            assert "opensearchserviceConfig" in ds_inputs
-            assert (
-                ds_inputs["opensearchserviceConfig"]["endpoint"]
-                == "https://search-my-domain-abc123def456ghij.us-east-1.es.amazonaws.com"
-            )
-            assert "elasticsearchConfig" not in ds_inputs
-
-    when_appsync_ready(api, check_resources)
+        assert "elasticsearchConfig" not in ds_inputs
 
 
-@pulumi.runtime.test
 def test_dynamo_data_source_region_uses_resolved_region(
     pulumi_mocks, project_cwd, no_region_context
 ):
@@ -91,28 +86,25 @@ def test_dynamo_data_source_region_uses_resolved_region(
     ds = make_data_source(api, "dynamo")
     add_resolver_for_ds(api, ds, "dynamo")
 
-    def check_resources(_):
-        ds_inputs = assert_data_source_inputs(pulumi_mocks, ds_type=DS_TYPE_DYNAMO, name="items")
-        assert ds_inputs["dynamodbConfig"]["region"] == "eu-central-1"
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    ds_inputs = assert_data_source_inputs(pulumi_mocks, ds_type=DS_TYPE_DYNAMO, name="items")
+    assert ds_inputs["dynamodbConfig"]["region"] == "eu-central-1"
 
 
-@pulumi.runtime.test
 def test_lambda_data_source_creates_function_role_and_accessible(pulumi_mocks, project_cwd):
     api = make_api()
     posts = api.data_source_lambda("posts", handler="functions/simple.handler")
     api.query("getPost", posts)
 
-    def check_resources(_):
-        fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
-        assert len(fns) == 1
-        assert_role(pulumi_mocks, "ds-posts-role")
-        assert isinstance(posts.resources.data_source, appsync.DataSource)
-        assert isinstance(posts.resources.service_role, iam.Role)
-        assert isinstance(posts.resources.function, Function)
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
+    assert len(fns) == 1
+    assert_role(pulumi_mocks, "ds-posts-role")
+    assert isinstance(posts.resources.data_source, appsync.DataSource)
+    assert isinstance(posts.resources.service_role, iam.Role)
+    assert isinstance(posts.resources.function, Function)
 
 
 @pytest.mark.parametrize(
@@ -131,7 +123,6 @@ def test_lambda_data_source_creates_function_role_and_accessible(pulumi_mocks, p
     ],
     ids=["function-config", "fn-opts"],
 )
-@pulumi.runtime.test
 def test_lambda_data_source_function_options(
     handler, extra_kwargs, expected_fn_inputs, pulumi_mocks, project_cwd
 ):
@@ -139,29 +130,25 @@ def test_lambda_data_source_function_options(
     posts = api.data_source_lambda("posts", handler, **extra_kwargs)
     add_resolver_for_ds(api, posts, "lambda")
 
-    def check_resources(_):
-        ds_fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
-        assert len(ds_fns) == 1
-        for key, value in expected_fn_inputs.items():
-            assert ds_fns[0].inputs[key] == value
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    ds_fns = [f for f in pulumi_mocks.created_functions() if "ds-posts" in f.name]
+    assert len(ds_fns) == 1
+    for key, value in expected_fn_inputs.items():
+        assert ds_fns[0].inputs[key] == value
 
 
-@pulumi.runtime.test
 def test_lambda_data_source_with_function_instance(pulumi_mocks, project_cwd):
     api = make_api()
     fn = Function("my-fn", handler="functions/simple.handler")
     posts = api.data_source_lambda("posts", fn)
     add_resolver_for_ds(api, posts, "lambda")
 
-    def check_resources(_):
-        assert_data_source_inputs(pulumi_mocks, ds_type=DS_TYPE_LAMBDA, name="posts")
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert_data_source_inputs(pulumi_mocks, ds_type=DS_TYPE_LAMBDA, name="posts")
 
 
-@pulumi.runtime.test
 def test_lambda_data_source_with_links_list(pulumi_mocks, project_cwd):
     api = make_api()
     table = DynamoTable("items", fields={"pk": "S"}, partition_key="pk")
@@ -172,16 +159,14 @@ def test_lambda_data_source_with_links_list(pulumi_mocks, project_cwd):
     )
     api.query("getPost", posts)
 
-    def check_resources(_):
-        ds_fn = pulumi_mocks.assert_function_created(f"{TP}myapi-ds-posts-fn")
-        assert ds_fn.typ == "aws:lambda/function:Function"
-        env_vars = ds_fn.inputs["environment"]["variables"]
-        assert env_vars["STLV_ITEMS_TABLE_ARN"].startswith(
-            "arn:aws:dynamodb:us-east-1:123456789012:table/"
-        )
-        assert env_vars["STLV_ITEMS_TABLE_NAME"] == f"{TP}items-test-name"
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    ds_fn = pulumi_mocks.assert_res("myapi-ds-posts-fn", R.FUNCTION)
+    env_vars = ds_fn.inputs["environment"]["variables"]
+    assert env_vars["STLV_ITEMS_TABLE_ARN"].startswith(
+        "arn:aws:dynamodb:us-east-1:123456789012:table/"
+    )
+    assert env_vars["STLV_ITEMS_TABLE_NAME"] == f"{TP}items-test-name"
 
 
 # --- IAM policies (single-statement data sources) ---
@@ -221,7 +206,6 @@ def test_lambda_data_source_with_links_list(pulumi_mocks, project_cwd):
     ],
     ids=["lambda", "dynamo", "opensearch"],
 )
-@pulumi.runtime.test
 def test_data_source_creates_iam_policy(  # noqa: PLR0913
     ds_type, policy_name_pattern, expected_actions, expected_resources, pulumi_mocks, project_cwd
 ):
@@ -230,16 +214,14 @@ def test_data_source_creates_iam_policy(  # noqa: PLR0913
     ds = make_data_source(api, ds_type)
     add_resolver_for_ds(api, ds, ds_type)
 
-    def check_resources(_):
-        assert_iam_policy(pulumi_mocks, policy_name_pattern, expected_actions, expected_resources)
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert_iam_policy(pulumi_mocks, policy_name_pattern, expected_actions, expected_resources)
 
 
 # --- VPC-style OpenSearch endpoint ---
 
 
-@pulumi.runtime.test
 def test_opensearch_vpc_endpoint(pulumi_mocks, project_cwd):
     """VPC-style OpenSearch endpoints produce correct config and IAM ARN."""
     api = make_api()
@@ -247,26 +229,22 @@ def test_opensearch_vpc_endpoint(pulumi_mocks, project_cwd):
     ds = api.data_source_opensearch("search", endpoint=vpc_endpoint)
     api.query("getPost", ds, code="resolvers/getItem.js")
 
-    def check_resources(_):
-        ds_inputs = assert_data_source_inputs(
-            pulumi_mocks, ds_type=DS_TYPE_OPENSEARCH, name="search"
-        )
-        assert "opensearchserviceConfig" in ds_inputs
-        assert ds_inputs["opensearchserviceConfig"]["endpoint"] == vpc_endpoint
-        assert_iam_policy(
-            pulumi_mocks,
-            "ds-search-policy",
-            ["es:ESHttp*"],
-            "arn:aws:es:us-east-1:*:domain/mydomain/*",
-        )
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    ds_inputs = assert_data_source_inputs(pulumi_mocks, ds_type=DS_TYPE_OPENSEARCH, name="search")
+    assert "opensearchserviceConfig" in ds_inputs
+    assert ds_inputs["opensearchserviceConfig"]["endpoint"] == vpc_endpoint
+    assert_iam_policy(
+        pulumi_mocks,
+        "ds-search-policy",
+        ["es:ESHttp*"],
+        "arn:aws:es:us-east-1:*:domain/mydomain/*",
+    )
 
 
 # --- RDS data source ---
 
 
-@pulumi.runtime.test
 def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
     api = make_api()
     db = api.data_source_rds(
@@ -277,24 +255,23 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
     )
     api.query("getPost", db, code="resolvers/getItem.js")
 
-    def check_resources(_):
-        stmts = assert_iam_policy(pulumi_mocks, "ds-db-policy", [], [], statement_count=2)
-        actions = [s["Action"] for s in stmts]
-        resources = [s["Resource"] for s in stmts]
-        for stmt in stmts:
-            assert stmt["Effect"] == "Allow"
-        assert [
-            "rds-data:ExecuteStatement",
-            "rds-data:BatchExecuteStatement",
-            "rds-data:BeginTransaction",
-            "rds-data:CommitTransaction",
-            "rds-data:RollbackTransaction",
-        ] in actions
-        assert ["secretsmanager:GetSecretValue"] in actions
-        assert "arn:aws:rds:us-east-1:123456789012:cluster:my-cluster" in resources
-        assert "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret" in resources
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    stmts = assert_iam_policy(pulumi_mocks, "ds-db-policy", [], [], statement_count=2)
+    actions = [s["Action"] for s in stmts]
+    resources = [s["Resource"] for s in stmts]
+    for stmt in stmts:
+        assert stmt["Effect"] == "Allow"
+    assert [
+        "rds-data:ExecuteStatement",
+        "rds-data:BatchExecuteStatement",
+        "rds-data:BeginTransaction",
+        "rds-data:CommitTransaction",
+        "rds-data:RollbackTransaction",
+    ] in actions
+    assert ["secretsmanager:GetSecretValue"] in actions
+    assert "arn:aws:rds:us-east-1:123456789012:cluster:my-cluster" in resources
+    assert "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret" in resources
 
 
 # --- Validation ---
@@ -378,19 +355,16 @@ def test_lambda_data_source_function_instance_extra_opts_raises(extra_kwargs, pr
         api.data_source_lambda("posts", fn, **extra_kwargs)
 
 
-@pulumi.runtime.test
 def test_none_data_source_created(pulumi_mocks, project_cwd):
     """The internal shared NONE data source is created when resources are built."""
     api = make_api()
     api.mutation("sendMessage", None)
 
-    def check_resources(_):
-        assert_data_source_inputs(pulumi_mocks, ds_type="NONE", name="NONE")
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert_data_source_inputs(pulumi_mocks, ds_type="NONE", name="NONE")
 
 
-@pulumi.runtime.test
 def test_data_source_customize_applied(pulumi_mocks, project_cwd):
     api = make_api()
     posts = api.data_source_lambda(
@@ -403,18 +377,16 @@ def test_data_source_customize_applied(pulumi_mocks, project_cwd):
     )
     api.query("getPost", posts)
 
-    def check_resources(_):
-        assert_data_source_inputs(
-            pulumi_mocks,
-            ds_type=DS_TYPE_LAMBDA,
-            name="custom-posts",
-        )
-        assert_role(pulumi_mocks, "ds-posts-role", path="/service-role/")
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert_data_source_inputs(
+        pulumi_mocks,
+        ds_type=DS_TYPE_LAMBDA,
+        name="custom-posts",
+    )
+    assert_role(pulumi_mocks, "ds-posts-role", path="/service-role/")
 
 
-@pulumi.runtime.test
 def test_lambda_data_source_function_customize_applied(pulumi_mocks, project_cwd):
     api = make_api()
     posts = api.data_source_lambda(
@@ -424,12 +396,9 @@ def test_lambda_data_source_function_customize_applied(pulumi_mocks, project_cwd
     )
     api.query("getPost", posts)
 
-    def check_resources(_):
-        pulumi_mocks.assert_res(
-            "myapi-ds-posts-fn", R.FUNCTION, {"memorySize": 1024}, partial=True
-        )
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    pulumi_mocks.assert_res("myapi-ds-posts-fn", R.FUNCTION, {"memorySize": 1024}, partial=True)
 
 
 # --- Customize key validation ---
