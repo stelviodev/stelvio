@@ -132,6 +132,9 @@ def _http_api():
 
 
 API_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+CACHING_DISABLED_POLICY_ID = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+# No Host: API Gateway answers a foreign Host with 403
+ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 API_RESOURCES = {
     R.API_ACCOUNT: 2,
     R.LOG_GROUP: 1,
@@ -179,16 +182,9 @@ API_RESOURCES = {
                 "targetOriginId": tid(TP + "api"),
                 "allowedMethods": API_METHODS,
                 "cachedMethods": ["GET", "HEAD"],
-                "compress": True,
                 "viewerProtocolPolicy": "redirect-to-https",
-                "forwardedValues": {
-                    "queryString": True,
-                    "cookies": {"forward": "none"},
-                    "headers": [],
-                },
-                "minTtl": 0,
-                "defaultTtl": 0,
-                "maxTtl": 0,
+                "cachePolicyId": CACHING_DISABLED_POLICY_ID,
+                "originRequestPolicyId": ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
                 "functionAssociations": [],
             },
             API_RESOURCES
@@ -207,17 +203,9 @@ API_RESOURCES = {
                 "targetOriginId": tid(TP + "api"),
                 "allowedMethods": API_METHODS,
                 "cachedMethods": ["GET", "HEAD"],
-                "compress": True,
                 "viewerProtocolPolicy": "redirect-to-https",
-                # No Host: API Gateway answers a foreign Host with 403
-                "forwardedValues": {
-                    "queryString": True,
-                    "cookies": {"forward": "none"},
-                    "headers": [],
-                },
-                "minTtl": 0,
-                "defaultTtl": 0,
-                "maxTtl": 0,
+                "cachePolicyId": CACHING_DISABLED_POLICY_ID,
+                "originRequestPolicyId": ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
                 "functionAssociations": [],
             },
             API_RESOURCES
@@ -235,16 +223,9 @@ API_RESOURCES = {
                 "targetOriginId": tn(TP + "fn"),
                 "allowedMethods": API_METHODS,
                 "cachedMethods": ["GET", "HEAD"],
-                "compress": True,
                 "viewerProtocolPolicy": "redirect-to-https",
-                "forwardedValues": {
-                    "queryString": True,
-                    "cookies": {"forward": "none"},
-                    "headers": [],
-                },
-                "minTtl": 0,
-                "defaultTtl": 0,
-                "maxTtl": 0,
+                "cachePolicyId": CACHING_DISABLED_POLICY_ID,
+                "originRequestPolicyId": ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
                 "functionAssociations": [],
             },
             {

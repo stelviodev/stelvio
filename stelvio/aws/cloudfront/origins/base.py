@@ -12,6 +12,12 @@ from stelvio.context import context
 
 API_ALLOWED_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
 API_CACHED_METHODS = ["GET", "HEAD"]
+# AWS managed policies. Their IDs are the same in every account, so no lookup on each preview:
+# https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html
+# https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-origin-request-policies.html
+CACHING_DISABLED_POLICY_ID = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+# Every viewer header but Host: API Gateway picks the API by Host, a foreign one gets 403.
+ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 
 # (customize key, computed props, default props) -> props: the owning Router's `_customizer`
 type Customizer = Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]]
@@ -77,19 +83,10 @@ class ComponentCloudfrontAdapter(ABC):
                 "allowed_methods": API_ALLOWED_METHODS,
                 "cached_methods": API_CACHED_METHODS,
                 "target_origin_id": origin_id,
-                "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
-                "forwarded_values": {
-                    "query_string": True,
-                    "cookies": {"forward": "none"},
-                    # Sent even when empty: the provider keeps a left-out `headers` (Optional +
-                    # Computed), so a behavior shifted into the list slot of a route that
-                    # forwards Host would keep forwarding it, and API Gateway answers 403.
-                    "headers": [],
-                },
-                "min_ttl": 0,
-                "default_ttl": 0,
-                "max_ttl": 0,
+                # Legacy `forwarded_values` drop `Authorization` on GET and every cookie.
+                "cache_policy_id": CACHING_DISABLED_POLICY_ID,
+                "origin_request_policy_id": ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
                 "function_associations": self._function_associations(cf_function),
             }
         )

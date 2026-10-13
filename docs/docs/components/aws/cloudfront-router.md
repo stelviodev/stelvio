@@ -118,6 +118,10 @@ curl -X POST https://example.com/api \
 `function_url={"auth": None}` drops the `x-amz-content-sha256` rule, but then anyone can call the Function URL directly, past the Router.
 
 
+#### API and Function routes cache behavior
+
+CloudFront doesn't cache API and Function routes and doesn't compress their responses. It passes every viewer header except `Host`, all cookies and all query strings to the origin. On a Function route with IAM auth, CloudFront replaces `Authorization` with its own signature, as described above.
+
 #### S3 Buckets cache behavior
 
 When routing a path to an S3 bucket, the default cache values are set like this:
