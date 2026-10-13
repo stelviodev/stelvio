@@ -63,7 +63,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:Router", name, tags=tags, customize=customize
         )
-        self.routes = routes or []
+        # Checked like `route()` calls but not sorted: a new order would rename every resource
+        # named by route index on a stack deployed with this one.
+        self.routes: list[Route] = []
+        for route in routes or []:
+            self._add_route(route)
         self.price_class = price_class
         self.custom_domain = custom_domain
         # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
@@ -268,8 +272,6 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 f"Remove the 'url' parameter from the Function to make it Router-compatible."
             )
         self.routes.append(route)
-        # Sort routes by path pattern length in descending order (more specific first)
-        self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
 
     def route(
         self,
@@ -294,3 +296,5 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 tags=self.tags,
             )
         self._add_route(Route(path, component_or_url, function_url))
+        # Sort routes by path pattern length in descending order (more specific first)
+        self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)

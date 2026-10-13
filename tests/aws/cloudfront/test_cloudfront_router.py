@@ -123,6 +123,51 @@ def test_route_rejects_a_second_root_route(first, second):
         router.route(second, Mock(spec=Bucket))
 
 
+def test_router_keeps_the_order_of_routes_given_to_the_constructor():
+    routes = [Route("/a", Mock(spec=Bucket)), Route("/abc", Mock(spec=Bucket))]
+
+    router = Router(name="test-router", routes=routes)
+
+    assert [r.path_pattern for r in router.routes] == ["/a", "/abc"]
+
+
+def test_route_leaves_the_constructor_list_as_given():
+    routes = [Route("/a", Mock(spec=Bucket)), Route("/abc", Mock(spec=Bucket))]
+    router = Router(name="test-router", routes=routes)
+
+    router.route("/ab", Mock(spec=Bucket))
+
+    assert [r.path_pattern for r in router.routes] == ["/abc", "/ab", "/a"]
+    assert [r.path_pattern for r in routes] == ["/a", "/abc"]
+
+
+def _function_with_url():
+    function = Mock(spec=Function)
+    function.name = "fn-with-url"
+    function.config.url = "public"
+    return function
+
+
+@pytest.mark.parametrize(
+    ("make_routes", "error"),
+    [
+        (
+            lambda: [Route("/a", Mock(spec=Bucket)), Route("/a", Mock(spec=Bucket))],
+            r"^Route for path pattern /a already exists\.$",
+        ),
+        (
+            lambda: [Route("/", Mock(spec=Bucket)), Route("/*", Mock(spec=Bucket))],
+            r"^Route for path pattern '/\*' clashes with '/': both are the root route\.$",
+        ),
+        (lambda: [Route("/api", _function_with_url())], r"^Function 'fn-with-url' has 'url'"),
+    ],
+    ids=["duplicate-path", "two-roots", "function-with-url"],
+)
+def test_router_checks_routes_given_to_the_constructor(make_routes, error):
+    with pytest.raises(ValueError, match=error):
+        Router(name="test-router", routes=make_routes())
+
+
 def test_add_route_rejects_duplicate_origin():
     """Router._add_route must reject using the same origin twice."""
     router = Router(name="test-router")
