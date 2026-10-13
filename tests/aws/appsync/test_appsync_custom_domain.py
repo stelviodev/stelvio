@@ -10,7 +10,7 @@ from stelvio.dns import DnsProviderNotConfiguredError
 from ...conftest import TP
 from ..conftest import assert_urn
 from ..pulumi_mocks import R, provider_urn, tid
-from .conftest import make_api, when_appsync_ready
+from .conftest import deploy_all, make_api
 
 
 @mark.parametrize(
@@ -37,43 +37,39 @@ from .conftest import make_api, when_appsync_ready
     ],
     ids=["acm-cert", "domain-name", "association"],
 )
-@pulumi.runtime.test
 def test_custom_domain_creates_resources(
     case, pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
     resource_getter, expected_type, input_key, expected_value = case
-    api = make_api(domain_name="api.example.com")
+    make_api(domain_name="api.example.com")
 
-    def check_resources(_):
-        resources = resource_getter(pulumi_mocks)
-        assert len(resources) == 1
-        assert resources[0].typ == expected_type
-        if input_key is not None:
-            assert resources[0].inputs[input_key] == expected_value
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    resources = resource_getter(pulumi_mocks)
+    assert len(resources) == 1
+    assert resources[0].typ == expected_type
+    if input_key is not None:
+        assert resources[0].inputs[input_key] == expected_value
 
 
-@pulumi.runtime.test
 def test_custom_domain_creates_dns_record(
     pulumi_mocks, project_cwd, app_context_with_dns, component_registry
 ):
-    api = make_api(domain_name="api.example.com")
+    make_api(domain_name="api.example.com")
 
-    def check_resources(_):
-        dns_records = pulumi_mocks.created_dns_records()
-        domain_cname_records = [
-            r
-            for r in dns_records
-            if r.inputs.get("type") == "CNAME" and r.inputs.get("name") == "api.example.com"
-        ]
-        assert len(domain_cname_records) == 1
-        assert (
-            domain_cname_records[0].inputs["content"]
-            == "test-test-myapi-domain-test-id.appsync-api.us-east-1.amazonaws.com"
-        )
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    dns_records = pulumi_mocks.created_dns_records()
+    domain_cname_records = [
+        r
+        for r in dns_records
+        if r.inputs.get("type") == "CNAME" and r.inputs.get("name") == "api.example.com"
+    ]
+    assert len(domain_cname_records) == 1
+    assert (
+        domain_cname_records[0].inputs["content"]
+        == "test-test-myapi-domain-test-id.appsync-api.us-east-1.amazonaws.com"
+    )
 
 
 @pulumi.runtime.test
@@ -176,15 +172,13 @@ def test_custom_domain_certificate_is_issued_in_us_east_1(
     assert domain.provider == provider_urn("stelvio-aws")
 
 
-@pulumi.runtime.test
 def test_no_domain_creates_no_domain_resources(pulumi_mocks, project_cwd):
-    api = make_api()
+    make_api()
 
-    def check_resources(_):
-        assert len(pulumi_mocks.created_appsync_domain_names()) == 0
-        assert len(pulumi_mocks.created_appsync_domain_associations()) == 0
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    assert len(pulumi_mocks.created_appsync_domain_names()) == 0
+    assert len(pulumi_mocks.created_appsync_domain_associations()) == 0
 
 
 @mark.parametrize(

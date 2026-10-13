@@ -7,6 +7,7 @@ import pulumi
 
 from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.dynamo_db import DynamoTable
+from stelvio.component import ComponentRegistry
 
 from ...conftest import TP  # noqa: F401  # re-exported for the appsync tests
 
@@ -80,31 +81,19 @@ def make_data_source(api: AppSync, ds_type: str, **kwargs: Any) -> Any:
     raise ValueError(f"Unknown ds_type: {ds_type}")
 
 
-def when_appsync_ready(api: Any, callback: Any) -> None:
-    r = api.resources
-    outputs: list[pulumi.Output[Any]] = [r.api.id, r.api.arn]
+def deploy_all() -> None:
+    """Create every registered component and wait for all of it, as `stlv deploy` does.
 
-    if r.api_key is not None:
-        outputs.append(r.api_key.id)
-    if r.auth_permissions:
-        outputs.extend(p.id for p in r.auth_permissions)
-    if r.acm_validated_domain is not None:
-        outputs.append(r.acm_validated_domain.resources.certificate.arn)
-    if r.domain_association is not None:
-        outputs.append(r.domain_association.id)
-    if r.domain_dns_record is not None:
-        outputs.append(r.domain_dns_record.name)
+    Data sources, resolvers and pipe functions are components of their own: the deploy loop
+    (`StelvioApp.drive`) creates them, `AppSync.resources` doesn't.
+    """
 
-    for ds in api._data_sources.values():
-        dr = ds.resources
-        outputs.extend([dr.data_source.arn, dr.service_role.arn])
-        if dr.function is not None:
-            outputs.append(dr.function.resources.function.arn)
-        outputs.extend(p.name for p in ds._policies)
+    @pulumi.runtime.test
+    def deploy() -> None:
+        for component in ComponentRegistry.all_instances():
+            _ = component.resources
 
-    outputs.extend(pf.resources.function.arn for pf in api._pipe_functions.values())
-    outputs.extend(resolver.resources.resolver.arn for resolver in api._resolvers)
-    pulumi.Output.all(*outputs).apply(callback)
+    deploy()
 
 
 def assert_iam_policy(  # noqa: PLR0913
