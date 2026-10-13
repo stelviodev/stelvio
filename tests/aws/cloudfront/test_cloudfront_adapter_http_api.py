@@ -49,11 +49,8 @@ def test_router_creates_cloudfront_origin_for_http_api(
         "targetOriginId": api_id,
         "compress": True,
         "viewerProtocolPolicy": "redirect-to-https",
-        "forwardedValues": {
-            "queryString": True,
-            "cookies": {"forward": "none"},
-            "headers": ["*"],
-        },
+        # No Host: API Gateway answers a foreign Host with 403
+        "forwardedValues": {"queryString": True, "cookies": {"forward": "none"}, "headers": []},
         "minTtl": 0,
         "defaultTtl": 0,
         "maxTtl": 0,

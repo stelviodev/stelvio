@@ -71,16 +71,7 @@ class ComponentCloudfrontAdapter(ABC):
         *,
         origin_id: pulumi.Input[str],
         cf_function: pulumi_aws.cloudfront.Function | None,
-        forwarded_headers: list[str] | None = None,
     ) -> list[dict]:
-        forwarded_values = {
-            "query_string": True,
-            "cookies": {"forward": "none"},
-            # Never left out: the provider keeps a missing `headers` (Optional + Computed), so a
-            # behavior shifted into an HttpApi's list slot would keep forwarding Host (403).
-            "headers": forwarded_headers or [],
-        }
-
         return self._cache_behaviors(
             {
                 "allowed_methods": API_ALLOWED_METHODS,
@@ -88,7 +79,14 @@ class ComponentCloudfrontAdapter(ABC):
                 "target_origin_id": origin_id,
                 "compress": True,
                 "viewer_protocol_policy": "redirect-to-https",
-                "forwarded_values": forwarded_values,
+                "forwarded_values": {
+                    "query_string": True,
+                    "cookies": {"forward": "none"},
+                    # Sent even when empty: the provider keeps a left-out `headers` (Optional +
+                    # Computed), so a behavior shifted into the list slot of a route that
+                    # forwards Host would keep forwarding it, and API Gateway answers 403.
+                    "headers": [],
+                },
                 "min_ttl": 0,
                 "default_ttl": 0,
                 "max_ttl": 0,

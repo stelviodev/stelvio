@@ -209,10 +209,11 @@ API_RESOURCES = {
                 "cachedMethods": ["GET", "HEAD"],
                 "compress": True,
                 "viewerProtocolPolicy": "redirect-to-https",
+                # No Host: API Gateway answers a foreign Host with 403
                 "forwardedValues": {
                     "queryString": True,
                     "cookies": {"forward": "none"},
-                    "headers": ["*"],
+                    "headers": [],
                 },
                 "minTtl": 0,
                 "defaultTtl": 0,
