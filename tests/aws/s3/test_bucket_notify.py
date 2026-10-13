@@ -1036,33 +1036,21 @@ def test_bucket_without_notifications(pulumi_mocks):
 
 
 @pytest.mark.parametrize(
-    ("notify", "created"),
+    ("kind", "make_target", "created"),
     [
-        (
-            lambda b: b.notify_function(
-                "on-upload", events=["s3:ObjectCreated:*"], function=UPLOAD_HANDLER
-            ),
-            {"function", "permission"},
-        ),
-        (
-            lambda b: b.notify_queue(
-                "on-upload", events=["s3:ObjectCreated:*"], queue=Queue("test-queue")
-            ),
-            {"queue_policy"},
-        ),
-        (
-            lambda b: b.notify_topic(
-                "on-upload", events=["s3:ObjectCreated:*"], topic=Topic("test-topic")
-            ),
-            {"topic_policy"},
-        ),
+        ("function", lambda: UPLOAD_HANDLER, {"function", "permission"}),
+        ("queue", lambda: Queue("test-queue"), {"queue_policy"}),
+        ("topic", lambda: Topic("test-topic"), {"topic_policy"}),
     ],
     ids=["function", "queue", "topic"],
 )
-def test_s3_bucket_resources_with_notification(pulumi_mocks, notify, created):
-    """BucketResources holds the subscription and only the resources its target needs."""
+def test_s3_bucket_resources_with_notification(pulumi_mocks, kind, make_target, created):
+    """BucketResources holds the subscription, which keeps its target and only the resources
+    that target needs."""
     bucket = Bucket("test-bucket")
-    notify(bucket)
+    target = make_target()
+    notify = getattr(bucket, f"notify_{kind}")
+    notify("on-upload", events=["s3:ObjectCreated:*"], **{kind: target})
 
     @pulumi.runtime.test
     def deploy():
@@ -1074,6 +1062,8 @@ def test_s3_bucket_resources_with_notification(pulumi_mocks, notify, created):
     assert resources.bucket_notification is not None
     [sub] = resources.subscriptions
     assert sub.name == "test-bucket-on-upload-subscription"
+    assert sub.queue is (target if kind == "queue" else None)
+    assert sub.topic is (target if kind == "topic" else None)
     fields = ("function", "permission", "queue_policy", "topic_policy")
     assert {f for f in fields if getattr(sub.resources, f) is not None} == created
     assert len(pulumi_mocks.created(R.BUCKET_NOTIFICATION)) == 1
