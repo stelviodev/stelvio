@@ -116,8 +116,9 @@ class ComponentCloudfrontAdapter(ABC):
         depends_on: list[pulumi.Resource],
     ) -> pulumi_aws.cloudfront.Function | None:
         # The root route has no prefix to strip, and its function would run on every request
-        # that reaches the default behavior (billed per invocation).
-        if self.route.is_root:
+        # that reaches the default behavior (billed per invocation). A wildcard route's
+        # function compares the `*` literally and never matches a real path.
+        if self.route.is_root or self.route.path_pattern.endswith("*"):
             return None
         return pulumi_aws.cloudfront.Function(
             context().prefix(f"{component_name}-uri-rewrite-{self.idx}"),
