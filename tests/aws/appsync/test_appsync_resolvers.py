@@ -448,8 +448,8 @@ def test_invalid_customize_key_rejected(bad_key, match_pattern, project_cwd):
 
 
 def test_resources_created_without_explicit_resources_access(pulumi_mocks, project_cwd):
-    """Data sources, resolvers, and pipe functions are created by AppSync._create_resources()
-    even when the user never calls .resources on child instances.
+    """Data sources, resolvers and pipe functions are components of their own: the deploy loop
+    creates them though the user never reads .resources on them.
     """
     api = make_api()
     posts = make_lambda_ds(api)
