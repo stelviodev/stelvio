@@ -6,12 +6,11 @@ import pulumi
 import pytest
 from pulumi_aws import appsync
 
-from stelvio.aws.appsync.constants import APPSYNC_JS_RUNTIME, NONE_PASSTHROUGH_CODE
-
 from ..conftest import assert_urn
+from ..pulumi_mocks import R, tid
 from .conftest import (
-    assert_appsync_function_inputs,
-    assert_resolver_inputs,
+    API_ID,
+    TP,
     deploy_all,
     make_api,
     make_data_source,
@@ -19,6 +18,22 @@ from .conftest import (
     make_lambda_ds,
     make_pipeline_steps,
 )
+
+JS_RUNTIME = {"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"}
+PASSTHROUGH_CODE = """\
+export function request(ctx) {
+    return { payload: ctx.args };
+}
+
+export function response(ctx) {
+    return ctx.result;
+}
+"""
+
+
+def pipe_function_id(name: str) -> str:
+    return f"fn-{tid(f'{TP}myapi-fn-{name}')}"
+
 
 # --- Unit resolvers (Lambda) ---
 
@@ -43,14 +58,28 @@ def test_lambda_resolver_creates_unit_resolver(
 
     deploy_all()
 
-    inputs = assert_resolver_inputs(
-        pulumi_mocks,
-        type=expected_type,
-        field=expected_field,
-        kind="UNIT",
-        dataSource="posts",
+    pulumi_mocks.assert_res(
+        f"myapi-{expected_type}-{expected_field}",
+        R.APPSYNC_RESOLVER,
+        {
+            "type": expected_type,
+            "field": expected_field,
+            "kind": "UNIT",
+            "dataSource": "posts",
+            "apiId": API_ID,
+        },
     )
-    assert "runtime" not in inputs
+    pulumi_mocks.assert_res_counts(
+        {
+            R.GRAPHQL_API: 1,
+            R.APPSYNC_DATA_SOURCE: 2,
+            R.APPSYNC_RESOLVER: 1,
+            R.ROLE: 2,
+            R.ROLE_POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.FUNCTION: 1,
+        }
+    )
 
 
 def test_multiple_resolvers_same_data_source(pulumi_mocks, project_cwd):
@@ -62,10 +91,8 @@ def test_multiple_resolvers_same_data_source(pulumi_mocks, project_cwd):
 
     deploy_all()
 
-    resolvers = pulumi_mocks.created_appsync_resolvers()
-    assert len(resolvers) == 3
-    fields = {r.inputs["field"] for r in resolvers}
-    assert fields == {"getPost", "listPosts", "createPost"}
+    resolvers = pulumi_mocks.created(R.APPSYNC_RESOLVER)
+    assert sorted(r.inputs["field"] for r in resolvers) == ["createPost", "getPost", "listPosts"]
 
 
 # --- Resolvers with explicit code (require JS runtime) ---
@@ -101,15 +128,20 @@ def test_resolver_with_explicit_code(ds_setup, code, expected_ds, pulumi_mocks, 
 
     from_file = code.endswith(".js")
     expected_code = Path(project_cwd, code).read_text() if from_file else code
-    inputs = assert_resolver_inputs(
-        pulumi_mocks,
-        type="Query",
-        field="getItem",
-        kind="UNIT",
-        dataSource=expected_ds,
-        code=expected_code,
+    pulumi_mocks.assert_res(
+        "myapi-Query-getItem",
+        R.APPSYNC_RESOLVER,
+        {
+            "type": "Query",
+            "field": "getItem",
+            "kind": "UNIT",
+            "dataSource": expected_ds,
+            "code": expected_code,
+            "runtime": JS_RUNTIME,
+        },
+        partial=True,
     )
-    assert inputs["runtime"]["name"] == APPSYNC_JS_RUNTIME
+    assert len(pulumi_mocks.created(R.APPSYNC_RESOLVER)) == 1
 
 
 # --- NONE data source resolvers ---
@@ -125,7 +157,7 @@ export function response(ctx) { return ctx.result; }
 
 @pytest.mark.parametrize(
     ("code", "expected_code"),
-    [(None, NONE_PASSTHROUGH_CODE), (CUSTOM_NONE_RESOLVER_CODE, CUSTOM_NONE_RESOLVER_CODE)],
+    [(None, PASSTHROUGH_CODE), (CUSTOM_NONE_RESOLVER_CODE, CUSTOM_NONE_RESOLVER_CODE)],
     ids=["passthrough", "custom"],
 )
 def test_none_resolver_code(code, expected_code, pulumi_mocks, project_cwd):
@@ -135,63 +167,113 @@ def test_none_resolver_code(code, expected_code, pulumi_mocks, project_cwd):
 
     deploy_all()
 
-    assert_resolver_inputs(
-        pulumi_mocks,
-        type="Mutation",
-        field="sendMessage",
-        kind="UNIT",
-        code=expected_code,
+    pulumi_mocks.assert_res(
+        "myapi-Mutation-sendMessage",
+        R.APPSYNC_RESOLVER,
+        {
+            "type": "Mutation",
+            "field": "sendMessage",
+            "kind": "UNIT",
+            "dataSource": "NONE",
+            "code": expected_code,
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        {R.GRAPHQL_API: 1, R.APPSYNC_DATA_SOURCE: 1, R.APPSYNC_RESOLVER: 1}
     )
 
 
 # --- Pipeline resolvers ---
 
 
-@pytest.mark.parametrize("with_ds", [True, False], ids=["standard", "none-ds"])
-def test_pipeline_resolver(with_ds, pulumi_mocks, project_cwd):
+def test_pipeline_resolver(pulumi_mocks, project_cwd):
     api = make_api()
-    steps = make_pipeline_steps(api, with_ds=with_ds)
-    api.mutation("deletePost", steps)
+    api.mutation("deletePost", make_pipeline_steps(api, with_ds=False))
 
     deploy_all()
 
-    assert_resolver_inputs(pulumi_mocks, kind="PIPELINE")
-    if with_ds:
-        fns = pulumi_mocks.created_appsync_functions()
-        assert len(fns) == 2
-        assert sorted(f.inputs["name"] for f in fns) == ["checkAuth", "doDelete"]
-    else:
-        assert_appsync_function_inputs(pulumi_mocks, "checkAuth", dataSource="NONE")
+    pulumi_mocks.assert_res(
+        "myapi-Mutation-deletePost",
+        R.APPSYNC_RESOLVER,
+        {
+            "type": "Mutation",
+            "field": "deletePost",
+            "kind": "PIPELINE",
+            "runtime": JS_RUNTIME,
+            "pipelineConfig": {"functions": [pipe_function_id("checkAuth")]},
+            "code": PASSTHROUGH_CODE,
+            "apiId": API_ID,
+        },
+    )
+    pulumi_mocks.assert_res(
+        "myapi-fn-checkAuth",
+        R.APPSYNC_FUNCTION,
+        {
+            "name": "checkAuth",
+            "code": Path(project_cwd, "resolvers/auth.js").read_text(),
+            "runtime": JS_RUNTIME,
+            "dataSource": "NONE",
+            "apiId": API_ID,
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.GRAPHQL_API: 1,
+            R.APPSYNC_DATA_SOURCE: 1,
+            R.APPSYNC_FUNCTION: 1,
+            R.APPSYNC_RESOLVER: 1,
+        }
+    )
 
 
-@pytest.mark.parametrize(
-    "code",
-    [
-        None,
-        """
+def test_pipeline_resolver_runs_steps_in_order(pulumi_mocks, project_cwd):
+    api = make_api()
+    api.mutation("deletePost", make_pipeline_steps(api))
+
+    deploy_all()
+
+    pulumi_mocks.assert_res(
+        "myapi-Mutation-deletePost",
+        R.APPSYNC_RESOLVER,
+        {
+            "kind": "PIPELINE",
+            "pipelineConfig": {
+                "functions": [pipe_function_id("checkAuth"), pipe_function_id("doDelete")]
+            },
+            "code": PASSTHROUGH_CODE,
+        },
+        partial=True,
+    )
+    functions = pulumi_mocks.created(R.APPSYNC_FUNCTION)
+    assert sorted((f.inputs["name"], f.inputs["dataSource"]) for f in functions) == [
+        ("checkAuth", "NONE"),
+        ("doDelete", "items"),
+    ]
+    assert len(pulumi_mocks.created(R.APPSYNC_RESOLVER)) == 1
+
+
+def test_pipeline_resolver_code(pulumi_mocks, project_cwd):
+    """Explicit code= replaces the pipeline's passthrough code."""
+    code = """
 export function request(ctx) {
     ctx.stash.startTime = util.time.nowISO8601();
     return {};
 }
 export function response(ctx) { return ctx.prev.result; }
-""",
-    ],
-    ids=["passthrough", "custom"],
-)
-def test_pipeline_resolver_code(code, pulumi_mocks, project_cwd):
-    """Pipeline uses passthrough code by default, or explicit code=."""
+"""
     api = make_api()
-    steps = make_pipeline_steps(api)
-    api.mutation("deletePost", steps, code=code)
-    expected = NONE_PASSTHROUGH_CODE if code is None else code
+    api.mutation("deletePost", make_pipeline_steps(api), code=code)
 
     deploy_all()
 
-    assert_resolver_inputs(
-        pulumi_mocks,
-        kind="PIPELINE",
-        code=expected,
+    pulumi_mocks.assert_res(
+        "myapi-Mutation-deletePost",
+        R.APPSYNC_RESOLVER,
+        {"kind": "PIPELINE", "code": code},
+        partial=True,
     )
+    assert len(pulumi_mocks.created(R.APPSYNC_RESOLVER)) == 1
 
 
 def test_resources_accessible_after_creation(pulumi_mocks, project_cwd):
@@ -313,11 +395,13 @@ def test_resolver_customize_applied(pulumi_mocks, project_cwd):
 
     deploy_all()
 
-    assert_resolver_inputs(
-        pulumi_mocks,
-        type="Query",
-        field="getPostCustom",
+    pulumi_mocks.assert_res(
+        "myapi-Query-getPost",
+        R.APPSYNC_RESOLVER,
+        {"type": "Query", "field": "getPostCustom"},
+        partial=True,
     )
+    assert len(pulumi_mocks.created(R.APPSYNC_RESOLVER)) == 1
 
 
 def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
@@ -332,10 +416,10 @@ def test_pipe_function_customize_applied(pulumi_mocks, project_cwd):
 
     deploy_all()
 
-    assert_appsync_function_inputs(
-        pulumi_mocks,
-        name="custom-check-auth",
+    pulumi_mocks.assert_res(
+        "myapi-fn-checkAuth", R.APPSYNC_FUNCTION, {"name": "custom-check-auth"}, partial=True
     )
+    assert len(pulumi_mocks.created(R.APPSYNC_FUNCTION)) == 1
 
 
 # --- Customize key validation ---
@@ -379,18 +463,12 @@ def test_resources_created_without_explicit_resources_access(pulumi_mocks, proje
 
     deploy_all()
 
-    ds = pulumi_mocks.created_appsync_data_sources()
-    assert any(d.inputs["name"] == "posts" for d in ds)
-
-    resolvers = pulumi_mocks.created_appsync_resolvers()
-    assert {r.inputs["field"] for r in resolvers} == {
-        "getPost",
-        "createPost",
-        "listPosts",
-    }
-
-    fns = pulumi_mocks.created_appsync_functions()
-    assert {f.inputs["name"] for f in fns} == {"validate", "fetch"}
+    data_sources = pulumi_mocks.created(R.APPSYNC_DATA_SOURCE)
+    assert sorted(d.inputs["name"] for d in data_sources) == ["NONE", "echo", "posts"]
+    resolvers = pulumi_mocks.created(R.APPSYNC_RESOLVER)
+    assert sorted(r.inputs["field"] for r in resolvers) == ["createPost", "getPost", "listPosts"]
+    functions = pulumi_mocks.created(R.APPSYNC_FUNCTION)
+    assert sorted(f.inputs["name"] for f in functions) == ["fetch", "validate"]
 
 
 # `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces
