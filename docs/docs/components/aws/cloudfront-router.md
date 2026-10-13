@@ -101,6 +101,21 @@ router.route("/api", fn, function_url={"cors": {...}})
 
 Key takeaway: When `auth` is omitted or set to `"default"`, `Router` defaults to `"iam"`.
 
+With `"iam"`, CloudFront signs every request it sends to the function. This changes two things for your clients:
+
+- A `PUT` or `POST` with a body must carry the body's SHA-256 hex digest in an `x-amz-content-sha256` header. Lambda doesn't accept unsigned payloads, so without it the request fails. See [Restrict access to an AWS Lambda function URL origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda.html).
+- Your function never sees the client's `Authorization` header, because CloudFront replaces it with its own signature. Send your own tokens in a different header.
+
+```bash
+BODY='{"key": "value"}'
+curl -X POST https://example.com/api \
+  -H "Content-Type: application/json" \
+  -H "x-amz-content-sha256: $(printf '%s' "$BODY" | shasum -a 256 | cut -d' ' -f1)" \
+  -d "$BODY"
+```
+
+`function_url={"auth": None}` drops the `x-amz-content-sha256` rule, but then anyone can call the Function URL directly, past the Router.
+
 
 #### S3 Buckets cache behavior
 
