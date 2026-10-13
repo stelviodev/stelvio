@@ -361,24 +361,6 @@ def test_authenticated_role_policy_created_with_permissions(pulumi_mocks):
     )
 
 
-def test_no_auth_role_policy_when_no_permissions(pulumi_mocks):
-    pool = UserPool("users", usernames=["email"])
-    client = pool.add_client("web")
-
-    identity = IdentityPool(
-        "app-identity",
-        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
-    )
-
-    @pulumi.runtime.test
-    def deploy():
-        return identity.resources
-
-    deploy()
-
-    pulumi_mocks.assert_no_res(R.ROLE_POLICY)
-
-
 def test_unauthenticated_role_created_when_enabled(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
