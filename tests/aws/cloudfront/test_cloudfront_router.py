@@ -1,3 +1,4 @@
+import re
 from unittest.mock import Mock, patch
 
 import pytest
@@ -107,6 +108,19 @@ def test_add_route_rejects_duplicate_path_pattern():
 
     with pytest.raises(ValueError, match="Route for path pattern /static already exists"):
         router._add_route(Route(path_pattern="/static", component=bucket2))
+
+
+@pytest.mark.parametrize(("first", "second"), [("/", "/*"), ("/*", "/"), ("", "/")])
+def test_route_rejects_a_second_root_route(first, second):
+    router = Router(name="test-router")
+    router.route(first, Mock(spec=Bucket))
+
+    with pytest.raises(
+        ValueError,
+        match=rf"^Route for path pattern {re.escape(repr(second))} clashes with "
+        rf"{re.escape(repr(first))}: both are the root route\.$",
+    ):
+        router.route(second, Mock(spec=Bucket))
 
 
 def test_add_route_rejects_duplicate_origin():

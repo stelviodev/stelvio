@@ -239,6 +239,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
+            if existing_route.is_root and route.is_root:
+                raise ValueError(
+                    f"Route for path pattern {route.path_pattern!r} clashes with "
+                    f"{existing_route.path_pattern!r}: both are the root route."
+                )
             if existing_route.component == route.component:
                 raise ValueError(f"Route for origin {route.component} already exists.")
 
