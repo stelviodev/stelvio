@@ -10,7 +10,7 @@
 
 ### Bug Fixes
 
-- **Router routes on `/` work.** An API, Function or URL there took only GET and lost the query string; a Bucket there wasn't cached and now serves `index.html` for `/`. `/api` now reaches the API's `/` route, not the root route. Adding a route no longer leaves an HttpApi's headers on a RestApi route (403).
+- **Router routes work on `/`, on `/api` without a slash, and for HttpApi.** On `/` an API took only GET and lost its query string, `/api` went to the root route, and HttpApi routes got 403. A Bucket on `/` now serves `index.html` and is cached for a day like other bucket routes: [invalidate](components/aws/cloudfront-router.md#s3-buckets-cache-behavior) after an upload.
 
 ## 0.10.1b7 (2026-10-09)
 
