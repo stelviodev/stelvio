@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import math
 import os
 import re
 import tempfile
@@ -61,6 +62,7 @@ _AWS_IDENTIFIER_MAX_LENGTH = 63
 _DOCDB_GENERATED_SUFFIX_LENGTH = 26
 _MIN_ISOLATED_SUBNETS = 2
 _MAX_INSTANCES = 16
+_MAX_SERVERLESS_CAPACITY = 256
 _MAX_SECRET_ROTATION_DAYS = 1000
 _MIN_BACKUP_RETENTION_DAYS = 1
 _MAX_BACKUP_RETENTION_DAYS = 35
@@ -101,6 +103,13 @@ class DocumentDbCustomizationDict(TypedDict, total=False):
     secret_rotation: Customization[SecretRotationArgs]
 
 
+class DocumentDbServerlessScalingConfig(TypedDict):
+    """Per-instance serverless capacity range in DocumentDB capacity units (DCUs)."""
+
+    min_capacity: float
+    max_capacity: float
+
+
 @dataclass(frozen=True, kw_only=True)
 class DocumentDbConfig:
     """DocumentDB cluster configuration.
@@ -109,7 +118,10 @@ class DocumentDbConfig:
         vpc: Existing Vpc whose isolated subnets host the cluster.
         instances: Number of cluster instances (default: 1).
         instance_class: Instance class with or without the ``db.`` prefix. None
-            uses ``t3.medium``.
+            uses ``t3.medium``. Use ``serverless`` or ``db.serverless`` for serverless.
+        serverless_scaling: Per-instance minimum and maximum DCUs. Serverless
+            instances default to 0.5-16 DCUs when omitted. May also be set on
+            provisioned clusters to prepare for serverless instances.
         engine: Engine version ``5.0`` or ``8.0`` (default: ``8.0``).
         deletion_protection: Block cluster deletion until flipped off. None uses
             the cluster default of False.
@@ -125,6 +137,7 @@ class DocumentDbConfig:
     vpc: Vpc
     instances: int = 1
     instance_class: str | None = None
+    serverless_scaling: DocumentDbServerlessScalingConfig | None = None
     engine: Literal["5.0", "8.0"] = "8.0"
     deletion_protection: bool | None = None
     backup_retention_period: int | None = None
@@ -138,6 +151,10 @@ class DocumentDbConfig:
         if self.instance_class is not None:
             object.__setattr__(
                 self, "instance_class", _normalize_instance_class(self.instance_class)
+            )
+        if self.serverless_scaling is not None:
+            object.__setattr__(
+                self, "serverless_scaling", _validate_serverless_scaling(self.serverless_scaling)
             )
         _validate_engine(self.engine)
         if self.deletion_protection is not None:
@@ -161,6 +178,7 @@ class DocumentDbConfigDict(TypedDict, total=False):
     vpc: Vpc
     instances: int
     instance_class: str | None
+    serverless_scaling: DocumentDbServerlessScalingConfig | None
     engine: Literal["5.0", "8.0"]
     deletion_protection: bool | None
     backup_retention_period: int | None
@@ -277,6 +295,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             {
                 "cluster_identifier_prefix": _identifier_prefix(self.name, suffix="-"),
                 "engine_version": _ENGINE_VERSIONS[self.config.engine],
+                "serverless_v2_scaling_configuration": self.config.serverless_scaling,
                 "db_subnet_group_name": subnet_group.name,
                 "vpc_security_group_ids": [security_group.id],
                 "db_cluster_parameter_group_name": parameter_group.name,
@@ -292,6 +311,16 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 "tags": {"Name": cluster_name},
             },
             default_props={
+                **(
+                    {
+                        "serverless_v2_scaling_configuration": {
+                            "min_capacity": 0.5,
+                            "max_capacity": 16,
+                        }
+                    }
+                    if self.config.instance_class == "serverless"
+                    else {}
+                ),
                 "engine": "docdb",
                 "master_username": "stelvio",
                 "manage_master_user_password": True,
@@ -327,6 +356,11 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # The provider's conflict check treats even False as a configured value.
             # Omit it to disable management without conflicting with the password.
             cluster_props.pop("manage_master_user_password")
+        ignore_changes = ["availability_zones"]
+        # AWS cannot remove the scaling range in place. Retain the previous range
+        # when no range is supplied so returning to provisioned instances is safe.
+        if cluster_props.get("serverless_v2_scaling_configuration") is None:
+            ignore_changes.append("serverless_v2_scaling_configuration")
         cluster = Cluster(
             cluster_name,
             **cluster_props,
@@ -335,7 +369,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # the pad so a default 2-AZ Vpc does not recreate the database.
             opts=ResourceOptions.merge(
                 self._resource_opts(),
-                ResourceOptions(ignore_changes=["availability_zones"]),
+                ResourceOptions(ignore_changes=ignore_changes),
             ),
         )
         # After the cluster so from_port/to_port follow cluster.port (including customize).
@@ -476,12 +510,35 @@ def _normalize_instance_class(instance_class: str) -> str:
     if not instance_class:
         raise ValueError(f"`instance_class` must be a non-empty string, got {instance_class!r}")
     normalized = instance_class.removeprefix("db.")
-    if not _INSTANCE_CLASS_RE.fullmatch(normalized):
+    if normalized != "serverless" and not _INSTANCE_CLASS_RE.fullmatch(normalized):
         raise ValueError(
             f"`instance_class` must be family.size (e.g. 't3.medium' or 'db.t3.medium'), "
             f"got {instance_class!r}"
         )
     return normalized
+
+
+def _validate_serverless_scaling(value: object) -> DocumentDbServerlessScalingConfig:
+    if not isinstance(value, dict):
+        raise TypeError("`serverless_scaling` must be a dict with min_capacity and max_capacity")
+    if set(value) != {"min_capacity", "max_capacity"}:
+        raise ValueError("`serverless_scaling` must contain exactly min_capacity and max_capacity")
+    for key, minimum in (("min_capacity", 0.5), ("max_capacity", 1)):
+        capacity = value[key]
+        if isinstance(capacity, bool) or not isinstance(capacity, (int, float)):
+            raise TypeError(f"`serverless_scaling.{key}` must be a number")
+        if (
+            not minimum <= capacity <= _MAX_SERVERLESS_CAPACITY
+            or not math.isfinite(capacity)
+            or capacity % 0.5
+        ):
+            raise ValueError(
+                f"`serverless_scaling.{key}` must be a finite multiple of 0.5 "
+                f"between {minimum} and {_MAX_SERVERLESS_CAPACITY}"
+            )
+    if value["min_capacity"] > value["max_capacity"]:
+        raise ValueError("`serverless_scaling.min_capacity` must not exceed max_capacity")
+    return {"min_capacity": value["min_capacity"], "max_capacity": value["max_capacity"]}
 
 
 def _validate_engine(engine: str) -> None:

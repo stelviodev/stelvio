@@ -34,6 +34,70 @@ That's a one-instance cluster on engine `8.0`. You need a `Vpc` with at least
 two availability zones. The default `Vpc` already has that. `Vpc(..., az=1)`
 raises `ValueError` when you construct `DocumentDb`.
 
+### Serverless capacity
+
+Set `instance_class="serverless"` (or `"db.serverless"`) to create serverless
+instances. With no range supplied, each instance scales between **0.5 and 16
+DocumentDB capacity units (DCUs)**:
+
+```python
+db = DocumentDb("todos", vpc=vpc, instance_class="serverless")
+```
+
+Set both bounds to choose a different range:
+
+```python
+db = DocumentDb(
+    "todos",
+    vpc=vpc,
+    instance_class="serverless",
+    instances=2,
+    serverless_scaling={"min_capacity": 1, "max_capacity": 8},
+)
+```
+
+`min_capacity` must be between 0.5 and 256; `max_capacity` must be between 1
+and 256. Both accept increments of 0.5, and the minimum must not exceed the
+maximum. Equal bounds are allowed and hold capacity constant. A supplied
+`serverless_scaling` dictionary must contain exactly these two keys.
+
+!!! warning "Capacity changes can require instance restarts"
+    Deploying a new range updates the cluster configuration. Reboot every
+    serverless instance after any `max_capacity` change, or when `min_capacity`
+    changes from 1 or less to greater than 1, or the reverse, for the new limits
+    to take effect. Stelvio does not perform these reboots. Plan a maintenance
+    restart and follow
+    [AWS's restart guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-managing.html)
+    to reduce writer unavailability.
+
+`instances` still controls the number of instances. The range applies to
+**each serverless instance**, so two instances with a maximum of 8 DCUs can
+consume up to 16 DCUs together. Serverless retains active capacity at its
+minimum; it does not scale to zero or bill per request. Storage, I/O, and any
+Secrets Manager or network charges still apply. See
+[AWS serverless scaling guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-scaling-config.html).
+
+Both engine `5.0` and `8.0` support serverless. Engine `5.0` requires a recent
+patch, and availability varies by region. Check
+[AWS requirements](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-limitations.html)
+before deployment. Stelvio does not query AWS availability during construction.
+
+You can set `serverless_scaling` on a provisioned cluster to prepare for
+serverless instances, including mixed instance classes selected through an
+`instance` customization callable. The automatic 0.5–16 range is a default:
+app-wide dictionary customization can replace it. An explicit constructor range
+takes precedence over app-wide dictionary defaults; callable and component-level
+customizations can override it. If you select `db.serverless` only through
+`customize`, also supply the scaling range through `serverless_scaling` or the
+cluster's `serverless_v2_scaling_configuration` customization.
+
+When returning to a provisioned `instance_class`, omitting `serverless_scaling`
+preserves the cluster's existing range. A scaling range can remain on a
+provisioned cluster. Removing that configuration through the AWS provider
+recreates the cluster, so Stelvio keeps it to avoid replacing the database
+during the class conversion. Explicit constructor or customization ranges
+remain managed, including on provisioned clusters.
+
 ### Instance class capacity
 
 !!! warning "Capacity is per zone, and it changes"
@@ -59,7 +123,7 @@ digits, and single hyphens, with no trailing hyphen. Invalid names raise
     care about, set `deletion_protection=True` and keep a snapshot through
     [Customization](#customization).
 
-Elastic clusters, serverless, global clusters, and snapshot restore are not
+Elastic clusters, global clusters, and snapshot restore are not
 supported. `stlv dev` access to the cluster is not supported yet.
 
 ### Configuration
@@ -86,7 +150,8 @@ Available configuration options:
 |--------|---------|-------------|
 | `vpc` | (required) | Existing `Vpc`. The cluster uses its isolated subnets. |
 | `instances` | `1` | Number of cluster instances (1 to 16). Extra instances are replicas. |
-| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t3.medium"` or `"db.t3.medium"`). `None` uses `t3.medium`. AWS does not offer every class in every availability zone. See [Instance class capacity](#instance-class-capacity). |
+| `instance_class` | `None` | Provisioned instance size, with or without the `db.` prefix (`"t3.medium"` or `"db.t3.medium"`), or `"serverless"` / `"db.serverless"`. `None` uses `t3.medium`. See [Serverless capacity](#serverless-capacity) and [Instance class capacity](#instance-class-capacity). |
+| `serverless_scaling` | `None` | Dict with `min_capacity` and `max_capacity` in DCUs. Serverless defaults to 0.5–16 DCUs; provisioned clusters retain any existing range when omitted. See [Serverless capacity](#serverless-capacity) for limits and restart requirements. |
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
