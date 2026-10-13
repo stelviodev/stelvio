@@ -10,7 +10,7 @@
 
 ### Bug Fixes
 
-- **Router routes on `/` work.** An API, Function or URL there took only GET and lost the query string; a Bucket there wasn't cached and now serves `index.html` for `/`. `/api` now reaches the API's `/` route, not the root route.
+- **Router routes on `/` work.** An API, Function or URL there took only GET and lost the query string; a Bucket there wasn't cached and now serves `index.html` for `/`. `/api` now reaches the API's `/` route, not the root route. Adding a route no longer leaves an HttpApi's headers on a RestApi route (403).
 
 ## 0.10.1b7 (2026-10-09)
 

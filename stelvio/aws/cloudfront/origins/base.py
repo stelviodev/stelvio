@@ -76,9 +76,10 @@ class ComponentCloudfrontAdapter(ABC):
         forwarded_values = {
             "query_string": True,
             "cookies": {"forward": "none"},
+            # Never left out: the provider keeps a missing `headers` (Optional + Computed), so a
+            # behavior shifted into an HttpApi's list slot would keep forwarding Host (403).
+            "headers": forwarded_headers or [],
         }
-        if forwarded_headers is not None:
-            forwarded_values["headers"] = forwarded_headers
 
         return self._cache_behaviors(
             {

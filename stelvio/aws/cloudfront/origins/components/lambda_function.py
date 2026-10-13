@@ -3,8 +3,6 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import (
-    API_ALLOWED_METHODS,
-    API_CACHED_METHODS,
     ComponentCloudfrontAdapter,
     Customizer,
     _as_is,
@@ -104,23 +102,8 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             component_name=self.function.name, depends_on=[self.function.resources.function]
         )
 
-        cache_behaviors = self._cache_behaviors(
-            {
-                "allowed_methods": API_ALLOWED_METHODS,
-                "cached_methods": API_CACHED_METHODS,
-                "target_origin_id": origin_dict["origin_id"],
-                "compress": True,
-                "viewer_protocol_policy": "redirect-to-https",
-                "forwarded_values": {
-                    "query_string": True,  # Lambda functions often use query parameters
-                    "cookies": {"forward": "none"},
-                },
-                # Don't cache Lambda responses by default
-                "min_ttl": 0,
-                "default_ttl": 0,
-                "max_ttl": 0,
-                "function_associations": self._function_associations(cf_function),
-            }
+        cache_behaviors = self._api_cache_behaviors(
+            origin_id=origin_dict["origin_id"], cf_function=cf_function
         )
 
         return RouteOriginConfig(

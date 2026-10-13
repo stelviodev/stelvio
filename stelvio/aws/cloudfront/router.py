@@ -134,6 +134,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 "forwarded_values": {
                     "query_string": False,
                     "cookies": {"forward": "none"},
+                    # Clears a removed root route's headers (the provider keeps a missing one).
+                    "headers": [],
                 },
                 "min_ttl": 0,
                 "default_ttl": 0,  # Don't cache 404 responses
