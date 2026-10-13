@@ -71,7 +71,7 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
 
 !!! note "Path matching rules"
     - Longer, more specific paths take priority over shorter ones
-    - The root path `/` acts as a catch-all for unmatched requests
+    - The root path `/` acts as a catch-all for unmatched requests. `/*` is the same route, so a Router accepts only one of them
     - If no root path is defined, unmatched requests return a 404 response
 
 !!! warning "Routes must be defined before resource creation"

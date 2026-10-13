@@ -25,4 +25,4 @@ class Route:
 
     @property
     def is_root(self) -> bool:
-        return self.path_pattern == "/"
+        return self.path_pattern in ("", "/", "/*")

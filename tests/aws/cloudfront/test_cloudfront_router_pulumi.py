@@ -273,17 +273,19 @@ API_RESOURCES = {
         ),
     ],
 )
+# "" was a working catch-all before `/` was fixed; it stays one.
+@mark.parametrize("path", ["/", "/*", ""])
 @mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
 def test_root_route_behavior_is_the_default_behavior(
-    pulumi_mocks, make_origin, default_behavior, counts
+    pulumi_mocks, path, make_origin, default_behavior, counts
 ):
-    """The route's own methods, forwarding and caching serve every path no other route
-    matches; no ordered behavior, no 404 function, no prefix-strip function."""
+    """The root used to get a fixed GET-only template, so a POST to an API on `/` got
+    CloudFront's 403. No prefix-strip function: it would run, and bill, on every request."""
+    router = Router("router")
+    router.route(path, make_origin())
 
     @pulumi.runtime.test
     def deploy():
-        router = Router("router")
-        router.route("/", make_origin())
         return router.resources
 
     deploy()
@@ -291,6 +293,7 @@ def test_root_route_behavior_is_the_default_behavior(
     distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
     assert distribution.inputs["defaultCacheBehavior"] == default_behavior
     assert "orderedCacheBehaviors" not in distribution.inputs
+    assert router.resources.cloudfront_functions == []
     pulumi_mocks.assert_res_counts(counts)
 
 
@@ -347,6 +350,37 @@ def test_root_route_next_to_other_routes(pulumi_mocks):
             R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
             R.ORIGIN_ACCESS_CONTROL: 1,
             R.BUCKET_POLICY: 1,
+        }
+    )
+
+
+def test_slash_star_root_leaves_same_length_routes_reachable(pulumi_mocks):
+    """`/x` sorts level with `/*` (same length); as an ordered behavior `/*` would sit first
+    and catch `/x` too."""
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router("router")
+        router.route("/*", Bucket("site"))
+        router.route("/x", Bucket("x"))
+        return router.resources
+
+    deploy()
+
+    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
+    default_behavior = distribution.inputs["defaultCacheBehavior"]
+    assert default_behavior["targetOriginId"] == f"arn:aws:s3:::{tn(TP + 'site')}"
+    [x_behavior] = distribution.inputs["orderedCacheBehaviors"]
+    assert x_behavior["pathPattern"] == "/x/*"
+    assert x_behavior["targetOriginId"] == f"arn:aws:s3:::{tn(TP + 'x')}"
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 2,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 2,
+            R.ORIGIN_ACCESS_CONTROL: 2,
+            R.BUCKET_POLICY: 2,
+            R.CLOUDFRONT_FUNCTION: 1,  # /x's prefix strip
+            R.DISTRIBUTION: 1,
         }
     )
 
