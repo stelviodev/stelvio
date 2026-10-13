@@ -12,8 +12,8 @@ from stelvio.component import Component
 class RouteOriginConfig:
     origin_access_controls: pulumi_aws.cloudfront.OriginAccessControl | None
     origins: dict
-    ordered_cache_behaviors: dict | list[dict] | None
-    cloudfront_functions: pulumi_aws.cloudfront.Function
+    ordered_cache_behaviors: list[dict]
+    cloudfront_functions: pulumi_aws.cloudfront.Function | None
 
 
 @final
@@ -22,3 +22,7 @@ class Route:
     path_pattern: str
     component: Component | str
     function_url_config: FunctionUrlConfig | FunctionUrlConfigDict | None = None
+
+    @property
+    def is_root(self) -> bool:
+        return self.path_pattern == "/"

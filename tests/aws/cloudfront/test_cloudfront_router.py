@@ -212,7 +212,7 @@ def test_route_rejects_after_resources_created(mock_registry, mock_context):
     mock_adapter = Mock()
     mock_origin_config = Mock()
     mock_origin_config.origins = {"origin_id": "test-origin"}
-    mock_origin_config.ordered_cache_behaviors = {"path_pattern": "/static/*"}
+    mock_origin_config.ordered_cache_behaviors = [{"path_pattern": "/static/*"}]
     mock_origin_config.origin_access_controls = Mock()
     mock_origin_config.cloudfront_functions = Mock()
     mock_adapter.get_origin_config.return_value = mock_origin_config
@@ -312,7 +312,7 @@ def test_create_resources_with_routes(mock_registry, mock_context):
         mock_adapter = Mock()
         mock_origin_config = Mock()
         mock_origin_config.origins = {"origin_id": "test-origin"}
-        mock_origin_config.ordered_cache_behaviors = {"path_pattern": "/static/*"}
+        mock_origin_config.ordered_cache_behaviors = [{"path_pattern": "/static/*"}]
         mock_origin_config.origin_access_controls = Mock()
         mock_origin_config.cloudfront_functions = Mock()
         mock_adapter.get_origin_config.return_value = mock_origin_config

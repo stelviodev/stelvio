@@ -97,11 +97,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         route_configs = [adapter.get_origin_config() for adapter in adapters]
 
-        root_path_idx = next(
-            (idx for idx, route in enumerate(self.routes) if route.path_pattern == "/"), None
-        )
+        root_idx = next((idx for idx, route in enumerate(self.routes) if route.is_root), None)
 
-        if root_path_idx is None:
+        if root_idx is None:
             # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
             default_404_function_code = default_404_function_js()
 
@@ -145,31 +143,18 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         else:
             default_404_function = None
-
+            # The root route's own behavior, so it keeps its methods, forwarding and caching.
+            [root_behavior] = route_configs[root_idx].ordered_cache_behaviors
             default_cache_behavior = {
-                "allowed_methods": ["GET", "HEAD", "OPTIONS"],
-                "cached_methods": ["GET", "HEAD"],
-                # Use the root path origin for default cache behavior
-                "target_origin_id": route_configs[root_path_idx].origins["origin_id"],
-                "compress": True,
-                "viewer_protocol_policy": "redirect-to-https",
-                "forwarded_values": {
-                    "query_string": False,
-                    "cookies": {"forward": "none"},
-                },
-                "min_ttl": 0,
-                "default_ttl": 0,  # Don't cache 404 responses
-                "max_ttl": 0,
-                "function_associations": [],
+                k: v for k, v in root_behavior.items() if k != "path_pattern"
             }
 
-        ordered_cache_behaviors = []
-        for rc in route_configs:
-            if rc.ordered_cache_behaviors:
-                if isinstance(rc.ordered_cache_behaviors, list):
-                    ordered_cache_behaviors.extend(rc.ordered_cache_behaviors)
-                else:
-                    ordered_cache_behaviors.append(rc.ordered_cache_behaviors)
+        ordered_cache_behaviors = [
+            behavior
+            for idx, rc in enumerate(route_configs)
+            if idx != root_idx
+            for behavior in rc.ordered_cache_behaviors
+        ]
 
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
@@ -240,7 +225,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 if rc.origin_access_controls is not None
             ],
             access_policies=access_policies,
-            cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
+            cloudfront_functions=[
+                rc.cloudfront_functions
+                for rc in route_configs
+                if rc.cloudfront_functions is not None
+            ]
             + ([default_404_function] if default_404_function else []),
             acm_validated_domain=acm_validated_domain,
             record=record,

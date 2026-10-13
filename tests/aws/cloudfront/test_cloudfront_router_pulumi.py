@@ -1,6 +1,8 @@
 import pulumi
-import pytest
+from pytest import mark, param, raises
 
+from stelvio.aws.api_gateway import HttpApi, RestApi
+from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.function import Function
 from stelvio.aws.function import function as function_module
@@ -109,40 +111,244 @@ def test_create_resources_no_routes_raises_error(pulumi_mocks):
     """Test that creating resources with no routes raises ValueError."""
     router = Router(name="test-router")
 
-    with pytest.raises(ValueError, match="must have at least one route"):
+    with raises(ValueError, match="must have at least one route"):
         router._create_resources()
 
 
-def test_create_resources_with_root_path(pulumi_mocks):
-    """A '/' route points the default cache behavior at its origin; no 404 function."""
-    bucket = Bucket("test-bucket")
-    router = Router(name="test-router")
-    router.route("/", bucket)
+def _rest_api():
+    api = RestApi("api")
+    api.route("GET", "/", "functions/simple.handler")
+    return api
+
+
+def _http_api():
+    api = HttpApi("api")
+    api.route("GET", "/", "functions/simple.handler")
+    return api
+
+
+API_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+API_RESOURCES = {
+    R.API_ACCOUNT: 2,
+    R.LOG_GROUP: 1,
+    R.ROLE: 2,
+    R.ROLE_POLICY_ATTACHMENT: 1,
+    R.FUNCTION: 1,
+    R.LAMBDA_PERMISSION: 1,
+    R.DISTRIBUTION: 1,
+}
+
+
+@mark.parametrize(
+    ("make_origin", "default_behavior", "counts"),
+    [
+        param(
+            lambda: Bucket("site"),
+            {
+                "targetOriginId": f"arn:aws:s3:::{tn(TP + 'site')}",
+                "allowedMethods": ["GET", "HEAD", "OPTIONS"],
+                "cachedMethods": ["GET", "HEAD"],
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "forwardedValues": {
+                    "queryString": False,
+                    "cookies": {"forward": "none"},
+                    "headers": ["If-Modified-Since"],
+                },
+                "minTtl": 0,
+                "defaultTtl": 86400,
+                "maxTtl": 31536000,
+                "functionAssociations": [],
+            },
+            {
+                R.BUCKET: 1,
+                R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+                R.ORIGIN_ACCESS_CONTROL: 1,
+                R.BUCKET_POLICY: 1,
+                R.DISTRIBUTION: 1,
+            },
+            id="bucket",
+        ),
+        param(
+            _rest_api,
+            {
+                "targetOriginId": tid(TP + "api"),
+                "allowedMethods": API_METHODS,
+                "cachedMethods": ["GET", "HEAD"],
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "forwardedValues": {"queryString": True, "cookies": {"forward": "none"}},
+                "minTtl": 0,
+                "defaultTtl": 0,
+                "maxTtl": 0,
+                "functionAssociations": [],
+            },
+            API_RESOURCES
+            | {
+                R.REST_API: 1,
+                R.API_METHOD: 1,
+                R.API_INTEGRATION: 1,
+                R.API_DEPLOYMENT: 1,
+                R.API_STAGE: 1,
+            },
+            id="rest-api",
+        ),
+        param(
+            _http_api,
+            {
+                "targetOriginId": tid(TP + "api"),
+                "allowedMethods": API_METHODS,
+                "cachedMethods": ["GET", "HEAD"],
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "forwardedValues": {
+                    "queryString": True,
+                    "cookies": {"forward": "none"},
+                    "headers": ["*"],
+                },
+                "minTtl": 0,
+                "defaultTtl": 0,
+                "maxTtl": 0,
+                "functionAssociations": [],
+            },
+            API_RESOURCES
+            | {
+                R.HTTP_API: 1,
+                R.HTTP_API_INTEGRATION: 1,
+                R.HTTP_API_ROUTE: 1,
+                R.HTTP_API_STAGE: 1,
+            },
+            id="http-api",
+        ),
+        param(
+            lambda: Function("fn", handler="functions/simple.handler"),
+            {
+                "targetOriginId": tn(TP + "fn"),
+                "allowedMethods": API_METHODS,
+                "cachedMethods": ["GET", "HEAD"],
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "forwardedValues": {"queryString": True, "cookies": {"forward": "none"}},
+                "minTtl": 0,
+                "defaultTtl": 0,
+                "maxTtl": 0,
+                "functionAssociations": [],
+            },
+            {
+                R.FUNCTION: 1,
+                R.ROLE: 1,
+                R.ROLE_POLICY_ATTACHMENT: 1,
+                R.FUNCTION_URL: 1,
+                R.ORIGIN_ACCESS_CONTROL: 1,
+                R.LAMBDA_PERMISSION: 1,
+                R.DISTRIBUTION: 1,
+            },
+            id="function",
+        ),
+        param(
+            lambda: "https://example.com",
+            {
+                "targetOriginId": TP + "url-origin-0",
+                "allowedMethods": API_METHODS,
+                "cachedMethods": ["GET", "HEAD"],
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "forwardedValues": {
+                    "queryString": True,
+                    "cookies": {"forward": "all"},
+                    "headers": ["*"],
+                },
+                "minTtl": 0,
+                "defaultTtl": 0,
+                "maxTtl": 0,
+                "functionAssociations": [],
+                # The mocks leave the Lambda@Edge `qualified_arn` unset, so no `lambdaArn`.
+                "lambdaFunctionAssociations": [
+                    {"eventType": "origin-request", "includeBody": True}
+                ],
+            },
+            # The Lambda@Edge Host rewrite: function, role, policy attachment
+            {R.FUNCTION: 1, R.ROLE: 1, R.ROLE_POLICY_ATTACHMENT: 1, R.DISTRIBUTION: 1},
+            id="url",
+        ),
+    ],
+)
+@mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
+def test_root_route_behavior_is_the_default_behavior(
+    pulumi_mocks, make_origin, default_behavior, counts
+):
+    """The route's own methods, forwarding and caching serve every path no other route
+    matches; no ordered behavior, no 404 function, no prefix-strip function."""
 
     @pulumi.runtime.test
     def deploy():
-        return [bucket.resources, router.resources]
+        router = Router("router")
+        router.route("/", make_origin())
+        return router.resources
 
     deploy()
 
-    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
-    # A fixed template, not the bucket route's own behavior: that one lands at `//*`, which no
-    # request path matches.
+    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
+    assert distribution.inputs["defaultCacheBehavior"] == default_behavior
+    assert "orderedCacheBehaviors" not in distribution.inputs
+    pulumi_mocks.assert_res_counts(counts)
+
+
+@mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
+def test_root_route_next_to_other_routes(pulumi_mocks):
+    """The root route takes the default behavior; the other routes keep theirs in order."""
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router("router")
+        router.route("/", Bucket("site"))
+        router.route("/api", _rest_api())
+        return router.resources
+
+    deploy()
+
+    # Routes are indexed longest first: /api 0, / 1.
+    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
     assert distribution.inputs["defaultCacheBehavior"] == {
-        "targetOriginId": f"arn:aws:s3:::{tn(TP + 'test-bucket')}",
+        "targetOriginId": f"arn:aws:s3:::{tn(TP + 'site')}",
         "allowedMethods": ["GET", "HEAD", "OPTIONS"],
         "cachedMethods": ["GET", "HEAD"],
         "compress": True,
         "viewerProtocolPolicy": "redirect-to-https",
-        "forwardedValues": {"queryString": False, "cookies": {"forward": "none"}},
+        "forwardedValues": {
+            "queryString": False,
+            "cookies": {"forward": "none"},
+            "headers": ["If-Modified-Since"],
+        },
         "minTtl": 0,
-        "defaultTtl": 0,
-        "maxTtl": 0,
+        "defaultTtl": 86400,
+        "maxTtl": 31536000,
         "functionAssociations": [],
     }
-    assert [b["pathPattern"] for b in distribution.inputs["orderedCacheBehaviors"]] == ["//*"]
-    # When root path exists, there should be no default 404 function
-    assert pulumi_mocks.created(R.CLOUDFRONT_FUNCTION, TP + "test-router-default-404") == []
+    [api_behavior] = distribution.inputs["orderedCacheBehaviors"]
+    assert api_behavior["pathPattern"] == "/api/*"
+    assert api_behavior["targetOriginId"] == tid(TP + "api")
+    pulumi_mocks.assert_res(
+        "api-uri-rewrite-0",
+        R.CLOUDFRONT_FUNCTION,
+        {"code": strip_path_pattern_function_js("/api")},
+        partial=True,
+    )
+    pulumi_mocks.assert_res_counts(
+        API_RESOURCES
+        | {
+            R.REST_API: 1,
+            R.API_METHOD: 1,
+            R.API_INTEGRATION: 1,
+            R.API_DEPLOYMENT: 1,
+            R.API_STAGE: 1,
+            R.CLOUDFRONT_FUNCTION: 1,
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.BUCKET_POLICY: 1,
+        }
+    )
 
 
 def test_create_resources_with_multiple_routes(pulumi_mocks):
@@ -167,25 +373,6 @@ def test_create_resources_with_multiple_routes(pulumi_mocks):
     ]
 
 
-def test_create_resources_with_url_origin(pulumi_mocks):
-    """Test that Router creates proper resources for URL origins."""
-    router = Router(name="test-router")
-    router.route("/", "https://example.com")
-
-    @pulumi.runtime.test
-    def deploy():
-        return router.resources
-
-    deploy()
-
-    assert len(pulumi_mocks.created(R.DISTRIBUTION)) == 1
-    # URL origins need neither an OAC nor a bucket policy
-    pulumi_mocks.assert_no_res(R.ORIGIN_ACCESS_CONTROL, R.BUCKET_POLICY)
-    pulumi_mocks.assert_res(
-        "url-origin-host-rewrite-0", R.FUNCTION, {"runtime": "nodejs22.x"}, partial=True
-    )
-
-
 def test_create_resources_custom_domain_no_dns_raises_error():
     """Test that custom_domain without DNS provider raises DnsProviderNotConfiguredError.
 
@@ -198,7 +385,7 @@ def test_create_resources_custom_domain_no_dns_raises_error():
     router.route("/", bucket)
 
     # Should raise DnsProviderNotConfiguredError because default context has no DNS
-    with pytest.raises(DnsProviderNotConfiguredError, match="DNS not configured"):
+    with raises(DnsProviderNotConfiguredError, match="DNS not configured"):
         router._create_resources()
 
 
@@ -501,7 +688,7 @@ def test_router_rejects_a_function_url_config_of_the_wrong_type(pulumi_mocks, pr
         "/api", Function("api-fn", handler="functions/simple.handler"), function_url="bad"
     )
 
-    with pytest.raises(
+    with raises(
         TypeError, match=r"^Invalid config type: expected FunctionUrlConfig or dict, got str$"
     ):
         _ = router.resources

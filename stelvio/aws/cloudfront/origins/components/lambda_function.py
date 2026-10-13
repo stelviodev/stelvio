@@ -116,18 +116,13 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             "min_ttl": 0,
             "default_ttl": 0,
             "max_ttl": 0,
-            "function_associations": [
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": cf_function.arn,
-                }
-            ],
+            "function_associations": self._function_associations(cf_function),
         }
 
-        if self.route.path_pattern.endswith("*"):
+        if self.route.is_root or self.route.path_pattern.endswith("*"):
             cache_behavior = cache_behavior_template.copy()
-            cache_behavior["path_pattern"] = self.route.path_pattern
-            ordered_cache_behaviors = cache_behavior
+            cache_behavior["path_pattern"] = self._path_pattern()
+            ordered_cache_behaviors = [cache_behavior]
         else:
             cb1 = cache_behavior_template.copy()
             cb1["path_pattern"] = self.route.path_pattern
