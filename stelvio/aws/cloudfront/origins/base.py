@@ -80,9 +80,8 @@ class ComponentCloudfrontAdapter(ABC):
         if forwarded_headers is not None:
             forwarded_values["headers"] = forwarded_headers
 
-        return [
+        return self._cache_behaviors(
             {
-                "path_pattern": self._path_pattern(),
                 "allowed_methods": API_ALLOWED_METHODS,
                 "cached_methods": API_CACHED_METHODS,
                 "target_origin_id": origin_id,
@@ -94,7 +93,15 @@ class ComponentCloudfrontAdapter(ABC):
                 "max_ttl": 0,
                 "function_associations": self._function_associations(cf_function),
             }
-        ]
+        )
+
+    def _cache_behaviors(self, behavior: dict) -> list[dict]:
+        """`behavior` for the exact path and for everything under it: `/api/*` alone sends
+        `/api` to the default behavior. Root and wildcard routes have no exact path."""
+        patterns = [self._path_pattern()]
+        if not (self.route.is_root or self.route.path_pattern.endswith("*")):
+            patterns.insert(0, self.route.path_pattern)
+        return [{"path_pattern": pattern, **behavior} for pattern in patterns]
 
     @staticmethod
     def _function_associations(cf_function: pulumi_aws.cloudfront.Function | None) -> list[dict]:

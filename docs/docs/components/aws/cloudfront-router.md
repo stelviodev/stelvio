@@ -51,7 +51,7 @@ api.route("GET", "/", "functions/hello.handler")
 The reason for this is that the CloudFront Router sits just in front of all other components from a visitor's perspective.
 Your API handles all its internal routes by itself, as outlined in the [REST API guide](rest-api.md) and [HTTP API guide](http-api.md).
 
-The CloudFront route (`router.route("/api", api)`) maps every incoming request to the API and strips the `/api` prefix. A request to `/api` therefore reaches the API's `/` route, while `/api/users` reaches `/users`. The same behavior applies to both `RestApi` and `HttpApi` origins.
+The CloudFront route (`router.route("/api", api)`) maps every incoming request to the API and strips the `/api` prefix. A request to `/api` therefore reaches the API's `/` route, while `/api/users` reaches `/users`. The same behavior applies to both `RestApi` and `HttpApi` origins. Each such route takes two of the 75 cache behaviors a CloudFront distribution allows, one for `/api` and one for `/api/*`.
 
 Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domains](../../concepts/dns.md), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 

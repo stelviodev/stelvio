@@ -43,34 +43,26 @@ def test_router_creates_cloudfront_origin_for_http_api(
         }
     ]
 
+    behavior = {
+        "allowedMethods": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+        "cachedMethods": ["GET", "HEAD"],
+        "targetOriginId": api_id,
+        "compress": True,
+        "viewerProtocolPolicy": "redirect-to-https",
+        "forwardedValues": {
+            "queryString": True,
+            "cookies": {"forward": "none"},
+            "headers": ["*"],
+        },
+        "minTtl": 0,
+        "defaultTtl": 0,
+        "maxTtl": 0,
+        "functionAssociations": [{"eventType": "viewer-request", "functionArn": rewrite_arn}],
+    }
+    # The exact path too: with `/api/*` alone, `/api` falls to the default behavior.
     assert distribution.inputs["orderedCacheBehaviors"] == [
-        {
-            "pathPattern": "/api/*",
-            "allowedMethods": [
-                "GET",
-                "HEAD",
-                "OPTIONS",
-                "PUT",
-                "POST",
-                "PATCH",
-                "DELETE",
-            ],
-            "cachedMethods": ["GET", "HEAD"],
-            "targetOriginId": api_id,
-            "compress": True,
-            "viewerProtocolPolicy": "redirect-to-https",
-            "forwardedValues": {
-                "queryString": True,
-                "cookies": {"forward": "none"},
-                "headers": ["*"],
-            },
-            "minTtl": 0,
-            "defaultTtl": 0,
-            "maxTtl": 0,
-            "functionAssociations": [
-                {"eventType": "viewer-request", "functionArn": rewrite_arn},
-            ],
-        }
+        {"pathPattern": "/api", **behavior},
+        {"pathPattern": "/api/*", **behavior},
     ]
 
     pulumi_mocks.assert_res(

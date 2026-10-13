@@ -328,9 +328,11 @@ def test_root_route_next_to_other_routes(pulumi_mocks):
         "maxTtl": 31536000,
         "functionAssociations": [],
     }
-    [api_behavior] = distribution.inputs["orderedCacheBehaviors"]
-    assert api_behavior["pathPattern"] == "/api/*"
-    assert api_behavior["targetOriginId"] == tid(TP + "api")
+    behaviors = distribution.inputs["orderedCacheBehaviors"]
+    assert [(b["pathPattern"], b["targetOriginId"]) for b in behaviors] == [
+        ("/api", tid(TP + "api")),
+        ("/api/*", tid(TP + "api")),
+    ]
     pulumi_mocks.assert_res(
         "api-uri-rewrite-0",
         R.CLOUDFRONT_FUNCTION,
@@ -588,6 +590,15 @@ def test_full_router_with_mixed_origins(
 
     [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
     assert len(distribution.inputs["origins"]) == 3
+    # Function and URL routes answer their exact path too; `/static` alone would ask S3 for
+    # the bucket root.
+    assert [b["pathPattern"] for b in distribution.inputs["orderedCacheBehaviors"]] == [
+        "/external",
+        "/external/*",
+        "/static/*",
+        "/api",
+        "/api/*",
+    ]
     # The URL origin needs no OAC
     oacs = pulumi_mocks.created(R.ORIGIN_ACCESS_CONTROL)
     assert {oac.name: oac.inputs["originAccessControlOriginType"] for oac in oacs} == {

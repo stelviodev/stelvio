@@ -8,6 +8,8 @@ import pulumi_aws
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import set_custom_host_header
 from stelvio.aws.cloudfront.origins.base import (
+    API_ALLOWED_METHODS,
+    API_CACHED_METHODS,
     ComponentCloudfrontAdapter,
     Customizer,
     _as_is,
@@ -143,45 +145,37 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             ),
         )
 
-        cache_behavior = {
-            "path_pattern": self._path_pattern(),
-            "allowed_methods": [
-                "GET",
-                "HEAD",
-                "OPTIONS",
-                "PUT",
-                "POST",
-                "PATCH",
-                "DELETE",
-            ],
-            "cached_methods": ["GET", "HEAD"],
-            "target_origin_id": origin_dict["origin_id"],
-            "compress": True,
-            "viewer_protocol_policy": "redirect-to-https",
-            "forwarded_values": {
-                # Forward everything so the origin sees original request
-                "query_string": True,
-                "cookies": {"forward": "all"},
-                # Forward all headers except Host (which Lambda@Edge will set)
-                "headers": ["*"],
-            },
-            "min_ttl": 0,
-            "default_ttl": 0,
-            "max_ttl": 0,
-            "function_associations": self._function_associations(cf_function),
-            "lambda_function_associations": [
-                {
-                    "event_type": "origin-request",
-                    "lambda_arn": lambda_edge.qualified_arn,
-                    "include_body": True,
-                }
-            ],
-        }
+        cache_behaviors = self._cache_behaviors(
+            {
+                "allowed_methods": API_ALLOWED_METHODS,
+                "cached_methods": API_CACHED_METHODS,
+                "target_origin_id": origin_dict["origin_id"],
+                "compress": True,
+                "viewer_protocol_policy": "redirect-to-https",
+                "forwarded_values": {
+                    "query_string": True,
+                    "cookies": {"forward": "all"},
+                    # Host too; the Lambda@Edge function below overwrites it
+                    "headers": ["*"],
+                },
+                "min_ttl": 0,
+                "default_ttl": 0,
+                "max_ttl": 0,
+                "function_associations": self._function_associations(cf_function),
+                "lambda_function_associations": [
+                    {
+                        "event_type": "origin-request",
+                        "lambda_arn": lambda_edge.qualified_arn,
+                        "include_body": True,
+                    }
+                ],
+            }
+        )
 
         return RouteOriginConfig(
             origin_access_controls=None,
             origins=origin_dict,
-            ordered_cache_behaviors=[cache_behavior],
+            ordered_cache_behaviors=cache_behaviors,
             cloudfront_functions=cf_function,
         )
 
