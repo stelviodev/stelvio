@@ -3,6 +3,8 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import (
+    API_ALLOWED_METHODS,
+    API_CACHED_METHODS,
     ComponentCloudfrontAdapter,
     Customizer,
     _as_is,
@@ -102,40 +104,29 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
             component_name=self.function.name, depends_on=[self.function.resources.function]
         )
 
-        cache_behavior_template = {
-            "allowed_methods": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
-            "cached_methods": ["GET", "HEAD"],
-            "target_origin_id": origin_dict["origin_id"],
-            "compress": True,
-            "viewer_protocol_policy": "redirect-to-https",
-            "forwarded_values": {
-                "query_string": True,  # Lambda functions often use query parameters
-                "cookies": {"forward": "none"},
-            },
-            # Don't cache Lambda responses by default
-            "min_ttl": 0,
-            "default_ttl": 0,
-            "max_ttl": 0,
-            "function_associations": self._function_associations(cf_function),
-        }
-
-        if self.route.is_root or self.route.path_pattern.endswith("*"):
-            cache_behavior = cache_behavior_template.copy()
-            cache_behavior["path_pattern"] = self._path_pattern()
-            ordered_cache_behaviors = [cache_behavior]
-        else:
-            cb1 = cache_behavior_template.copy()
-            cb1["path_pattern"] = self.route.path_pattern
-
-            cb2 = cache_behavior_template.copy()
-            cb2["path_pattern"] = f"{self.route.path_pattern}/*"
-
-            ordered_cache_behaviors = [cb1, cb2]
+        cache_behaviors = self._cache_behaviors(
+            {
+                "allowed_methods": API_ALLOWED_METHODS,
+                "cached_methods": API_CACHED_METHODS,
+                "target_origin_id": origin_dict["origin_id"],
+                "compress": True,
+                "viewer_protocol_policy": "redirect-to-https",
+                "forwarded_values": {
+                    "query_string": True,  # Lambda functions often use query parameters
+                    "cookies": {"forward": "none"},
+                },
+                # Don't cache Lambda responses by default
+                "min_ttl": 0,
+                "default_ttl": 0,
+                "max_ttl": 0,
+                "function_associations": self._function_associations(cf_function),
+            }
+        )
 
         return RouteOriginConfig(
             origin_access_controls=oac,
             origins=origin_dict,
-            ordered_cache_behaviors=ordered_cache_behaviors,
+            ordered_cache_behaviors=cache_behaviors,
             cloudfront_functions=cf_function,
         )
 
