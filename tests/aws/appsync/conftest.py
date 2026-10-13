@@ -9,7 +9,8 @@ from stelvio.aws.appsync import AppSync, CognitoAuth
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.component import ComponentRegistry
 
-from ...conftest import TP  # noqa: F401  # re-exported for the appsync tests
+from ...conftest import TP
+from ..pulumi_mocks import tid
 
 INLINE_SCHEMA = """\
 type Query {
@@ -28,6 +29,7 @@ type Post {
 """
 
 COGNITO_USER_POOL_ID = "us-east-1_TestPool123"
+API_ID = tid(f"{TP}myapi")
 
 
 def make_api(
