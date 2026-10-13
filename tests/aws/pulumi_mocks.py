@@ -525,12 +525,6 @@ class PulumiTestMocks(Mocks):
     def created_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.API_DOMAIN_NAME, name)
 
-    def created_dns_records(self, name: str | None = None) -> list[MockResourceArgs]:
-        # This covers both Route53 and Cloudflare records
-        route53_records = self.created(R.ROUTE53_RECORD, name)
-        cloudflare_records = self.created(R.CLOUDFLARE_RECORD, name)
-        return route53_records + cloudflare_records
-
     # CloudFront resource helpers
     def created_cloudfront_distributions(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.DISTRIBUTION, name)
@@ -583,29 +577,6 @@ class PulumiTestMocks(Mocks):
     # AppSync resource helpers
     def created_appsync_apis(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.GRAPHQL_API, name)
-
-    def created_appsync_data_sources(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.APPSYNC_DATA_SOURCE, name)
-
-    def created_appsync_resolvers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.APPSYNC_RESOLVER, name)
-
-    def created_appsync_functions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.APPSYNC_FUNCTION, name)
-
-    def created_appsync_api_keys(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.APPSYNC_API_KEY, name)
-
-    def created_appsync_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.APPSYNC_DOMAIN_NAME, name)
-
-    def created_appsync_domain_associations(
-        self, name: str | None = None
-    ) -> list[MockResourceArgs]:
-        return self.created(R.APPSYNC_DOMAIN_ASSOCIATION, name)
-
-    def created_role_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.ROLE_POLICY, name)
 
     def created_log_groups(self, name: str | None = None) -> list[MockResourceArgs]:
         return self.created(R.LOG_GROUP, name)
