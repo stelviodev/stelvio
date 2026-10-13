@@ -48,10 +48,7 @@ def test_router_creates_cloudfront_origin_for_rest_api(
         "targetOriginId": tid(TP + "edge-api"),
         "compress": True,
         "viewerProtocolPolicy": "redirect-to-https",
-        "forwardedValues": {
-            "queryString": True,
-            "cookies": {"forward": "none"},
-        },
+        "forwardedValues": {"queryString": True, "cookies": {"forward": "none"}, "headers": []},
         "minTtl": 0,
         "defaultTtl": 0,
         "maxTtl": 0,
