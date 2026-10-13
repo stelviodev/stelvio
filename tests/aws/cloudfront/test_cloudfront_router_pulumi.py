@@ -434,6 +434,48 @@ def test_slash_star_root_leaves_same_length_routes_reachable(pulumi_mocks):
     )
 
 
+@mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
+def test_wildcard_routes_pass_the_path_through(pulumi_mocks):
+    """A wildcard route gets one behavior and no prefix-strip function: the origin sees the
+    full path."""
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router("router")
+        router.route("/files/*", Bucket("files"))
+        router.route("/w/*", Function("fn", handler="functions/simple.handler"))
+        router.route("/u/*", "https://example.com")
+        return router.resources
+
+    deploy()
+
+    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
+    behaviors = distribution.inputs["orderedCacheBehaviors"]
+    assert [
+        (b["pathPattern"], b["targetOriginId"], b["functionAssociations"]) for b in behaviors
+    ] == [
+        ("/files/*", f"arn:aws:s3:::{tn(TP + 'files')}", []),
+        ("/w/*", tn(TP + "fn"), []),
+        ("/u/*", TP + "url-origin-2", []),
+    ]
+    pulumi_mocks.assert_res("router-default-404", R.CLOUDFRONT_FUNCTION)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_POLICY: 1,
+            R.FUNCTION: 2,  # the routed Function + the URL route's Lambda@Edge
+            R.ROLE: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.FUNCTION_URL: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.ORIGIN_ACCESS_CONTROL: 2,
+            R.CLOUDFRONT_FUNCTION: 1,  # the default 404
+            R.DISTRIBUTION: 1,
+        }
+    )
+
+
 def test_create_resources_with_multiple_routes(pulumi_mocks):
     """Test that Router handles multiple routes correctly."""
     bucket1 = Bucket("bucket1")
