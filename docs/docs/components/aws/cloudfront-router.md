@@ -73,6 +73,7 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
     - Longer, more specific paths take priority over shorter ones
     - The root path `/` acts as a catch-all for unmatched requests. `/*` is the same route, so a Router accepts only one of them
     - If no root path is defined, unmatched requests return a 404 response
+    - A Bucket on the root path serves its `index.html` for `/` only. A folder in it (`/docs/`) or a bucket route on another path (`/files/`) returns 403
 
 !!! warning "Routes must be defined before resource creation"
     All routes must be added to the Router before its resources are created. Once the Router's CloudFront distribution and related resources have been provisioned, attempting to add new routes will raise a `RuntimeError`. Define all your routes immediately after creating the Router instance.

@@ -10,7 +10,7 @@ from stelvio.aws.s3.s3 import Bucket
 from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
-from ..conftest import assert_urn
+from ..conftest import assert_urn, create_app_context_with_global_customize
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 
 
@@ -354,6 +354,53 @@ def test_root_route_next_to_other_routes(pulumi_mocks):
             R.BUCKET_POLICY: 1,
         }
     )
+
+
+def _rest_api_root_next_to_a_bucket(router):
+    router.route("/", _rest_api())
+    router.route("/static", Bucket("static"))
+
+
+@mark.parametrize(
+    ("add_routes", "scope", "expected"),
+    [
+        param(lambda router: router.route("/", Bucket("site")), None, "index.html", id="bucket"),
+        param(
+            lambda router: router.route("/*", Bucket("site")), None, "index.html", id="bucket-/*"
+        ),
+        param(
+            lambda router: router.route("/", Bucket("site")),
+            "instance",
+            "home.html",
+            id="bucket-instance-customize",
+        ),
+        param(
+            lambda router: router.route("/", Bucket("site")),
+            "global",
+            "home.html",
+            id="bucket-global-customize",
+        ),
+        # A Bucket elsewhere on the router doesn't count: `/` stays the API's.
+        param(_rest_api_root_next_to_a_bucket, None, None, id="rest-api-root"),
+    ],
+)
+@mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
+def test_root_route_default_root_object(pulumi_mocks, add_routes, scope, expected):
+    """`GET /` on a root bucket would ask S3 for the bucket root: 403."""
+    customize = {"distribution": {"default_root_object": "home.html"}}
+    if scope == "global":
+        create_app_context_with_global_customize({Router: customize})
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router("router", customize=customize if scope == "instance" else None)
+        add_routes(router)
+        return router.resources
+
+    deploy()
+
+    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
+    assert distribution.inputs.get("defaultRootObject") == expected
 
 
 def test_slash_star_root_leaves_same_length_routes_reachable(pulumi_mocks):

@@ -15,6 +15,7 @@ from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
+from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.provider import ProviderStore
@@ -156,6 +157,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             for behavior in rc.ordered_cache_behaviors
         ]
 
+        root_is_bucket = root_idx is not None and isinstance(
+            self.routes[root_idx].component, Bucket
+        )
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
             **self._customizer(
@@ -177,6 +181,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 {
                     "enabled": True,
                     "is_ipv6_enabled": True,
+                    # `GET /` on a bucket is a ListBucket call; its policy allows GetObject: 403.
+                    "default_root_object": "index.html" if root_is_bucket else None,
                     "price_class": "PriceClass_100",
                     "restrictions": {
                         "geo_restriction": {
