@@ -69,18 +69,6 @@ def test_validation_via_config_dataclass():
 # =========================================================================
 
 
-def test_no_domain_creates_no_domain_resource(pulumi_mocks):
-    pool = UserPool("users", usernames=["email"])
-
-    @pulumi.runtime.test
-    def deploy():
-        return pool.resources
-
-    deploy()
-
-    pulumi_mocks.assert_no_res(R.USER_POOL_DOMAIN)
-
-
 @pulumi.runtime.test
 def test_no_domain_resources_are_none(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
@@ -141,18 +129,6 @@ def test_prefix_domain_no_certificate_arn(pulumi_mocks):
     pulumi_mocks.assert_res(
         "users-domain", R.USER_POOL_DOMAIN, {"certificateArn": None}, partial=True
     )
-
-
-def test_prefix_domain_no_acm_resources(pulumi_mocks):
-    pool = UserPool("users", usernames=["email"], domain="myapp-auth")
-
-    @pulumi.runtime.test
-    def deploy():
-        return pool.resources
-
-    deploy()
-
-    pulumi_mocks.assert_no_res(R.CERTIFICATE)
 
 
 @pulumi.runtime.test

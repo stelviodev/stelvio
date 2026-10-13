@@ -58,7 +58,7 @@ def test_single_trigger_creates_permission(pulumi_mocks, project_cwd):
 # =========================================================================
 
 
-def test_multiple_triggers_create_functions(pulumi_mocks, project_cwd):
+def test_multiple_triggers_create_a_function_and_permission_each(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
         usernames=["email"],
@@ -76,26 +76,17 @@ def test_multiple_triggers_create_functions(pulumi_mocks, project_cwd):
 
     pulumi_mocks.assert_res("users-trigger-pre_sign_up", R.FUNCTION)
     pulumi_mocks.assert_res("users-trigger-post_confirmation", R.FUNCTION)
-
-
-def test_multiple_triggers_create_permissions(pulumi_mocks, project_cwd):
-    pool = UserPool(
-        "users",
-        usernames=["email"],
-        triggers={
-            "pre_sign_up": "functions/auth/validate.handler",
-            "post_confirmation": "functions/auth/welcome.handler",
-        },
-    )
-
-    @pulumi.runtime.test
-    def deploy():
-        return pool.resources
-
-    deploy()
-
     pulumi_mocks.assert_res("users-trigger-pre_sign_up-perm", R.LAMBDA_PERMISSION)
     pulumi_mocks.assert_res("users-trigger-post_confirmation-perm", R.LAMBDA_PERMISSION)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.USER_POOL: 1,
+            R.FUNCTION: 2,
+            R.ROLE: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.LAMBDA_PERMISSION: 2,
+        }
+    )
 
 
 # =========================================================================
