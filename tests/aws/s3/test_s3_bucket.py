@@ -160,6 +160,7 @@ def test_multiple_s3_buckets(pulumi_mocks):
     # Assert
     pulumi_mocks.assert_res("bucket-one", R.BUCKET)
     pulumi_mocks.assert_res("bucket-two", R.BUCKET)
+    pulumi_mocks.assert_res_counts({R.BUCKET: 2, R.BUCKET_PUBLIC_ACCESS_BLOCK: 2})
 
 
 @pytest.mark.parametrize("versioning_enabled", [True, False])
