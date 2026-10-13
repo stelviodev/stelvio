@@ -66,13 +66,13 @@ class ComponentCloudfrontAdapter(ABC):
             },
         }
 
-    def _api_cache_behavior(
+    def _api_cache_behaviors(
         self,
         *,
         origin_id: pulumi.Input[str],
-        cf_function: pulumi_aws.cloudfront.Function,
+        cf_function: pulumi_aws.cloudfront.Function | None,
         forwarded_headers: list[str] | None = None,
-    ) -> dict:
+    ) -> list[dict]:
         forwarded_values = {
             "query_string": True,
             "cookies": {"forward": "none"},
@@ -80,31 +80,38 @@ class ComponentCloudfrontAdapter(ABC):
         if forwarded_headers is not None:
             forwarded_values["headers"] = forwarded_headers
 
-        return {
-            "path_pattern": self._path_pattern(),
-            "allowed_methods": API_ALLOWED_METHODS,
-            "cached_methods": API_CACHED_METHODS,
-            "target_origin_id": origin_id,
-            "compress": True,
-            "viewer_protocol_policy": "redirect-to-https",
-            "forwarded_values": forwarded_values,
-            "min_ttl": 0,
-            "default_ttl": 0,
-            "max_ttl": 0,
-            "function_associations": [
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": cf_function.arn,
-                }
-            ],
-        }
+        return [
+            {
+                "path_pattern": self._path_pattern(),
+                "allowed_methods": API_ALLOWED_METHODS,
+                "cached_methods": API_CACHED_METHODS,
+                "target_origin_id": origin_id,
+                "compress": True,
+                "viewer_protocol_policy": "redirect-to-https",
+                "forwarded_values": forwarded_values,
+                "min_ttl": 0,
+                "default_ttl": 0,
+                "max_ttl": 0,
+                "function_associations": self._function_associations(cf_function),
+            }
+        ]
+
+    @staticmethod
+    def _function_associations(cf_function: pulumi_aws.cloudfront.Function | None) -> list[dict]:
+        if cf_function is None:
+            return []
+        return [{"event_type": "viewer-request", "function_arn": cf_function.arn}]
 
     def _uri_rewrite_function(
         self,
         *,
         component_name: str,
         depends_on: list[pulumi.Resource],
-    ) -> pulumi_aws.cloudfront.Function:
+    ) -> pulumi_aws.cloudfront.Function | None:
+        # The root route has no prefix to strip, and its function would run on every request
+        # that reaches the default behavior (billed per invocation).
+        if self.route.is_root:
+            return None
         return pulumi_aws.cloudfront.Function(
             context().prefix(f"{component_name}-uri-rewrite-{self.idx}"),
             **self.customize(

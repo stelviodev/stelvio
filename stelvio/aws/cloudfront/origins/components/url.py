@@ -6,7 +6,7 @@ import pulumi
 import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
-from stelvio.aws.cloudfront.js import set_custom_host_header, strip_path_pattern_function_js
+from stelvio.aws.cloudfront.js import set_custom_host_header
 from stelvio.aws.cloudfront.origins.base import (
     ComponentCloudfrontAdapter,
     Customizer,
@@ -93,29 +93,8 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             },
         }
 
-        path_pattern = (
-            f"{self.route.path_pattern}/*"
-            if self.route.path_pattern and not self.route.path_pattern.endswith("*")
-            else self.route.path_pattern or "/"
-        )
-
-        # CloudFront Function for path rewriting (viewer-request)
-        function_code = strip_path_pattern_function_js(self.route.path_pattern or "/")
-        cf_function = pulumi_aws.cloudfront.Function(
-            context().prefix(f"url-origin-uri-rewrite-{self.idx}"),
-            **self.customize(
-                "cloudfront_functions",
-                {},
-                {
-                    "runtime": "cloudfront-js-2.0",
-                    "code": function_code,
-                    "comment": (
-                        f"Strip {self.route.path_pattern or '/'} prefix for URL route {self.idx}"
-                    ),
-                },
-            ),
-            opts=self.resource_opts,
-        )
+        # Not `self.url.name`: that would rename every deployed URL route's function.
+        cf_function = self._uri_rewrite_function(component_name="url-origin", depends_on=[])
 
         # Lambda@Edge for Host header rewriting (origin-request)
         # Create IAM role for Lambda@Edge
@@ -165,7 +144,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
         )
 
         cache_behavior = {
-            "path_pattern": path_pattern,
+            "path_pattern": self._path_pattern(),
             "allowed_methods": [
                 "GET",
                 "HEAD",
@@ -189,12 +168,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             "min_ttl": 0,
             "default_ttl": 0,
             "max_ttl": 0,
-            "function_associations": [
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": cf_function.arn,
-                }
-            ],
+            "function_associations": self._function_associations(cf_function),
             "lambda_function_associations": [
                 {
                     "event_type": "origin-request",
@@ -207,7 +181,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
         return RouteOriginConfig(
             origin_access_controls=None,
             origins=origin_dict,
-            ordered_cache_behaviors=cache_behavior,
+            ordered_cache_behaviors=[cache_behavior],
             cloudfront_functions=cf_function,
         )
 
