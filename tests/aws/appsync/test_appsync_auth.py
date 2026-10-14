@@ -35,10 +35,7 @@ from .conftest import (
 
 
 def authorizer_uri(function: str) -> str:
-    return (
-        f"arn:aws:apigateway:{DEFAULT_REGION}:lambda:path/2015-03-31/functions/"
-        f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{tn(TP + function)}/invocations"
-    )
+    return f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{tn(TP + function)}"
 
 
 def test_api_key_auth(pulumi_mocks, project_cwd):
