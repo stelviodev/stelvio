@@ -55,16 +55,11 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             "domain_name": origin_args.domain_name,
             "origin_access_control_id": oac.id,
         }
-        path_pattern = (
-            f"{self.route.path_pattern}/*"
-            if not self.route.path_pattern.endswith("*")
-            else self.route.path_pattern
-        )
         cf_function = self._uri_rewrite_function(
             component_name=self.bucket.name, depends_on=[self.bucket.resources.bucket]
         )
         cache_behavior = {
-            "path_pattern": path_pattern,
+            "path_pattern": self._path_pattern(),
             "allowed_methods": ["GET", "HEAD", "OPTIONS"],
             "cached_methods": ["GET", "HEAD"],
             "target_origin_id": origin_dict["origin_id"],
@@ -78,17 +73,12 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             "min_ttl": 0,
             "default_ttl": 86400,  # 1 day
             "max_ttl": 31536000,  # 1 year
-            "function_associations": [
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": cf_function.arn,
-                }
-            ],
+            "function_associations": self._function_associations(cf_function),
         }
         return RouteOriginConfig(
             origin_access_controls=oac,
             origins=origin_dict,
-            ordered_cache_behaviors=cache_behavior,
+            ordered_cache_behaviors=[cache_behavior],
             cloudfront_functions=cf_function,
         )
 
