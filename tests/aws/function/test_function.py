@@ -431,10 +431,11 @@ def _assert_iam_role(pulumi_mocks, test_case: FunctionTestCase):
     )
 
 
-def _assert_role_attachments(pulumi_mocks, test_case: FunctionTestCase):
-    """Verify the IAM role policy attachments."""
+def _assert_role_attachments(pulumi_mocks, test_case: FunctionTestCase, function: Function):
+    """Verify the IAM role policy attachments, and that `resources.policy` is the attached one."""
     name = TP + test_case.name
     role = f"{name}-r-test-name"
+    policy_arn = f"arn:aws:iam::123456789012:policy/{name}-p-test-name"
     expected = [
         (
             f"{name}-basic-execution-r-p-attachment",
@@ -446,14 +447,19 @@ def _assert_role_attachments(pulumi_mocks, test_case: FunctionTestCase):
     ]
     if test_case.expected_policy:
         expected.append(
-            (
-                f"{name}-default-r-p-attachment",
-                {
-                    "role": role,
-                    "policyArn": f"arn:aws:iam::123456789012:policy/{name}-p-test-name",
-                },
-            )
+            (f"{name}-default-r-p-attachment", {"role": role, "policyArn": policy_arn})
         )
+
+        @pulumi.runtime.test
+        def check_policy_handle():
+            def check(arn):
+                assert arn == policy_arn
+
+            return function.resources.policy.arn.apply(check)
+
+        check_policy_handle()
+    else:
+        assert function.resources.policy is None
     attachments = sorted(pulumi_mocks.created(R.ROLE_POLICY_ATTACHMENT), key=lambda a: a.name)
     assert [(a.name, a.inputs) for a in attachments] == expected
 
@@ -488,12 +494,13 @@ def _assert_ide_file(project_cwd, test_case: FunctionTestCase):
 def verify_function_resources(
     pulumi_mocks,
     project_cwd,
+    function: Function,
     test_case: FunctionTestCase,
     expected_dependencies_path: Path | None,
 ):
     _assert_iam_policy(pulumi_mocks, test_case)
     _assert_iam_role(pulumi_mocks, test_case)
-    _assert_role_attachments(pulumi_mocks, test_case)
+    _assert_role_attachments(pulumi_mocks, test_case, function)
     _assert_lambda_function(pulumi_mocks, project_cwd, test_case, expected_dependencies_path)
     _assert_ide_file(project_cwd, test_case)
 
@@ -588,7 +595,7 @@ def test_function__(
     dependencies_path = (
         mock_get_or_install_dependencies_function.return_value if expect_requirements else None
     )
-    verify_function_resources(pulumi_mocks, project_cwd, test_case, dependencies_path)
+    verify_function_resources(pulumi_mocks, project_cwd, function, test_case, dependencies_path)
     if expect_requirements:
         mock_get_or_install_dependencies_function.assert_called_once_with(
             requirements_source=RequirementsSpec(
@@ -630,14 +637,13 @@ def test_function__(
 )
 def test_functions_multiple__(pulumi_mocks, project_cwd, test_case_set):
     @pulumi.runtime.test
-    def deploy(test_case):
-        return Function(
-            test_case.name, handler=test_case.input_handler, links=test_case.links
-        ).resources
+    def deploy(function):
+        return function.resources
 
     for test_case in test_case_set:
-        deploy(test_case)
-        verify_function_resources(pulumi_mocks, project_cwd, test_case, None)
+        function = Function(test_case.name, handler=test_case.input_handler, links=test_case.links)
+        deploy(function)
+        verify_function_resources(pulumi_mocks, project_cwd, function, test_case, None)
         pulumi_mocks.created_resources = []
 
 
