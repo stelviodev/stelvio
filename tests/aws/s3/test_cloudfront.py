@@ -271,7 +271,10 @@ def test_cloudfront_distribution_s3_bucket_policy_creation(
     # Act
     @pulumi.runtime.test
     def deploy():
-        return distribution.resources
+        def check_handle(policy_id):
+            assert policy_id == tid(TP + "test-bucket-policy-bucket-policy")
+
+        return distribution.resources.bucket_policy.id.apply(check_handle)
 
     deploy()
 
