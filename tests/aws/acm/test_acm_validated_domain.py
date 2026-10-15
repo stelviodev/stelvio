@@ -13,7 +13,6 @@ from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid
 pytestmark = pytest.mark.usefixtures("project_cwd")
 
 
-@pulumi.runtime.test
 def test_acm_validated_domain_basic(pulumi_mocks, app_context_with_dns, component_registry):
     """Test basic ACM validated domain creation"""
     # Arrange
@@ -21,19 +20,19 @@ def test_acm_validated_domain_basic(pulumi_mocks, app_context_with_dns, componen
     acm_domain = AcmValidatedDomain("test-cert", domain_name=domain_name)
 
     # Act
-    _ = acm_domain.resources
+    @pulumi.runtime.test
+    def deploy():
+        return acm_domain.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Check certificate was created
-        certificates = pulumi_mocks.created_certificates(TP + "test-cert-certificate")
-        assert len(certificates) == 1
-        cert = certificates[0]
-        assert cert.inputs["domainName"] == domain_name  # ACM uses camelCase
-        assert cert.inputs["validationMethod"] == "DNS"
-
-    # Use a simpler approach - just check that the certificate was created
-    acm_domain.resources.certificate.id.apply(check_resources)
+    pulumi_mocks.assert_res(
+        "test-cert-certificate",
+        R.CERTIFICATE,
+        {"domainName": domain_name, "validationMethod": "DNS"},
+        partial=True,
+    )
 
 
 @pulumi.runtime.test

@@ -7,6 +7,8 @@ from stelvio.aws.api_gateway.http_api import HttpApi
 from stelvio.aws.api_gateway.rest_api.constants import ROUTE_MAX_LENGTH, ROUTE_MAX_PARAMS
 from stelvio.aws.function import Function, FunctionConfig
 
+from ...pulumi_mocks import R
+
 pytestmark = mark.usefixtures("project_cwd")
 
 
@@ -88,13 +90,10 @@ def test_http_api_route_handler_configuration(pulumi_mocks, handler, opts):
 
     deploy()
 
-    functions = pulumi_mocks.created_functions()
-
-    assert len(functions) == 1
-    assert functions[0].typ == "aws:lambda/function:Function"
-    assert functions[0].name == "test-test-my-api-functions-simple_handler"
-    assert functions[0].inputs["memorySize"] == 512
-    assert functions[0].inputs["timeout"] == 60
+    [function] = pulumi_mocks.created(R.FUNCTION)
+    assert function.name == "test-test-my-api-functions-simple_handler"
+    assert function.inputs["memorySize"] == 512
+    assert function.inputs["timeout"] == 60
 
 
 def test_http_api_route_uses_supplied_function(pulumi_mocks):
@@ -108,14 +107,11 @@ def test_http_api_route_uses_supplied_function(pulumi_mocks):
 
     deploy()
 
-    functions = pulumi_mocks.created_functions()
+    [function_resource] = pulumi_mocks.created(R.FUNCTION)
+    assert function_resource.name == "test-test-users-function"
 
-    assert len(functions) == 1
-    assert functions[0].name == "test-test-users-function"
-
-    permissions = pulumi_mocks.created_permissions()
-    assert len(permissions) == 1
-    assert permissions[0].inputs["function"] == "test-test-users-function-test-name"
+    [permission] = pulumi_mocks.created(R.LAMBDA_PERMISSION)
+    assert permission.inputs["function"] == "test-test-users-function-test-name"
 
 
 @mark.parametrize(

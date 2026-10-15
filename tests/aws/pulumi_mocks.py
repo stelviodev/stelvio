@@ -472,115 +472,6 @@ class PulumiTestMocks(Mocks):
         """
         return [r for r in self.created_resources if r.typ == typ and (not name or r.name == name)]
 
-    # Lambda resource helpers
-    def created_functions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.FUNCTION, name)
-
-    def created_function_urls(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.FUNCTION_URL, name)
-
-    def created_role_policy_attachments(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.ROLE_POLICY_ATTACHMENT, name)
-
-    def created_roles(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.ROLE, name)
-
-    def created_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.POLICY, name)
-
-    # API Gateway resource helpers
-    def created_rest_apis(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.REST_API, name)
-
-    def created_deployments(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_DEPLOYMENT, name)
-
-    def created_stages(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_STAGE, name)
-
-    def created_permissions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.LAMBDA_PERMISSION, name)
-
-    def created_dynamo_tables(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.DYNAMO_TABLE, name)
-
-    # S3 resource helpers
-    def created_s3_buckets(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.BUCKET, name)
-
-    def created_s3_bucket_objects(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.BUCKET_OBJECT, name)
-
-    def created_s3_public_access_blocks(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.BUCKET_PUBLIC_ACCESS_BLOCK, name)
-
-    # Layer resource helper
-    def created_layer_versions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.LAYER_VERSION, name)
-
-    # Custom domain resource helpers
-    def created_certificates(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.CERTIFICATE, name)
-
-    def created_domain_names(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.API_DOMAIN_NAME, name)
-
-    # CloudFront resource helpers
-    def created_cloudfront_distributions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.DISTRIBUTION, name)
-
-    def created_origin_access_controls(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.ORIGIN_ACCESS_CONTROL, name)
-
-    # AWS Provider helpers
-    def created_providers(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.AWS_PROVIDER, name)
-
-    # EventBridge resource helpers
-    def created_event_rules(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.EVENT_RULE, name)
-
-    def created_event_targets(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.EVENT_TARGET, name)
-
-    # SQS resource helpers
-    def created_event_source_mappings(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.EVENT_SOURCE_MAPPING, name)
-
-    def created_queues(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.QUEUE, name)
-
-    def created_queue_policies(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.QUEUE_POLICY, name)
-
-    # SNS resource helpers
-    def created_topics(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.TOPIC, name)
-
-    def created_topic_subscriptions(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.TOPIC_SUBSCRIPTION, name)
-
-    # Cognito resource helpers
-    def created_user_pools(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.USER_POOL, name)
-
-    def created_identity_pools(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.IDENTITY_POOL, name)
-
-    # SES resource helpers
-    def created_email_identities(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.EMAIL_IDENTITY, name)
-
-    def created_configuration_sets(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.CONFIGURATION_SET, name)
-
-    # AppSync resource helpers
-    def created_appsync_apis(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.GRAPHQL_API, name)
-
-    def created_log_groups(self, name: str | None = None) -> list[MockResourceArgs]:
-        return self.created(R.LOG_GROUP, name)
-
     # =========================================================================
     # Assertion Helpers
     # =========================================================================
@@ -636,14 +527,6 @@ class PulumiTestMocks(Mocks):
             if not r.typ.startswith(("stelvio:", "pulumi:providers:"))
         )
         assert actual == expected
-
-    def assert_function_created(self, name: str) -> MockResourceArgs:
-        """Assert exactly one Lambda function with the given name exists and return it."""
-        functions = self.created_functions(name)
-        assert len(functions) == 1, (
-            f"Expected exactly 1 function named '{name}', found {len(functions)}"
-        )
-        return functions[0]
 
 
 class MockDns:

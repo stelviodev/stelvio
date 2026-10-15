@@ -68,7 +68,6 @@ def mock_cache_fs(tmp_path, monkeypatch):
         "code_and_requirements_as_file_custom_runtime_and_arch",
     ],
 )
-@pulumi.runtime.test
 def test_layer_with__(  # noqa: PLR0913
     pulumi_mocks,
     project_cwd,
@@ -93,53 +92,60 @@ def test_layer_with__(  # noqa: PLR0913
         layer_name, code=code, requirements=requirements, runtime=runtime, architecture=arch
     )
 
+    @pulumi.runtime.test
+    def deploy():
+        return layer.resources
+
+    deploy()
+
     # Assert
-    def check_resources(_):
-        layer_versions = pulumi_mocks.created_layer_versions(TP + layer_name)
-        assert len(layer_versions) == 1
-        layer_args = layer_versions[0]
-        assert layer_args.inputs["layerName"] == TP + layer_name
-        assert layer_args.inputs["compatibleRuntimes"] == [runtime or DEFAULT_RUNTIME]
-        assert layer_args.inputs["compatibleArchitectures"] == [arch or DEFAULT_ARCHITECTURE]
-        code_archive: AssetArchive = layer_args.inputs["code"]
-        assert isinstance(code_archive, AssetArchive)
-        assert len(code_archive.assets) == bool(code) + bool(requirements)
+    layer_args = pulumi_mocks.assert_res(
+        layer_name,
+        R.LAYER_VERSION,
+        {
+            "layerName": TP + layer_name,
+            "compatibleRuntimes": [runtime or DEFAULT_RUNTIME],
+            "compatibleArchitectures": [arch or DEFAULT_ARCHITECTURE],
+        },
+        partial=True,
+    )
+    code_archive: AssetArchive = layer_args.inputs["code"]
+    assert isinstance(code_archive, AssetArchive)
+    assert len(code_archive.assets) == bool(code) + bool(requirements)
 
-        # Check code archive
-        if code:
-            code_dir_name = Path(code).name
-            expected_code_key = f"python/{code_dir_name}"
-            assert expected_code_key in code_archive.assets
-            code_archive_asset = code_archive.assets[expected_code_key]
-            assert isinstance(code_archive_asset, FileArchive)
-            assert code_archive_asset.path == str(project_cwd / code)
+    # Check code archive
+    if code:
+        code_dir_name = Path(code).name
+        expected_code_key = f"python/{code_dir_name}"
+        assert expected_code_key in code_archive.assets
+        code_archive_asset = code_archive.assets[expected_code_key]
+        assert isinstance(code_archive_asset, FileArchive)
+        assert code_archive_asset.path == str(project_cwd / code)
 
-        if not requirements:
-            mock_get_or_install_dependencies_layer.assert_not_called()
-            return
+    if not requirements:
+        mock_get_or_install_dependencies_layer.assert_not_called()
+        return
 
-        mock_get_or_install_dependencies_layer.assert_called_once_with(
-            requirements_source=RequirementsSpec(
-                content="\n".join(requirements) if isinstance(requirements, list) else None,
-                path_from_root=Path(requirements) if isinstance(requirements, str) else None,
-            ),
-            runtime=runtime or DEFAULT_RUNTIME,
-            architecture=arch or DEFAULT_ARCHITECTURE,
-            project_root=project_cwd,
-            log_context=f"Layer: {layer_name}",
-            cache_subdirectory=_LAYER_CACHE_SUBDIR,
-        )
+    mock_get_or_install_dependencies_layer.assert_called_once_with(
+        requirements_source=RequirementsSpec(
+            content="\n".join(requirements) if isinstance(requirements, list) else None,
+            path_from_root=Path(requirements) if isinstance(requirements, str) else None,
+        ),
+        runtime=runtime or DEFAULT_RUNTIME,
+        architecture=arch or DEFAULT_ARCHITECTURE,
+        project_root=project_cwd,
+        log_context=f"Layer: {layer_name}",
+        cache_subdirectory=_LAYER_CACHE_SUBDIR,
+    )
 
-        # Check dependencies archive
-        expected_depencencies_key = f"python/lib/{runtime or DEFAULT_RUNTIME}/site-packages"
-        assert expected_depencencies_key in code_archive.assets
-        dependencies_archive_asset = code_archive.assets[expected_depencencies_key]
-        assert isinstance(dependencies_archive_asset, FileArchive)
-        assert dependencies_archive_asset.path == str(
-            mock_get_or_install_dependencies_layer.return_value
-        )
-
-    layer.arn.apply(check_resources)
+    # Check dependencies archive
+    expected_depencencies_key = f"python/lib/{runtime or DEFAULT_RUNTIME}/site-packages"
+    assert expected_depencencies_key in code_archive.assets
+    dependencies_archive_asset = code_archive.assets[expected_depencencies_key]
+    assert isinstance(dependencies_archive_asset, FileArchive)
+    assert dependencies_archive_asset.path == str(
+        mock_get_or_install_dependencies_layer.return_value
+    )
 
 
 @pytest.mark.parametrize(
@@ -190,7 +196,6 @@ def test_layer_raises_when__(project_cwd, opts, error_type, error_match):
         _ = Layer(name="my-layer", **opts).resources
 
 
-@pulumi.runtime.test
 def test_layer_customize_layer_version_resource(
     pulumi_mocks, project_cwd, mock_cache_fs, mock_get_or_install_dependencies_layer
 ):
@@ -209,16 +214,20 @@ def test_layer_customize_layer_version_resource(
         },
     )
 
-    # Act & Assert
-    def check_resources(_):
-        layer_versions = pulumi_mocks.created_layer_versions(TP + "custom-layer")
-        assert len(layer_versions) == 1
-        layer_args = layer_versions[0]
+    # Act
+    @pulumi.runtime.test
+    def deploy():
+        return layer.resources
 
-        # Check customization was applied
-        assert layer_args.inputs.get("description") == "Custom layer description"
+    deploy()
 
-    layer.arn.apply(check_resources)
+    # Assert
+    pulumi_mocks.assert_res(
+        "custom-layer",
+        R.LAYER_VERSION,
+        {"description": "Custom layer description"},
+        partial=True,
+    )
 
 
 def test_layer_rejects_component_tags(project_cwd):
