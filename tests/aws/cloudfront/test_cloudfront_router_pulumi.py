@@ -447,6 +447,53 @@ def test_slash_star_root_leaves_same_length_routes_reachable(pulumi_mocks):
     )
 
 
+def test_customized_function_code_stays_on_root_and_wildcard_routes(pulumi_mocks):
+    """Only the generated no-op rewrite is skipped on `/` and `/files/*`: a user's own
+    `cloudfront_functions` code still gets a function on each route and its association."""
+    code = "function handler(event) { return event.request; }"
+
+    @pulumi.runtime.test
+    def deploy():
+        router = Router("router", customize={"cloudfront_functions": {"code": code}})
+        router.route("/", Bucket("site"))
+        router.route("/files/*", Bucket("files"))
+        return router.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "files-uri-rewrite-0", R.CLOUDFRONT_FUNCTION, {"code": code}, partial=True
+    )
+    pulumi_mocks.assert_res(
+        "site-uri-rewrite-1", R.CLOUDFRONT_FUNCTION, {"code": code}, partial=True
+    )
+    functions_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function"
+    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
+    assert distribution.inputs["defaultCacheBehavior"]["functionAssociations"] == [
+        {
+            "eventType": "viewer-request",
+            "functionArn": f"{functions_arn}/{tn(TP + 'site-uri-rewrite-1')}",
+        }
+    ]
+    [files] = distribution.inputs["orderedCacheBehaviors"]
+    assert files["functionAssociations"] == [
+        {
+            "eventType": "viewer-request",
+            "functionArn": f"{functions_arn}/{tn(TP + 'files-uri-rewrite-0')}",
+        }
+    ]
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 2,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 2,
+            R.BUCKET_POLICY: 2,
+            R.ORIGIN_ACCESS_CONTROL: 2,
+            R.CLOUDFRONT_FUNCTION: 2,  # the customized ones, no default 404 with a root route
+            R.DISTRIBUTION: 1,
+        }
+    )
+
+
 @mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
 def test_wildcard_routes_pass_the_path_through(pulumi_mocks):
     """A wildcard route gets one behavior and no prefix-strip function: the origin sees the

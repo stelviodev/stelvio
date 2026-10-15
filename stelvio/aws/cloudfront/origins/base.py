@@ -114,22 +114,24 @@ class ComponentCloudfrontAdapter(ABC):
         component_name: str,
         depends_on: list[pulumi.Resource],
     ) -> pulumi_aws.cloudfront.Function | None:
+        defaults = {
+            "runtime": "cloudfront-js-2.0",
+            "code": strip_path_pattern_function_js(self.route.path_pattern),
+            "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}",
+        }
+        props = self.customize("cloudfront_functions", {}, defaults)
         # The root route has no prefix to strip, and its function would run on every request
         # that reaches the default behavior (billed per invocation). A wildcard route's
-        # function compares the `*` literally and never matches a real path.
-        if self.route.is_root or self.route.path_pattern.endswith("*"):
+        # function compares the `*` literally and never matches a real path. Only the
+        # generated code is skipped: a customized `code` is the user's own function (a guard,
+        # a redirect) and keeps its association.
+        if (self.route.is_root or self.route.path_pattern.endswith("*")) and props.get(
+            "code"
+        ) == defaults["code"]:
             return None
         return pulumi_aws.cloudfront.Function(
             context().prefix(f"{component_name}-uri-rewrite-{self.idx}"),
-            **self.customize(
-                "cloudfront_functions",
-                {},
-                {
-                    "runtime": "cloudfront-js-2.0",
-                    "code": strip_path_pattern_function_js(self.route.path_pattern),
-                    "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}",
-                },
-            ),
+            **props,
             opts=pulumi.ResourceOptions.merge(
                 self.resource_opts,
                 pulumi.ResourceOptions(depends_on=depends_on),
