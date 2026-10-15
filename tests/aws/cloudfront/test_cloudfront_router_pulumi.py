@@ -9,50 +9,99 @@ from stelvio.dns import DnsProviderNotConfiguredError
 
 from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import R, provider_urn, tid, tn
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 
 
-@pulumi.runtime.test
 def test_create_resources_with_s3_bucket(pulumi_mocks):
     """Test that Router creates proper CloudFront resources for S3 bucket origin."""
     bucket = Bucket("test-bucket")
-    _ = bucket.resources
-
     router = Router(name="test-router")
     router.route("/static", bucket)
-    _ = router.resources
 
-    def check_resources(_):
-        # Verify CloudFront distribution was created
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-        dist = distributions[0]
-        assert dist.name == TP + "test-router"
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, router.resources]
 
-        # Verify Origin Access Control was created for S3
-        oacs = pulumi_mocks.created_origin_access_controls()
-        assert len(oacs) == 1
-        oac = oacs[0]
-        assert oac.name == TP + "test-bucket-oac-0"
+    deploy()
 
-        # Verify CloudFront functions were created
-        cf_functions = pulumi_mocks.created_cloudfront_functions()
-        # 1 for URI rewrite + 1 for default 404
-        assert len(cf_functions) == 2
-
-        # Verify S3 bucket policy was created for CloudFront access
-        bucket_policies = pulumi_mocks.created_bucket_policies()
-        assert len(bucket_policies) == 1
-
-    # Wait for both distribution and access policies to be created
-    resources = router.resources
-    if resources.access_policies:
-        pulumi.Output.all(
-            dist_id=resources.distribution.id,
-            policy_ids=[p.id for p in resources.access_policies],
-        ).apply(check_resources)
-    else:
-        resources.distribution.id.apply(check_resources)
+    origin_id = f"arn:aws:s3:::{tn(TP + 'test-bucket')}"
+    functions_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function"
+    not_found_arn = f"{functions_arn}/{tn(TP + 'test-router-default-404')}"
+    rewrite_arn = f"{functions_arn}/{tn(TP + 'test-bucket-uri-rewrite-0')}"
+    pulumi_mocks.assert_res(
+        "test-router",
+        R.DISTRIBUTION,
+        {
+            "enabled": True,
+            "isIpv6Enabled": True,
+            "priceClass": "PriceClass_100",
+            "viewerCertificate": {"cloudfrontDefaultCertificate": True},
+            "restrictions": {"geoRestriction": {"restrictionType": "none"}},
+            "origins": [
+                {
+                    "originId": origin_id,
+                    "domainName": f"{tn(TP + 'test-bucket')}.s3.{DEFAULT_REGION}.amazonaws.com",
+                    "originAccessControlId": tid(TP + "test-bucket-oac-0"),
+                }
+            ],
+            "defaultCacheBehavior": {
+                "targetOriginId": origin_id,
+                "allowedMethods": ["GET", "HEAD", "OPTIONS"],
+                "cachedMethods": ["GET", "HEAD"],
+                "compress": True,
+                "viewerProtocolPolicy": "redirect-to-https",
+                "forwardedValues": {"queryString": False, "cookies": {"forward": "none"}},
+                "minTtl": 0,
+                "defaultTtl": 0,
+                "maxTtl": 0,
+                "functionAssociations": [
+                    {"eventType": "viewer-request", "functionArn": not_found_arn}
+                ],
+            },
+            "orderedCacheBehaviors": [
+                {
+                    "pathPattern": "/static/*",
+                    "targetOriginId": origin_id,
+                    "allowedMethods": ["GET", "HEAD", "OPTIONS"],
+                    "cachedMethods": ["GET", "HEAD"],
+                    "compress": True,
+                    "viewerProtocolPolicy": "redirect-to-https",
+                    "forwardedValues": {
+                        "queryString": False,
+                        "cookies": {"forward": "none"},
+                        "headers": ["If-Modified-Since"],
+                    },
+                    "minTtl": 0,
+                    "defaultTtl": 86400,
+                    "maxTtl": 31536000,
+                    "functionAssociations": [
+                        {"eventType": "viewer-request", "functionArn": rewrite_arn}
+                    ],
+                }
+            ],
+        },
+    )
+    pulumi_mocks.assert_res(
+        "test-bucket-oac-0",
+        R.ORIGIN_ACCESS_CONTROL,
+        {
+            "description": "Origin Access Control for test-bucket route 0",
+            "originAccessControlOriginType": "s3",
+            "signingBehavior": "always",
+            "signingProtocol": "sigv4",
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.DISTRIBUTION: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            # URI rewrite + default 404
+            R.CLOUDFRONT_FUNCTION: 2,
+            R.BUCKET_POLICY: 1,
+        }
+    )
 
 
 @pulumi.runtime.test
@@ -64,105 +113,77 @@ def test_create_resources_no_routes_raises_error(pulumi_mocks):
         router._create_resources()
 
 
-@pulumi.runtime.test
 def test_create_resources_with_root_path(pulumi_mocks):
-    """Test that Router handles root path '/' as default cache behavior."""
+    """A '/' route points the default cache behavior at its origin; no 404 function."""
     bucket = Bucket("test-bucket")
-    _ = bucket.resources
-
     router = Router(name="test-router")
     router.route("/", bucket)
-    _ = router.resources
 
-    def check_resources(_):
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, router.resources]
 
-        # When root path exists, there should be no default 404 function
-        cf_functions = pulumi_mocks.created_cloudfront_functions()
-        function_names = [f.name for f in cf_functions]
-        assert TP + "test-router-default-404" not in function_names
+    deploy()
 
-    router.resources.distribution.id.apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_create_resources_without_root_path_creates_404(pulumi_mocks):
-    """Test that Router creates default 404 function when no root path defined."""
-    bucket = Bucket("test-bucket")
-    _ = bucket.resources
-
-    router = Router(name="test-router")
-    router.route("/static", bucket)  # Not root path
-    _ = router.resources
-
-    def check_resources(_):
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-
-        # Without root path, a default 404 function should be created
-        cf_functions = pulumi_mocks.created_cloudfront_functions()
-        function_names = [f.name for f in cf_functions]
-        assert TP + "test-router-default-404" in function_names
-
-    router.resources.distribution.id.apply(check_resources)
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    # A fixed template, not the bucket route's own behavior: that one lands at `//*`, which no
+    # request path matches.
+    assert distribution.inputs["defaultCacheBehavior"] == {
+        "targetOriginId": f"arn:aws:s3:::{tn(TP + 'test-bucket')}",
+        "allowedMethods": ["GET", "HEAD", "OPTIONS"],
+        "cachedMethods": ["GET", "HEAD"],
+        "compress": True,
+        "viewerProtocolPolicy": "redirect-to-https",
+        "forwardedValues": {"queryString": False, "cookies": {"forward": "none"}},
+        "minTtl": 0,
+        "defaultTtl": 0,
+        "maxTtl": 0,
+        "functionAssociations": [],
+    }
+    assert [b["pathPattern"] for b in distribution.inputs["orderedCacheBehaviors"]] == ["//*"]
+    # When root path exists, there should be no default 404 function
+    assert pulumi_mocks.created(R.CLOUDFRONT_FUNCTION, TP + "test-router-default-404") == []
 
 
-@pulumi.runtime.test
 def test_create_resources_with_multiple_routes(pulumi_mocks):
     """Test that Router handles multiple routes correctly."""
     bucket1 = Bucket("bucket1")
     bucket2 = Bucket("bucket2")
-    _ = bucket1.resources
-    _ = bucket2.resources
-
     router = Router(name="test-router")
     router.route("/static", bucket1)
     router.route("/files", bucket2)
-    resources = router.resources
 
-    def check_resources(_):
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket1.resources, bucket2.resources, router.resources]
 
-        # Check that we have 2 OACs (one per bucket)
-        oacs = pulumi_mocks.created_origin_access_controls()
-        assert len(oacs) == 2
+    deploy()
 
-    # Use the last created policy to ensure all resources are created
-    # The access_policies list contains the bucket policies
-    if resources.access_policies:
-        # Wait for the first bucket policy to be created
-        resources.access_policies[0].id.apply(check_resources)
-    else:
-        router.resources.distribution.id.apply(check_resources)
+    assert len(pulumi_mocks.created(R.DISTRIBUTION)) == 1
+    # One OAC per bucket
+    assert sorted(oac.name for oac in pulumi_mocks.created(R.ORIGIN_ACCESS_CONTROL)) == [
+        TP + "bucket1-oac-0",
+        TP + "bucket2-oac-1",
+    ]
 
 
-@pulumi.runtime.test
 def test_create_resources_with_url_origin(pulumi_mocks):
     """Test that Router creates proper resources for URL origins."""
     router = Router(name="test-router")
     router.route("/", "https://example.com")
-    _ = router.resources
 
-    def check_resources(_):
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
 
-        # URL origins don't need OAC like S3
-        oacs = pulumi_mocks.created_origin_access_controls()
-        # No OAC for URL origins
-        assert len(oacs) == 0
+    deploy()
 
-        # URL origins don't need bucket policies
-        bucket_policies = pulumi_mocks.created_bucket_policies()
-        assert len(bucket_policies) == 0
-
-        pulumi_mocks.assert_res(
-            "url-origin-host-rewrite-0", R.FUNCTION, {"runtime": "nodejs22.x"}, partial=True
-        )
-
-    router.resources.distribution.id.apply(check_resources)
+    assert len(pulumi_mocks.created(R.DISTRIBUTION)) == 1
+    # URL origins need neither an OAC nor a bucket policy
+    pulumi_mocks.assert_no_res(R.ORIGIN_ACCESS_CONTROL, R.BUCKET_POLICY)
+    pulumi_mocks.assert_res(
+        "url-origin-host-rewrite-0", R.FUNCTION, {"runtime": "nodejs22.x"}, partial=True
+    )
 
 
 def test_create_resources_custom_domain_no_dns_raises_error():
@@ -181,68 +202,58 @@ def test_create_resources_custom_domain_no_dns_raises_error():
         router._create_resources()
 
 
-@pulumi.runtime.test
 def test_create_resources_with_custom_domain_and_dns(pulumi_mocks, app_context_with_dns):
     """Test that Router creates ACM certificate and DNS record with custom domain."""
     custom_domain = "cdn-custom-domain-dns.example.com"
 
     bucket = Bucket("test-bucket")
-    _ = bucket.resources
-
     router = Router(name="test-router-custom-domain-dns", custom_domain=custom_domain)
     router.route("/", bucket)
-    resources = router.resources
-    assert resources.record is not None
 
-    def check_resources(_):
-        # Verify ACM certificate was created for this test's domain.
-        certificates = [
-            cert
-            for cert in pulumi_mocks.created_certificates()
-            if cert.inputs.get("domainName") == custom_domain
-        ]
-        assert len(certificates) == 1
-        cert = certificates[0]
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, router.resources]
 
-        # Verify certificate validation was created for this certificate.
-        validations = pulumi_mocks.created_certificate_validations()
-        matching_validations = [
-            validation
-            for validation in validations
-            if cert.name in str(validation.inputs.get("certificateArn", ""))
-        ]
-        assert len(matching_validations) == 1
+    deploy()
 
-        # Verify the router CNAME record was created (exclude ACM validation record).
-        router_dns_records = [
-            record
-            for record in app_context_with_dns.created_records
-            if record[0] == f"{TP}test-router-custom-domain-dns-cloudfront-record"
-        ]
-        assert len(router_dns_records) == 1
-        _, dns_name, record_type, _, ttl = router_dns_records[0]
-        assert dns_name == custom_domain
-        assert record_type == "CNAME"
-        assert ttl == 1
+    certificate_name = "test-router-custom-domain-dns-acm-validated-domain-certificate"
+    certificate_id = tid(TP + certificate_name)
+    certificate_arn = f"arn:aws:acm:{DEFAULT_REGION}:{ACCOUNT_ID}:certificate/{certificate_id}"
+    pulumi_mocks.assert_res(
+        certificate_name, R.CERTIFICATE, {"domainName": custom_domain}, partial=True
+    )
+    pulumi_mocks.assert_res(
+        f"{certificate_name}-validation",
+        R.CERTIFICATE_VALIDATION,
+        {"certificateArn": certificate_arn},
+        partial=True,
+    )
 
-        # Verify distribution has this custom domain alias and viewer certificate.
-        distributions = [
-            distribution
-            for distribution in pulumi_mocks.created_cloudfront_distributions()
-            if distribution.inputs.get("aliases") == [custom_domain]
-        ]
-        assert len(distributions) == 1
-        dist = distributions[0]
-        viewer_certificate = dist.inputs.get("viewerCertificate") or {}
-        assert viewer_certificate.get("sslSupportMethod") == "sni-only"
-        assert viewer_certificate.get("minimumProtocolVersion") == "TLSv1.2_2021"
+    pulumi_mocks.assert_res(
+        "test-router-custom-domain-dns-cloudfront-record",
+        R.CLOUDFLARE_RECORD,
+        {
+            "zoneId": "test-zone-id",
+            "name": custom_domain,
+            "type": "CNAME",
+            "content": f"{tid(TP + 'test-router-custom-domain-dns')}.cloudfront.net",
+            "ttl": 1,
+        },
+    )
 
-    # Wait on cert_validation to ensure all ACM resources are created before assertions
-    pulumi.Output.all(
-        dist_id=resources.distribution.id,
-        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
-        dns_record_id=resources.record.pulumi_resource.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res(
+        "test-router-custom-domain-dns",
+        R.DISTRIBUTION,
+        {
+            "aliases": [custom_domain],
+            "viewerCertificate": {
+                "acmCertificateArn": certificate_arn,
+                "sslSupportMethod": "sni-only",
+                "minimumProtocolVersion": "TLSv1.2_2021",
+            },
+        },
+        partial=True,
+    )
 
 
 @pulumi.runtime.test
@@ -275,41 +286,28 @@ def test_router_parented(pulumi_mocks, app_context_with_dns):
     return pulumi.Output.all(record.pulumi_resource.urn, acm.urn).apply(check)
 
 
-@pulumi.runtime.test
 def test_route_ordering_more_specific_paths_first(pulumi_mocks):
-    """Test that more specific paths are handled correctly.
+    """Test that more specific paths come first.
 
-    CloudFront uses path specificity for matching:
-    - Longer/more specific paths should match first
-    - /api/v1/* should match before /api/*
+    CloudFront uses the first cache behavior whose pattern matches, so /api/v1/*
+    must come before /api/* or it never matches.
     """
     bucket1 = Bucket("bucket-api")
     bucket2 = Bucket("bucket-api-v1")
-    _ = bucket1.resources
-    _ = bucket2.resources
-
     router = Router(name="test-router")
-    # Add routes in any order - CloudFront handles specificity
+    # Least specific first, so the Router has to reorder
     router.route("/api", bucket1)
     router.route("/api/v1", bucket2)
-    _ = router.resources
 
-    def check_resources(_):
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-        dist = distributions[0]
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket1.resources, bucket2.resources, router.resources]
 
-        # Verify orderedCacheBehaviors exist (note: Pulumi uses camelCase keys)
-        assert "orderedCacheBehaviors" in dist.inputs
-        behaviors = dist.inputs["orderedCacheBehaviors"]
+    deploy()
 
-        # Should have behaviors for both paths
-        assert behaviors is not None
-        patterns = {b["pathPattern"] for b in behaviors if "pathPattern" in b}
-        # Depending on adapter implementation, patterns may include wildcards
-        assert any(p.startswith("/api") for p in patterns)
-
-    router.resources.distribution.id.apply(check_resources)
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    behaviors = distribution.inputs["orderedCacheBehaviors"]
+    assert [b["pathPattern"] for b in behaviors] == ["/api/v1/*", "/api/*"]
 
 
 def test_route_order_preserved_in_routes_list():
@@ -328,172 +326,53 @@ def test_route_order_preserved_in_routes_list():
     assert router.routes[2].path_pattern == "/c"
 
 
-@pulumi.runtime.test
 def test_multiple_path_patterns_create_ordered_cache_behaviors(pulumi_mocks):
     """Test that multiple path patterns result in ordered cache behaviors."""
     bucket1 = Bucket("static")
     bucket2 = Bucket("files")
     bucket3 = Bucket("uploads")
-    _ = bucket1.resources
-    _ = bucket2.resources
-    _ = bucket3.resources
-
     router = Router(name="test-router")
     router.route("/static", bucket1)
     router.route("/files", bucket2)
     router.route("/uploads", bucket3)
-    _ = router.resources
 
-    def check_resources(_):
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-        dist = distributions[0]
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket1.resources, bucket2.resources, bucket3.resources, router.resources]
 
-        # Verify we have multiple origins
-        origins = dist.inputs["origins"]
-        assert len(origins) == 3
+    deploy()
 
-        # Verify orderedCacheBehaviors contains entries for each non-root path
-        behaviors = dist.inputs["orderedCacheBehaviors"]
-        assert behaviors is not None
-        # Each bucket should have an ordered cache behavior
-        assert len(behaviors) == 3
-
-    router.resources.distribution.id.apply(check_resources)
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    assert len(distribution.inputs["origins"]) == 3
+    behaviors = distribution.inputs["orderedCacheBehaviors"]
+    assert sorted(b["pathPattern"] for b in behaviors) == ["/files/*", "/static/*", "/uploads/*"]
 
 
-@pulumi.runtime.test
 def test_full_router_with_mixed_origins(
     pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd
 ):
     """Test Router with multiple different origin types."""
     bucket = Bucket("static-bucket")
     fn = Function("api-function", handler="functions/simple.handler")
-    _ = bucket.resources
-    _ = fn.resources
-
     router = Router(name="mixed-router")
     router.route("/static", bucket)
     router.route("/api", fn)
     router.route("/external", "https://httpbin.org/anything")
-    _ = router.resources
 
-    def check_resources(_):
-        # Verify single distribution created
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-        dist = distributions[0]
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, fn.resources, router.resources]
 
-        # Verify multiple origins
-        origins = dist.inputs["origins"]
-        assert len(origins) == 3
+    deploy()
 
-        # S3 origin should have OAC
-        s3_oacs = [
-            oac
-            for oac in pulumi_mocks.created_origin_access_controls()
-            if oac.inputs["originAccessControlOriginType"] == "s3"
-        ]
-        assert len(s3_oacs) == 1
-
-    router.resources.distribution.id.apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_router_exports_outputs(pulumi_mocks):
-    """Test that Router exports the expected Pulumi outputs."""
-    bucket = Bucket("test-bucket")
-    _ = bucket.resources
-
-    router = Router(name="output-test")
-    router.route("/", bucket)
-    _ = router.resources
-
-    def check_outputs(_):
-        # The router should have exported outputs for domain_name, distribution_id, num_origins
-        # These are verified by checking the distribution was created
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-
-    router.resources.distribution.id.apply(check_outputs)
-
-
-@pulumi.runtime.test
-def test_custom_domain_acm_uses_us_east_1_provider(pulumi_mocks, app_context_with_dns_eu_west):
-    """Test that ACM certificate is created with a us-east-1 provider for CloudFront.
-
-    CloudFront requires ACM certificates to be in us-east-1 regardless of the
-    region used for other components.
-    """
-    bucket = Bucket("test-bucket")
-    _ = bucket.resources
-
-    router = Router(name="test-router", custom_domain="cdn.example.com")
-    router.route("/", bucket)
-    resources = router.resources
-
-    def check_resources(_):
-        # Verify a us-east-1 provider was created
-        providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.inputs.get("region") == "us-east-1"]
-        assert len(us_east_1_providers) >= 1, "Expected at least one us-east-1 provider for ACM"
-
-        # Verify ACM certificate was created and uses the us-east-1 provider
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-        cert = certificates[0]
-        assert cert.provider == provider_urn("stelvio-aws-us-east-1")
-
-        # Verify certificate validation also uses the us-east-1 provider
-        validations = pulumi_mocks.created_certificate_validations()
-        assert len(validations) == 1
-        validation = validations[0]
-        assert validation.provider == provider_urn("stelvio-aws-us-east-1")
-
-    pulumi.Output.all(
-        dist_id=resources.distribution.id,
-        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
-    ).apply(check_resources)
-
-
-@pulumi.runtime.test
-def test_custom_domain_acm_skips_provider_when_already_us_east_1(
-    pulumi_mocks, app_context_with_dns
-):
-    """Test that no redundant us-east-1 provider is created when region is already us-east-1.
-
-    When the user's configured region is us-east-1, CloudFront ACM certificates
-    can use the default provider — no explicit provider is needed.
-    """
-    bucket = Bucket("test-bucket")
-    _ = bucket.resources
-
-    router = Router(name="test-router", custom_domain="cdn.example.com")
-    router.route("/", bucket)
-    resources = router.resources
-
-    def check_resources(_):
-        # Verify no extra us-east-1 provider was created (default is already us-east-1)
-        providers = pulumi_mocks.created_providers()
-        us_east_1_providers = [p for p in providers if p.name.startswith("stelvio-aws-us-east-1")]
-        assert len(us_east_1_providers) == 0, (
-            "Should not create a separate us-east-1 provider when region is already us-east-1"
-        )
-
-        # Verify ACM certificate does not use a separate us-east-1 provider
-        certificates = pulumi_mocks.created_certificates()
-        assert len(certificates) == 1
-        assert certificates[0].provider == provider_urn("stelvio-aws")
-
-        # Verify certificate validation also does not use a separate us-east-1 provider
-        validations = pulumi_mocks.created_certificate_validations()
-        assert len(validations) == 1
-        assert validations[0].provider == provider_urn("stelvio-aws")
-
-    pulumi.Output.all(
-        dist_id=resources.distribution.id,
-        cert_validation_id=resources.acm_validated_domain.resources.cert_validation.id,
-    ).apply(check_resources)
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    assert len(distribution.inputs["origins"]) == 3
+    # The URL origin needs no OAC
+    oacs = pulumi_mocks.created(R.ORIGIN_ACCESS_CONTROL)
+    assert {oac.name: oac.inputs["originAccessControlOriginType"] for oac in oacs} == {
+        TP + "static-bucket-oac-1": "s3",
+        TP + "api-function-oac-2": "lambda",
+    }
 
 
 def test_router_function_and_url_routes(pulumi_mocks, project_cwd):

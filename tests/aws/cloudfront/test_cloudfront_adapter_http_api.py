@@ -9,7 +9,6 @@ from ...conftest import TP
 from ..pulumi_mocks import ACCOUNT_ID, R, tid, tn
 
 
-@pulumi.runtime.test
 def test_router_creates_cloudfront_origin_for_http_api(
     pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd
 ):
@@ -18,71 +17,71 @@ def test_router_creates_cloudfront_origin_for_http_api(
 
     router = Router("http-router")
     router.route("/api", api)
-    resources = router.resources
 
     api_id = tid(TP + "edge-api")
     rewrite_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function/{tn(TP + 'edge-api-uri-rewrite-0')}"
 
-    def check(_):
-        assert len(pulumi_mocks.created(R.HTTP_API)) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
 
-        distributions = pulumi_mocks.created_cloudfront_distributions()
-        assert len(distributions) == 1
-        distribution = distributions[0]
-        assert distribution.inputs["origins"] == [
-            {
-                "customOriginConfig": {
-                    "httpPort": 80,
-                    "httpsPort": 443,
-                    "originProtocolPolicy": "https-only",
-                    "originSslProtocols": ["TLSv1.2"],
-                },
-                "domainName": f"{api_id}.execute-api.us-east-1.amazonaws.com",
-                "originId": api_id,
-            }
-        ]
+    deploy()
 
-        assert distribution.inputs["orderedCacheBehaviors"] == [
-            {
-                "pathPattern": "/api/*",
-                "allowedMethods": [
-                    "GET",
-                    "HEAD",
-                    "OPTIONS",
-                    "PUT",
-                    "POST",
-                    "PATCH",
-                    "DELETE",
-                ],
-                "cachedMethods": ["GET", "HEAD"],
-                "targetOriginId": api_id,
-                "compress": True,
-                "viewerProtocolPolicy": "redirect-to-https",
-                "forwardedValues": {
-                    "queryString": True,
-                    "cookies": {"forward": "none"},
-                    "headers": ["*"],
-                },
-                "minTtl": 0,
-                "defaultTtl": 0,
-                "maxTtl": 0,
-                "functionAssociations": [
-                    {"eventType": "viewer-request", "functionArn": rewrite_arn},
-                ],
-            }
-        ]
+    assert len(pulumi_mocks.created(R.HTTP_API)) == 1
 
-        rewrite = pulumi_mocks.created_cloudfront_functions(TP + "edge-api-uri-rewrite-0")
-        assert len(rewrite) == 1
-        assert rewrite[0].inputs["code"] == strip_path_pattern_function_js("/api")
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    assert distribution.inputs["origins"] == [
+        {
+            "customOriginConfig": {
+                "httpPort": 80,
+                "httpsPort": 443,
+                "originProtocolPolicy": "https-only",
+                "originSslProtocols": ["TLSv1.2"],
+            },
+            "domainName": f"{api_id}.execute-api.us-east-1.amazonaws.com",
+            "originId": api_id,
+        }
+    ]
 
-        oacs = pulumi_mocks.created_origin_access_controls()
-        assert len(oacs) == 0
+    assert distribution.inputs["orderedCacheBehaviors"] == [
+        {
+            "pathPattern": "/api/*",
+            "allowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "POST",
+                "PATCH",
+                "DELETE",
+            ],
+            "cachedMethods": ["GET", "HEAD"],
+            "targetOriginId": api_id,
+            "compress": True,
+            "viewerProtocolPolicy": "redirect-to-https",
+            "forwardedValues": {
+                "queryString": True,
+                "cookies": {"forward": "none"},
+                "headers": ["*"],
+            },
+            "minTtl": 0,
+            "defaultTtl": 0,
+            "maxTtl": 0,
+            "functionAssociations": [
+                {"eventType": "viewer-request", "functionArn": rewrite_arn},
+            ],
+        }
+    ]
 
-    resources.distribution.id.apply(check)
+    pulumi_mocks.assert_res(
+        "edge-api-uri-rewrite-0",
+        R.CLOUDFRONT_FUNCTION,
+        {"code": strip_path_pattern_function_js("/api")},
+        partial=True,
+    )
+    pulumi_mocks.assert_no_res(R.ORIGIN_ACCESS_CONTROL)
 
 
-@pulumi.runtime.test
 def test_http_api_origin_domain_uses_resolved_region(
     pulumi_mocks, mock_get_or_install_dependencies_function, project_cwd, no_region_context
 ):
@@ -98,17 +97,19 @@ def test_http_api_origin_domain_uses_resolved_region(
 
     router = Router("http-router")
     router.route("/api", api)
-    resources = router.resources
 
     api_id = tid(TP + "edge-api")
 
-    def check(_):
-        distribution = pulumi_mocks.assert_res("http-router", R.DISTRIBUTION)
-        assert distribution.inputs["origins"][0]["domainName"] == (
-            f"{api_id}.execute-api.eu-central-1.amazonaws.com"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
 
-    resources.distribution.id.apply(check)
+    deploy()
+
+    distribution = pulumi_mocks.assert_res("http-router", R.DISTRIBUTION)
+    assert distribution.inputs["origins"][0]["domainName"] == (
+        f"{api_id}.execute-api.eu-central-1.amazonaws.com"
+    )
 
 
 @mark.parametrize(
@@ -147,7 +148,6 @@ def test_http_api_origin_domain_uses_resolved_region(
         "shared_domain",
     ],
 )
-@pulumi.runtime.test
 def test_http_api_origin_domain_and_path(
     pulumi_mocks,
     mock_get_or_install_dependencies_function,
@@ -165,11 +165,13 @@ def test_http_api_origin_domain_and_path(
 
     router = Router("origin-router")
     router.route("/api", api)
-    resources = router.resources
 
-    def check(_):
-        distribution = pulumi_mocks.created_cloudfront_distributions()[0]
-        origin = distribution.inputs["origins"][0]
-        assert (origin["domainName"], origin.get("originPath")) == expected_origin
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
 
-    resources.distribution.id.apply(check)
+    deploy()
+
+    [distribution] = pulumi_mocks.created(R.DISTRIBUTION)
+    origin = distribution.inputs["origins"][0]
+    assert (origin["domainName"], origin.get("originPath")) == expected_origin
