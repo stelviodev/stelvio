@@ -189,7 +189,10 @@ def test_cleanup_failure_reports_exact_recovery_and_is_idempotent(world, network
         raise RuntimeError("retained temporary unit")
 
     session.runtime.close = failed
-    with raises(RuntimeError, match="VPC dev cleanup incomplete"):
+    with raises(
+        RuntimeError,
+        match="VPC networking cleanup incomplete; preserve recovery ownership",
+    ):
         session.close()
     session.close()
     assert (
