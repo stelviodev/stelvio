@@ -4,7 +4,7 @@
 # This file is the single source of truth for test/worker counts. Counts are
 # chosen so tests divide evenly across workers with no straggler left running
 # alone at the end. Adjust when adding/removing tests:
-#   integration       — 185 tests / 12 workers  (VPC-creating cases moved out)
+#   integration       — 187 tests / 11 workers  (VPC-creating cases moved out)
 #   integration_vpc   —   8 tests /  4 workers  (account VPC quota is 5,
 #                       including the default VPC)
 #   integration_cf    —  14 tests /  7 workers
@@ -25,8 +25,8 @@ INTEGRATION_DIR="tests/integration"
 pids=()
 exit_code=0
 
-# Standard tier — 12 workers for 185 tests (no VPC creates)
-uv run pytest "$INTEGRATION_DIR" --integration $COMMON_ARGS -n 12 &
+# Standard tier — 11 workers for 187 tests (no VPC creates)
+uv run pytest "$INTEGRATION_DIR" --integration $COMMON_ARGS -n 11 &
 pids+=($!)
 
 # VPC tier — 4 workers for 8 tests (quota is 5 VPCs including the default VPC)

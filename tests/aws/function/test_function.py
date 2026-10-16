@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pulumi
 import pytest
@@ -57,6 +57,7 @@ from stelvio.aws.types import (
 from stelvio.link import Link, Linkable
 
 from ...conftest import TP
+from ..conftest import assert_hash_truncated
 from ..pulumi_mocks import R
 
 LAMBDA_ASSUME_ROLE_POLICY = [
@@ -410,72 +411,71 @@ MULTI_LAYER_FB_TC = replace(
 
 def _assert_iam_policy(pulumi_mocks, test_case: FunctionTestCase):
     """Verify the IAM policy creation."""
-    policies = pulumi_mocks.created_policies(f"{TP + test_case.name}-p")
     if test_case.expected_policy:
-        assert len(policies) == 1, "Expected 1 policy to be created"
-        policy_args = policies[0]
-        policy_str = json.dumps(test_case.expected_policy)
-        assert policy_str == policy_args.inputs["policy"], "Policy content mismatch"
+        pulumi_mocks.assert_res(
+            f"{test_case.name}-p",
+            R.POLICY,
+            {"policy": json.dumps(test_case.expected_policy), "path": "/"},
+            partial=True,
+        )
     else:
-        assert len(policies) == 0, "Expected no policy to be created"
+        pulumi_mocks.assert_no_res(R.POLICY)
 
 
 def _assert_iam_role(pulumi_mocks, test_case: FunctionTestCase):
     """Verify the IAM role creation."""
-    roles = pulumi_mocks.created_roles(f"{TP + test_case.name}-r")
-    assert len(roles) == 1, "Expected 1 role to be created"
-    assert roles[0].inputs == {"assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)}
+    pulumi_mocks.assert_res(
+        f"{test_case.name}-r",
+        R.ROLE,
+        {"assumeRolePolicy": json.dumps(LAMBDA_ASSUME_ROLE_POLICY)},
+    )
 
 
 def _assert_role_attachments(pulumi_mocks, test_case: FunctionTestCase, function: Function):
-    """Verify the IAM role policy attachments."""
-    role_attachments = pulumi_mocks.created_role_policy_attachments()
-    expected_attachments = 1 + (1 if test_case.expected_policy else 0)
-    assert len(role_attachments) == expected_attachments
-
-    basic_role_attachment = None
-    default_role_attachment = None
-    for attachment in role_attachments:
-        if (
-            attachment.inputs["policyArn"]
-            == "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        ):
-            basic_role_attachment = attachment
-        else:
-            default_role_attachment = attachment
-
-    # Verify basic execution role attachment
-    assert basic_role_attachment is not None
-    assert basic_role_attachment.name == f"{TP + test_case.name}-basic-execution-r-p-attachment"
-    assert basic_role_attachment.inputs["role"] == f"{TP + test_case.name}-r-test-name"
-
+    """Verify the IAM role policy attachments, and that `resources.policy` is the attached one."""
+    name = TP + test_case.name
+    role = f"{name}-r-test-name"
+    policy_arn = f"arn:aws:iam::123456789012:policy/{name}-p-test-name"
+    expected = [
+        (
+            f"{name}-basic-execution-r-p-attachment",
+            {
+                "role": role,
+                "policyArn": "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+            },
+        )
+    ]
     if test_case.expected_policy:
-        assert default_role_attachment is not None
-        assert default_role_attachment.name == f"{TP + test_case.name}-default-r-p-attachment"
-        assert default_role_attachment.inputs["role"] == f"{TP + test_case.name}-r-test-name"
+        expected.append(
+            (f"{name}-default-r-p-attachment", {"role": role, "policyArn": policy_arn})
+        )
 
-        def assert_attachment_arn(policy_arn):
-            assert default_role_attachment.inputs["policyArn"] == policy_arn
+        @pulumi.runtime.test
+        def check_policy_handle():
+            def check(arn):
+                assert arn == policy_arn
 
-        assert function.resources.policy is not None, "Function policy resource should exist"
-        function.resources.policy.arn.apply(assert_attachment_arn)
+            return function.resources.policy.arn.apply(check)
+
+        check_policy_handle()
+    else:
+        assert function.resources.policy is None
+    attachments = sorted(pulumi_mocks.created(R.ROLE_POLICY_ATTACHMENT), key=lambda a: a.name)
+    assert [(a.name, a.inputs) for a in attachments] == expected
 
 
 def _assert_lambda_function(
     pulumi_mocks,
     project_cwd,
-    function: Function,
     test_case: FunctionTestCase,
     expected_dependencies_path: Path | None,
 ):
-    functions = pulumi_mocks.created_functions(TP + test_case.name)
-    assert len(functions) == 1
-    function_args = functions[0]
-
-    def assert_function_role_arn(role_arn):
-        assert function_args.inputs["role"] == role_arn
-
-    function.resources.role.arn.apply(assert_function_role_arn)
+    function_args = pulumi_mocks.assert_res(
+        test_case.name,
+        R.FUNCTION,
+        {"role": f"arn:aws:iam::123456789012:role/{TP}{test_case.name}-r-test-name"},
+        partial=True,
+    )
 
     assert_function_configuration(function_args, test_case)
     assert_function_code(
@@ -494,16 +494,14 @@ def _assert_ide_file(project_cwd, test_case: FunctionTestCase):
 def verify_function_resources(
     pulumi_mocks,
     project_cwd,
-    function,
+    function: Function,
     test_case: FunctionTestCase,
     expected_dependencies_path: Path | None,
 ):
     _assert_iam_policy(pulumi_mocks, test_case)
     _assert_iam_role(pulumi_mocks, test_case)
     _assert_role_attachments(pulumi_mocks, test_case, function)
-    _assert_lambda_function(
-        pulumi_mocks, project_cwd, function, test_case, expected_dependencies_path
-    )
+    _assert_lambda_function(pulumi_mocks, project_cwd, test_case, expected_dependencies_path)
     _assert_ide_file(project_cwd, test_case)
 
 
@@ -557,7 +555,6 @@ def test_function_properties(pulumi_mocks, project_cwd):
     ],
     ids=lambda test_case: test_case.test_id,
 )
-@pulumi.runtime.test
 def test_function__(
     mock_get_or_install_dependencies_function,
     mock_get_or_install_dependencies_layer,
@@ -580,46 +577,47 @@ def test_function__(
     if isinstance(test_case.requirements, str):
         (project_cwd / test_case.requirements).touch()
 
-    # Assert
-    def check_resources(_):
-        requirements = test_case.requirements
-        if isinstance(requirements, list):  # an empty or blank-only list disables dependencies
-            expect_requirements = any(line.strip() for line in requirements)
-        else:
-            expect_requirements = bool(requirements) or (
-                test_case.create_default_requirements_at and requirements is not False
-            )
-        dependencies_path = (
-            mock_get_or_install_dependencies_function.return_value if expect_requirements else None
-        )
-        verify_function_resources(
-            pulumi_mocks, project_cwd, function, test_case, dependencies_path
-        )
-        if expect_requirements:
-            mock_get_or_install_dependencies_function.assert_called_once_with(
-                requirements_source=RequirementsSpec(
-                    content="\n".join(requirements) if isinstance(requirements, list) else None,
-                    path_from_root=Path(requirements)
-                    if isinstance(requirements, str)
-                    else (
-                        Path(test_case.create_default_requirements_at)
-                        if test_case.create_default_requirements_at
-                        and requirements is not False
-                        and not isinstance(requirements, list)
-                        else None
-                    ),
-                ),
-                runtime=test_case.runtime or DEFAULT_RUNTIME,
-                architecture=test_case.arch or DEFAULT_ARCHITECTURE,
-                project_root=project_cwd,
-                log_context=f"Function: {test_case.input_handler}",
-                cache_subdirectory=_FUNCTION_CACHE_SUBDIR,
-            )
-        else:
-            mock_get_or_install_dependencies_function.assert_not_called()
-
     # Act
-    function.invoke_arn.apply(check_resources)
+    @pulumi.runtime.test
+    def deploy():
+        return function.resources
+
+    deploy()
+
+    # Assert
+    requirements = test_case.requirements
+    if isinstance(requirements, list):  # an empty or blank-only list disables dependencies
+        expect_requirements = any(line.strip() for line in requirements)
+    else:
+        expect_requirements = bool(requirements) or (
+            test_case.create_default_requirements_at and requirements is not False
+        )
+    dependencies_path = (
+        mock_get_or_install_dependencies_function.return_value if expect_requirements else None
+    )
+    verify_function_resources(pulumi_mocks, project_cwd, function, test_case, dependencies_path)
+    if expect_requirements:
+        mock_get_or_install_dependencies_function.assert_called_once_with(
+            requirements_source=RequirementsSpec(
+                content="\n".join(requirements) if isinstance(requirements, list) else None,
+                path_from_root=Path(requirements)
+                if isinstance(requirements, str)
+                else (
+                    Path(test_case.create_default_requirements_at)
+                    if test_case.create_default_requirements_at
+                    and requirements is not False
+                    and not isinstance(requirements, list)
+                    else None
+                ),
+            ),
+            runtime=test_case.runtime or DEFAULT_RUNTIME,
+            architecture=test_case.arch or DEFAULT_ARCHITECTURE,
+            project_root=project_cwd,
+            log_context=f"Function: {test_case.input_handler}",
+            cache_subdirectory=_FUNCTION_CACHE_SUBDIR,
+        )
+    else:
+        mock_get_or_install_dependencies_function.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -637,60 +635,39 @@ def test_function__(
         "ide_files_two_folder_based_from_different_folders",
     ],
 )
-@pulumi.runtime.test
 def test_functions_multiple__(pulumi_mocks, project_cwd, test_case_set):
-    def create_and_verify_function(test_case):
+    @pulumi.runtime.test
+    def deploy(function):
+        return function.resources
+
+    for test_case in test_case_set:
         function = Function(test_case.name, handler=test_case.input_handler, links=test_case.links)
-        function_resource = function.resources.function
-        return function, function_resource
-
-    def process_test_cases(remaining_test_cases):
-        if not remaining_test_cases:
-            return
-
-        test_case = remaining_test_cases[0]
-        function, function_resource = create_and_verify_function(test_case)
-
-        def check_resources(_):
-            verify_function_resources(pulumi_mocks, project_cwd, function, test_case, None)
-            pulumi_mocks.created_resources = []
-            process_test_cases(remaining_test_cases[1:])
-
-        function_resource.id.apply(check_resources)
-
-    process_test_cases(test_case_set)
+        deploy(function)
+        verify_function_resources(pulumi_mocks, project_cwd, function, test_case, None)
+        pulumi_mocks.created_resources = []
 
 
-@pulumi.runtime.test
-@patch("stelvio.aws.function.function.resource_name")
-def test_function_uses_resource_name(mock_resource_name, pulumi_mocks, project_cwd):
-    # Arrange - Mock resource_name to return a specific value
-    mocked_name = "test-test-mocked-safe-function-name"
-    mock_resource_name.return_value = mocked_name
+def test_function_long_name_truncates_function_role_and_policy_names(pulumi_mocks, project_cwd):
+    permission = Link("perm", {}, [AwsPermission(actions=["s3:GetObject"], resources=["*"])])
 
-    # Act - Create function
-    function = Function("my-function", handler="functions/simple.handler")
-    _ = function.resources
+    @pulumi.runtime.test
+    def deploy():
+        return Function(
+            "f" * 120, handler="functions/simple.handler", links=[permission]
+        ).resources
 
-    # Assert
-    def check_resource_name_usage(_):
-        # Find the call for this specific Lambda function
-        lambda_calls = [
-            call
-            for call in mock_resource_name.call_args_list
-            if call.args[0] == "my-function"
-            and call.kwargs["limit"] == 64
-            and not call.kwargs.get("suffix")
-        ]
+    deploy()
 
-        assert len(lambda_calls) == 1
-
-        # Verify the Lambda function was created with the mocked resource_name return value
-        functions = pulumi_mocks.created_functions()
-        assert len(functions) == 1
-        assert functions[0].name == mocked_name
-
-    function.resources.function.id.apply(check_resource_name_usage)
+    # Lambda 64, IAM role 64, IAM policy 128, each minus the 8-char Pulumi suffix
+    [function] = pulumi_mocks.created(R.FUNCTION)
+    [role] = pulumi_mocks.created(R.ROLE)
+    [policy] = pulumi_mocks.created(R.POLICY)
+    assert_hash_truncated(function.name, 56)
+    assert_hash_truncated(role.name, 56, suffix="-r")
+    assert_hash_truncated(policy.name, 120, suffix="-p")
+    pulumi_mocks.assert_res_counts(
+        {R.FUNCTION: 1, R.ROLE: 1, R.POLICY: 1, R.ROLE_POLICY_ATTACHMENT: 2}
+    )
 
 
 @pytest.mark.parametrize(
@@ -964,7 +941,6 @@ def _assert_bridge_env_vars(function_args, test_case: FunctionTestCase):
     "mock_get_or_install_dependencies_layer",
     "project_cwd",
 )
-@pulumi.runtime.test
 def test_function_dev_mode__(pulumi_mocks, dev_mode_context, test_case):
     """Test that functions are created correctly in bridge mode."""
     mock_discover, mock_bridge_archive = dev_mode_context
@@ -979,7 +955,12 @@ def test_function_dev_mode__(pulumi_mocks, dev_mode_context, test_case):
         function_kwargs["layers"] = [layer() for layer in test_case.layers]
 
     function = Function(test_case.name, **function_kwargs)
-    _ = function.resources
+
+    @pulumi.runtime.test
+    def deploy():
+        return function.resources
+
+    deploy()
 
     # Verify AppSync was discovered
     mock_discover.assert_called_once()
@@ -987,67 +968,36 @@ def test_function_dev_mode__(pulumi_mocks, dev_mode_context, test_case):
     # Verify bridge archive was created
     mock_bridge_archive.assert_called_once()
 
-    # Create assertion function to be called after resources are created
-    def check_resources(_):
-        # Verify function configuration
-        functions = pulumi_mocks.created_functions(TP + test_case.name)
-        assert len(functions) == 1
-        function_args = functions[0]
+    function_args = pulumi_mocks.assert_res(
+        test_case.name, R.FUNCTION, {"handler": "stlv_function_stub.handler"}, partial=True
+    )
 
-        # Check handler is the stub handler
-        assert function_args.inputs["handler"] == "stlv_function_stub.handler"
+    # Check bridge environment variables
+    _assert_bridge_env_vars(function_args, test_case)
 
-        # Check bridge environment variables
-        _assert_bridge_env_vars(function_args, test_case)
+    # Verify code uses bridge archive
+    code: AssetArchive = function_args.inputs["code"]
+    assert "stlv_function_stub.py" in code.assets
+    assert isinstance(code.assets["stlv_function_stub.py"], StringAsset)
 
-        # Verify code uses bridge archive
-        code: AssetArchive = function_args.inputs["code"]
-        assert "stlv_function_stub.py" in code.assets
-        assert isinstance(code.assets["stlv_function_stub.py"], StringAsset)
-
-        # If test case has layers, verify they're still applied
-        if test_case.expected_layers:
-            assert_function_layers(function_args, test_case.expected_layers)
-
-    # Apply assertions after function resources are created
-    function.invoke_arn.apply(check_resources)
+    # If test case has layers, verify they're still applied
+    if test_case.expected_layers:
+        assert_function_layers(function_args, test_case.expected_layers)
 
 
 @pulumi.runtime.test
 def test_function_dev_mode_discovers_bridge_in_default_region(
-    project_cwd, pulumi_mocks, no_region_context
+    project_cwd, pulumi_mocks, no_region_context, request
 ):
     """Bridge AppSync discovery uses the chain-resolved default region — with no region
     configured (the default new-user setup), the raw context region would be None."""
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
-    from stelvio.config import AwsConfig
-    from stelvio.context import AppContext, _ContextStore
+    # Requested in the body: dev_mode_context copies the live context, so it must run after
+    # no_region_context has replaced it, and argument order doesn't guarantee that.
+    mock_discover, _ = request.getfixturevalue("dev_mode_context")
 
-    # no_region_context's context, but with dev_mode on
-    _ContextStore.clear()
-    _ContextStore.set(
-        AppContext(name="test", env="test", aws=AwsConfig(), home="aws", dev_mode=True)
-    )
+    _ = Function("test-function", handler="functions/simple.handler").resources
 
-    with (
-        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
-        patch(
-            "stelvio.aws.function.function._create_lambda_bridge_archive"
-        ) as mock_bridge_archive,
-    ):
-        mock_discover.return_value = AppSyncResource(
-            api_id="test-api-id",
-            http_endpoint="https://test-http.appsync.amazonaws.com",
-            realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
-            api_key="test-api-key-123",
-        )
-        mock_bridge_archive.return_value = AssetArchive(
-            {"stlv_function_stub.py": StringAsset("stub-content")}
-        )
-
-        _ = Function("test-function", handler="functions/simple.handler").resources
-
-        mock_discover.assert_called_once_with(region="eu-central-1", profile=None)
+    mock_discover.assert_called_once_with(region="eu-central-1", profile=None)
 
 
 @pulumi.runtime.test
@@ -1069,111 +1019,30 @@ def test_bridge_event_env_always_injects_function_region(
 
 
 @pulumi.runtime.test
-def test_function_dev_mode_registers_handler(project_cwd, pulumi_mocks):
+def test_function_dev_mode_registers_handler(project_cwd, pulumi_mocks, dev_mode_context):
     """Test that function registers itself with WebsocketHandlers in bridge mode."""
     from stelvio.bridge.local.handlers import WebsocketHandlers
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
 
-    mock_appsync_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test-http.appsync.amazonaws.com",
-        realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
-        api_key="test-api-key-123",
-    )
+    function = Function("test-function", handler="functions/simple.handler")
 
-    # Clear handlers before test
-    WebsocketHandlers._handlers.clear()
+    def check_registration(_):
+        assert WebsocketHandlers.all() == [function]
 
-    with (
-        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
-        patch(
-            "stelvio.aws.function.function._create_lambda_bridge_archive"
-        ) as mock_bridge_archive,
-        patch("stelvio.aws.function.function.context") as mock_context,
-    ):
-        # Setup mocks
-        mock_discover.return_value = mock_appsync_resource
-        mock_bridge_archive.return_value = AssetArchive(
-            {"function_stub.py": StringAsset("stub-content")}
-        )
-
-        # Mock context to return dev_mode=True
-        mock_ctx = MagicMock()
-        mock_ctx.dev_mode = True
-        mock_ctx.name = "test"
-        mock_ctx.env = "test"
-        mock_ctx.prefix.return_value = TP
-        mock_ctx.aws.region = "us-east-1"
-        mock_ctx.aws.profile = None
-        mock_context.return_value = mock_ctx
-
-        # Create function
-        function = Function("test-function", handler="functions/simple.handler")
-
-        # Create check function
-        def check_registration(_):
-            # Verify handler was registered
-            assert len(WebsocketHandlers._handlers) == 1
-            assert function in WebsocketHandlers._handlers
-
-        # Apply check after function resources are created
-        function.invoke_arn.apply(check_registration)
+    return function.invoke_arn.apply(check_registration)
 
 
-@pulumi.runtime.test
-def test_function_dev_mode_generates_endpoint_id(project_cwd, pulumi_mocks):
-    """Test that function generates a unique endpoint ID in bridge mode."""
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
+def test_function_dev_mode_stub_carries_endpoint_id(project_cwd, pulumi_mocks, dev_mode_context):
+    """The stub Lambda's endpoint id is the function name plus an 8-hex random tail."""
 
-    mock_appsync_resource = AppSyncResource(
-        api_id="test-api-id",
-        http_endpoint="https://test-http.appsync.amazonaws.com",
-        realtime_endpoint="wss://test-realtime.appsync.amazonaws.com",
-        api_key="test-api-key-123",
-    )
+    @pulumi.runtime.test
+    def deploy():
+        return Function("test-function", handler="functions/simple.handler").resources
 
-    with (
-        patch("stelvio.aws.function.function.discover_or_create_appsync") as mock_discover,
-        patch(
-            "stelvio.aws.function.function._create_lambda_bridge_archive"
-        ) as mock_bridge_archive,
-        patch("stelvio.aws.function.function.context") as mock_context,
-    ):
-        # Setup mocks
-        mock_discover.return_value = mock_appsync_resource
-        mock_bridge_archive.return_value = AssetArchive(
-            {"function_stub.py": StringAsset("stub-content")}
-        )
+    deploy()
 
-        # Mock context to return dev_mode=True
-        mock_ctx = MagicMock()
-        mock_ctx.dev_mode = True
-        mock_ctx.name = "test"
-        mock_ctx.env = "test"
-        mock_ctx.prefix.return_value = TP
-        mock_ctx.aws.region = "us-east-1"
-        mock_ctx.aws.profile = None
-        mock_context.return_value = mock_ctx
-
-        # Create two functions with different names to test unique endpoint ID generation
-        function1 = Function("test-function-1", handler="functions/simple.handler")
-        function2 = Function("test-function-2", handler="functions/simple.handler")
-
-        # Create check function
-        def check_endpoint_ids(_):
-            # Get endpoint IDs
-            endpoint_id_1 = function1._dev_endpoint_id
-            endpoint_id_2 = function2._dev_endpoint_id
-
-            # Verify both have endpoint IDs
-            assert endpoint_id_1 is not None
-            assert endpoint_id_2 is not None
-
-            # Verify they are different (unique)
-            assert endpoint_id_1 != endpoint_id_2
-
-        # Apply check after function resources are created
-        pulumi.Output.all(function1.invoke_arn, function2.invoke_arn).apply(check_endpoint_ids)
+    [stub] = pulumi_mocks.created(R.FUNCTION)
+    endpoint_id = stub.inputs["environment"]["variables"]["STLV_DEV_ENDPOINT_ID"]
+    assert re.fullmatch(r"test-function-[0-9a-f]{8}", endpoint_id)
 
 
 # Function Link Tests
@@ -1212,65 +1081,41 @@ def test_function_link(pulumi_mocks, project_cwd):
     pulumi.Output.all(link.properties, link.permissions).apply(verify_link)
 
 
-@pulumi.runtime.test
 def test_function_to_function_link(pulumi_mocks, project_cwd):
     """Test that linking one function to another grants invoke permissions."""
-    # Create target function
-    target = Function("target-function", handler="functions/simple.handler")
 
-    # Create caller function that links to target
-    caller = Function(
-        "caller-function",
-        handler="functions/simple.handler",
-        links=[target],
-    )
+    @pulumi.runtime.test
+    def deploy():
+        target = Function("target-function", handler="functions/simple.handler")
+        return Function(
+            "caller-function", handler="functions/simple.handler", links=[target]
+        ).resources
 
-    def verify_caller_policy(_):
-        # Verify caller function has IAM policy with invoke permission for target
-        policies = pulumi_mocks.created_policies(TP + "caller-function-p")
-        assert len(policies) == 1
+    deploy()
 
-        policy_content = json.loads(policies[0].inputs["policy"])
-        assert len(policy_content) == 1
-
-        statement = policy_content[0]
-        assert statement["actions"] == ["lambda:InvokeFunction"]
-
-        # Resource should be target function's ARN
-        expected_target_arn = FUNCTION_ARN_TEMPLATE.format(name=TP + "target-function-test-name")
-        assert statement["resources"] == [expected_target_arn]
-
-    caller.invoke_arn.apply(verify_caller_policy)
+    policy = pulumi_mocks.assert_res("caller-function-p", R.POLICY)
+    expected_target_arn = FUNCTION_ARN_TEMPLATE.format(name=TP + "target-function-test-name")
+    assert json.loads(policy.inputs["policy"]) == [
+        {"actions": ["lambda:InvokeFunction"], "resources": [expected_target_arn]}
+    ]
 
 
-@pulumi.runtime.test
 def test_function_to_function_link_env_vars(pulumi_mocks, project_cwd):
     """Test that linking to a function creates correct environment variables."""
-    target = Function("target-fn", handler="functions/simple.handler")
 
-    caller = Function(
-        "caller-fn",
-        handler="functions/simple.handler",
-        links=[target],
-    )
+    @pulumi.runtime.test
+    def deploy():
+        target = Function("target-fn", handler="functions/simple.handler")
+        return Function("caller-fn", handler="functions/simple.handler", links=[target]).resources
 
-    def verify_env_vars(_):
-        functions = pulumi_mocks.created_functions(TP + "caller-fn")
-        assert len(functions) == 1
+    deploy()
 
-        env_vars = functions[0].inputs["environment"]["variables"]
-
-        # Should have STLV_TARGET_FN_FUNCTION_ARN and STLV_TARGET_FN_FUNCTION_NAME
-        assert "STLV_TARGET_FN_FUNCTION_ARN" in env_vars
-        assert "STLV_TARGET_FN_FUNCTION_NAME" in env_vars
-
-        expected_target_name = TP + "target-fn-test-name"
-        expected_target_arn = FUNCTION_ARN_TEMPLATE.format(name=expected_target_name)
-
-        assert env_vars["STLV_TARGET_FN_FUNCTION_NAME"] == expected_target_name
-        assert env_vars["STLV_TARGET_FN_FUNCTION_ARN"] == expected_target_arn
-
-    caller.invoke_arn.apply(verify_env_vars)
+    caller = pulumi_mocks.assert_res("caller-fn", R.FUNCTION)
+    expected_target_name = TP + "target-fn-test-name"
+    assert caller.inputs["environment"]["variables"] == {
+        "STLV_TARGET_FN_FUNCTION_ARN": FUNCTION_ARN_TEMPLATE.format(name=expected_target_name),
+        "STLV_TARGET_FN_FUNCTION_NAME": expected_target_name,
+    }
 
 
 def test_function_packages_linked_files(pulumi_mocks, project_cwd):

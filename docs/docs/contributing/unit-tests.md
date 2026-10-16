@@ -134,9 +134,6 @@ the input you didn't mean to send, so prefer it. JSON-string inputs compare pars
 all the resources, not just the ones you're testing**, otherwise everything outside your three
 assertions is unguarded. `assert_no_res(*types)` is the negative form.
 
-Older suites use `created_*` helpers returning lists you count by hand. Read them, don't write
-them.
-
 ## Parametrize what varies
 
 Tests that differ only in inputs and expected values are one parametrized test:
@@ -164,9 +161,11 @@ context only when the failure couldn't say which resource it was.
 
 ## Shared suites
 
-A new component also registers in four cross-component suites. Reviewers check all four:
+A new component also registers in two cross-component suites. Reviewers check both:
 
 - `tests/aws/test_tagging_contract.py`: `tags=` lands on every taggable resource.
-- `tests/aws/test_customization_sync.py`: customize keys stay in sync with `Resources` fields.
-- `tests/aws/test_keyword_only_constructor_params.py`: `tags` and `customize` are keyword-only.
 - `tests/test_type_urns.py`: the canonical URN list, with its count.
+
+`tests/aws/test_keyword_only_constructor_params.py` finds every component by itself and
+checks that `tags`, `customize` and `parent` are keyword-only. A component without `tags` or
+`customize` goes in its exception set.

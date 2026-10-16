@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Systems Administration",
 ]
@@ -77,6 +78,9 @@ markers = [
     "integration_cf: integration tests with CloudFront distributions (slow teardown)",
     "integration_dns: integration tests that need a Route 53 domain configured",
 ]
+
+# A parametrized scan must fail collection if a broken scan produces no cases.
+empty_parameter_set_mark = "fail_at_collect"
 
 [tool.coverage.report]
 omit = ["*/tests/*"]
