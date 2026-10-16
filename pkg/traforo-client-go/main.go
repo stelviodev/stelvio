@@ -3,9 +3,10 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/stelviodev/traforo/forwarder"
 	"github.com/stelviodev/traforo/helper"
-	"os"
 )
 
 func main() {

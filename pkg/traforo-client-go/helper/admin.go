@@ -7,15 +7,17 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"github.com/stelviodev/traforo/darwin"
-	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/stelviodev/traforo/darwin"
+	"golang.org/x/sys/unix"
 )
 
 const installationAttribute = "dev.stelvio.traforo.installation"
@@ -38,7 +40,7 @@ type installationReceipt struct {
 
 func (r installationReceipt) encode() ([]byte, error) {
 	if len(r.Staging) > 63 {
-		return nil, uncertain
+		return nil, errUncertain
 	}
 	buf := make([]byte, 136)
 	copy(buf, "STLVINS1")
@@ -59,7 +61,7 @@ func readInstallation(fd int) (installationReceipt, bool, error) {
 		return r, false, nil
 	}
 	if e != nil || n != 136 || string(buf[:8]) != "STLVINS1" {
-		return r, false, uncertain
+		return r, false, errUncertain
 	}
 	ids := []*identity{&r.Image, &r.Directory, &r.Daemon, &r.Socket}
 	for i, id := range ids {
@@ -68,28 +70,28 @@ func readInstallation(fd int) (installationReceipt, bool, error) {
 	}
 	index := bytes.IndexByte(buf[72:136], 0)
 	if index < 0 {
-		return r, false, uncertain
+		return r, false, errUncertain
 	}
 	r.Staging = string(buf[72 : 72+index])
 	if r.Staging != "" {
 		if !strings.HasPrefix(r.Staging, ".tunnel.") {
-			return r, false, uncertain
+			return r, false, errUncertain
 		}
 		for _, v := range r.Staging[8:] {
-			if !(v >= 'a' && v <= 'z' || v >= 'A' && v <= 'Z' || v >= '0' && v <= '9') {
-				return r, false, uncertain
+			if (v < 'a' || v > 'z') && (v < 'A' || v > 'Z') && (v < '0' || v > '9') {
+				return r, false, errUncertain
 			}
 		}
 	}
 	st, e := stat(fd)
 	if e != nil || !r.Image.matches(st) {
-		return r, false, uncertain
+		return r, false, errUncertain
 	}
 	return r, true, nil
 }
 func writeInstallation(fd int, r installationReceipt) error {
 	if !trusted() {
-		return uncertain
+		return errUncertain
 	}
 	buf, e := r.encode()
 	if e != nil {
@@ -123,7 +125,7 @@ func exactFile(path string, id identity, expected []byte) bool {
 	if e != nil {
 		return false
 	}
-	defer unix.Close(p)
+	defer func() { _ = unix.Close(p) }() // Close the directory after inspection.
 	data, st, e := readAt(p, filepath.Base(path), len(expected))
 	return e == nil && id.matches(st) && st.Nlink <= 2 && bytes.Equal(data, expected)
 }
@@ -133,7 +135,9 @@ func prepare(fd int, r *installationReceipt) error {
 		if e != nil {
 			return e
 		}
-		unix.Close(p)
+		if e = unix.Close(p); e != nil {
+			return e
+		}
 	}
 	e := unix.Mkdir(darwin.StateParent, 0755)
 	if e == nil {
@@ -150,11 +154,11 @@ func prepare(fd int, r *installationReceipt) error {
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { _ = unix.Close(p) }() // Close the directory on every return path.
 	if r.Directory.Inode == 0 {
 		if r.Staging == "" {
 			if _, e := named(darwin.State); e != unix.ENOENT {
-				return uncertain
+				return errUncertain
 			}
 			var nonce [8]byte
 			if _, e = rand.Read(nonce[:]); e != nil {
@@ -183,7 +187,7 @@ func prepare(fd int, r *installationReceipt) error {
 		st, se := stat(stage)
 		ce := file.Close()
 		if e != io.EOF || len(entries) != 0 || se != nil || ce != nil || st.Mode&0777 != 0711 {
-			return uncertain
+			return errUncertain
 		}
 		r.Directory = identityOf(st)
 		if e = writeInstallation(fd, *r); e != nil {
@@ -197,7 +201,7 @@ func prepare(fd int, r *installationReceipt) error {
 		source := darwin.StateParent + "/" + r.Staging
 		if st, e := named(source); e == nil {
 			if !r.Directory.matches(st) {
-				return uncertain
+				return errUncertain
 			}
 			if e = moveExclusive(source, darwin.State); e != nil {
 				return e
@@ -210,13 +214,15 @@ func prepare(fd int, r *installationReceipt) error {
 		}
 		st, e := named(darwin.State)
 		if e != nil || !r.Directory.matches(st) {
-			return uncertain
+			return errUncertain
 		}
 		q, e := safeDirectory(darwin.State)
 		if e != nil {
 			return e
 		}
-		unix.Close(q)
+		if e = unix.Close(q); e != nil {
+			return e
+		}
 		r.Staging = ""
 		if e = writeInstallation(fd, *r); e != nil {
 			return e
@@ -224,18 +230,17 @@ func prepare(fd int, r *installationReceipt) error {
 	}
 	st, e := named(darwin.State)
 	if e != nil || !r.Directory.matches(st) {
-		return uncertain
+		return errUncertain
 	}
 	q, e := safeDirectory(darwin.State)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(q)
+	defer func() { _ = unix.Close(q) }() // Close the state-directory handle after publication.
 	gate, e := unix.Openat(q, "admission", unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if e == nil {
 		if e = unix.Fsync(gate); e != nil {
-			unix.Close(gate)
-			return e
+			return errors.Join(e, unix.Close(gate))
 		}
 		if e = unix.Close(gate); e != nil {
 			return e
@@ -245,12 +250,12 @@ func prepare(fd int, r *installationReceipt) error {
 	}
 	return unix.Fsync(q)
 }
-func publish(fd int, r *installationReceipt) error {
+func publish(fd int, r *installationReceipt) (returnErr error) {
 	p, e := safeDirectory(darwin.State)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	if r.Daemon.Inode == 0 {
 		stage, st, e := prefixAt(p, "daemon.pending", launchPlist, 0644)
 		if e != nil {
@@ -277,14 +282,14 @@ func publish(fd int, r *installationReceipt) error {
 	}
 	if _, e = named(pendingDaemon); e == nil {
 		if !exactFile(pendingDaemon, r.Daemon, launchPlist) {
-			return uncertain
+			return errUncertain
 		}
 		e = unix.Link(pendingDaemon, darwin.Plist)
 		if e != nil && e != unix.EEXIST {
 			return e
 		}
 		if !exactFile(darwin.Plist, r.Daemon, launchPlist) {
-			return uncertain
+			return errUncertain
 		}
 		if e = syncDirectory("/Library/LaunchDaemons"); e != nil {
 			return e
@@ -299,7 +304,7 @@ func publish(fd int, r *installationReceipt) error {
 		return e
 	}
 	if !exactFile(darwin.Plist, r.Daemon, launchPlist) {
-		return uncertain
+		return errUncertain
 	}
 	return nil
 }
@@ -308,7 +313,7 @@ func recordSocket(fd int, r *installationReceipt) error {
 		st, e := named(darwin.Socket)
 		if e == nil {
 			if st.Mode&unix.S_IFMT != unix.S_IFSOCK || st.Uid != 0 || st.Mode&0777 != 0666 || !noACLPath(darwin.Socket) || r.Socket.Inode != 0 && !r.Socket.matches(st) {
-				return uncertain
+				return errUncertain
 			}
 			r.Socket = identityOf(st)
 			if e = writeInstallation(fd, *r); e != nil {
@@ -321,7 +326,7 @@ func recordSocket(fd int, r *installationReceipt) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return uncertain
+	return errUncertain
 }
 
 // Move shared entries into an exclusive namespace before verifying and deleting.
@@ -344,7 +349,7 @@ func dispose(path, retired string, id identity, kind uint16, expected []byte) er
 			return e
 		}
 		if !check(path) {
-			return uncertain
+			return errUncertain
 		}
 		if e = moveExclusive(path, retired); e != nil {
 			return e
@@ -353,33 +358,35 @@ func dispose(path, retired string, id identity, kind uint16, expected []byte) er
 		return e
 	}
 	if !check(retired) {
-		moveExclusive(retired, path)
-		return uncertain
+		if restoreErr := moveExclusive(retired, path); restoreErr != nil {
+			return errors.Join(errUncertain, fmt.Errorf("restore retired entry: %w", restoreErr))
+		}
+		return errUncertain
 	}
 	if e := unix.Unlink(retired); e != nil {
 		return e
 	}
 	return syncDirectory(filepath.Dir(retired))
 }
-func emptyPrivate(name string) error {
+func emptyPrivate(name string) (returnErr error) {
 	p, e := safeDirectory(darwin.State)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	data, st, e := readAt(p, name, 0)
 	if e == unix.ENOENT {
 		return nil
 	}
 	if e != nil || len(data) != 0 || st.Nlink != 1 || st.Mode&0777 != 0600 {
-		return uncertain
+		return errUncertain
 	}
 	if e = unix.Unlinkat(p, name, 0); e != nil {
 		return e
 	}
 	return unix.Fsync(p)
 }
-func uninstall(fd int, r *installationReceipt, gateFD int) error {
+func uninstall(fd int, r *installationReceipt, gateFD int) (returnErr error) {
 	st, e := named(darwin.State)
 	absent := e == unix.ENOENT
 	if e != nil && !absent {
@@ -387,25 +394,27 @@ func uninstall(fd int, r *installationReceipt, gateFD int) error {
 	}
 	if !absent {
 		if !r.Directory.matches(st) {
-			return uncertain
+			return errUncertain
 		}
 		p, e := safeDirectory(darwin.State)
 		if e != nil {
 			return e
 		}
-		unix.Close(p)
+		if e = unix.Close(p); e != nil {
+			return e
+		}
 		if gateFD < 0 {
-			return uncertain
+			return errUncertain
 		}
 	}
 	if _, e := named(darwin.Plist); e == nil {
 		if !exactFile(darwin.Plist, r.Daemon, launchPlist) {
-			return uncertain
+			return errUncertain
 		}
 	} else if e != unix.ENOENT {
 		return e
 	}
-	launch("bootout")
+	_ = launch("bootout") // The lock check below verifies that the service has exited.
 	image := -1
 	for i := 0; i < 350; i++ {
 		image, e = lockFile(darwin.Installed, false, false, false)
@@ -415,9 +424,9 @@ func uninstall(fd int, r *installationReceipt, gateFD int) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if image < 0 {
-		return uncertain
+		return errUncertain
 	}
-	defer unix.Close(image)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(image)) }()
 	if !absent {
 		lease, e := lockFile(darwin.State+"/lease", true, false, true)
 		if e != nil {
@@ -426,13 +435,13 @@ func uninstall(fd int, r *installationReceipt, gateFD int) error {
 		store := Store{image, lease}
 		state, exists, e := store.Load()
 		if e == nil && exists && darwin.Alive(state.Peer) && (state.Parent.PID == 0 || darwin.ParentAlive(state.Parent)) {
-			e = uncertain
+			e = errUncertain
 		}
 		if e == nil {
 			devices := initDevices()
 			e = cleanup(store, &state, &devices)
 		}
-		unix.Close(lease)
+		e = errors.Join(e, unix.Close(lease))
 		if e != nil {
 			return e
 		}
@@ -454,9 +463,9 @@ func uninstall(fd int, r *installationReceipt, gateFD int) error {
 				if e == nil {
 					e = unix.Fsync(stage)
 				}
-				unix.Close(stage)
+				e = errors.Join(e, unix.Close(stage))
 			}
-			unix.Close(p)
+			e = errors.Join(e, unix.Close(p))
 			if e != nil {
 				return e
 			}
@@ -491,12 +500,14 @@ func uninstall(fd int, r *installationReceipt, gateFD int) error {
 		}
 		st, e = named(retired)
 		if e != nil || !r.Directory.matches(st) {
-			moveExclusive(retired, darwin.State)
-			return uncertain
+			if restoreErr := moveExclusive(retired, darwin.State); restoreErr != nil {
+				return errors.Join(errUncertain, fmt.Errorf("restore tunnel state directory: %w", restoreErr))
+			}
+			return errUncertain
 		}
 		entries, e := os.ReadDir(retired)
 		if e != nil || len(entries) != 0 {
-			return uncertain
+			return errUncertain
 		}
 		if e = unix.Rmdir(retired); e != nil {
 			return e
@@ -507,7 +518,7 @@ func uninstall(fd int, r *installationReceipt, gateFD int) error {
 	}
 	return dispose(darwin.Installed, "/Library/PrivilegedHelperTools/.stelvio-traforo.retired", r.Image, unix.S_IFREG, nil)
 }
-func admin(install bool) error {
+func admin(install bool) (returnErr error) {
 	if ok, stage := trustStage(); !ok {
 		return fmt.Errorf("trusted image boundary %d", stage)
 	}
@@ -519,7 +530,7 @@ func admin(install bool) error {
 	if e != nil {
 		return e
 	}
-	defer unix.Close(fd)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(fd)) }()
 	r, exists, e := readInstallation(fd)
 	if e != nil {
 		return e
@@ -530,14 +541,14 @@ func admin(install bool) error {
 			if e != nil {
 				return e
 			}
-			defer unix.Close(image)
+			defer func() { returnErr = errors.Join(returnErr, unix.Close(image)) }()
 			_, currentExists, receiptError := readInstallation(fd)
 			if receiptError != nil || currentExists {
-				return uncertain
+				return errUncertain
 			}
 			for _, path := range []string{darwin.State, darwin.Plist} {
 				if _, e := named(path); e != unix.ENOENT {
-					return uncertain
+					return errUncertain
 				}
 			}
 			st, e := stat(fd)
@@ -553,19 +564,19 @@ func admin(install bool) error {
 				if lockError != nil {
 					return lockError
 				}
-				defer unix.Close(image)
+				defer func() { returnErr = errors.Join(returnErr, unix.Close(image)) }()
 				current, present, receiptError := readInstallation(fd)
 				if receiptError != nil || !present || current.Staging != ".tunnel.retired" {
-					return uncertain
+					return errUncertain
 				}
 				r = current
 				if _, pathError := named(darwin.Plist); pathError != unix.ENOENT {
-					return uncertain
+					return errUncertain
 				}
 				retired := darwin.StateParent + "/.tunnel.retired"
 				if st, pathError := named(retired); pathError == nil {
 					if !r.Directory.matches(st) {
-						return uncertain
+						return errUncertain
 					}
 					directory, directoryError := safeDirectory(retired)
 					if directoryError != nil {
@@ -573,9 +584,9 @@ func admin(install bool) error {
 					}
 					file := os.NewFile(uintptr(directory), retired)
 					names, readError := file.Readdirnames(1)
-					file.Close()
-					if readError != io.EOF || len(names) != 0 {
-						return uncertain
+					closeError := file.Close()
+					if readError != io.EOF || len(names) != 0 || closeError != nil {
+						return errUncertain
 					}
 					if removeError := unix.Rmdir(retired); removeError != nil {
 						return removeError
@@ -600,12 +611,11 @@ func admin(install bool) error {
 			}
 			current, present, receiptError := readInstallation(fd)
 			if receiptError != nil || !present {
-				unix.Close(image)
-				return uncertain
+				return errors.Join(errUncertain, unix.Close(image))
 			}
 			r = current
 			prepareError := prepare(fd, &r)
-			unix.Close(image)
+			prepareError = errors.Join(prepareError, unix.Close(image))
 			if prepareError != nil {
 				return prepareError
 			}
@@ -614,10 +624,10 @@ func admin(install bool) error {
 				return gateError
 			}
 		}
-		defer unix.Close(g)
+		defer func() { returnErr = errors.Join(returnErr, unix.Close(g)) }()
 		r, exists, e = readInstallation(fd)
 		if e != nil || !exists {
-			return uncertain
+			return errUncertain
 		}
 		return uninstall(fd, &r, g)
 	}
@@ -627,16 +637,15 @@ func admin(install bool) error {
 	}
 	r, exists, e = readInstallation(fd)
 	if e != nil {
-		unix.Close(image)
-		return e
+		return errors.Join(e, unix.Close(image))
 	}
 	g := -1
 	defer func() {
 		if image >= 0 {
-			unix.Close(image)
+			returnErr = errors.Join(returnErr, unix.Close(image))
 		}
 		if g >= 0 {
-			unix.Close(g)
+			returnErr = errors.Join(returnErr, unix.Close(g))
 		}
 	}()
 	if _, e := named(darwin.State + "/admission"); e == nil {
@@ -672,8 +681,11 @@ func admin(install bool) error {
 	if e = publish(fd, &r); e != nil {
 		return e
 	}
-	unix.Close(image)
+	closeErr := unix.Close(image)
 	image = -1
+	if closeErr != nil {
+		return closeErr
+	}
 	if e = launch("bootstrap"); e != nil {
 		return e
 	}

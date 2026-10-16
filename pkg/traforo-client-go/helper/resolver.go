@@ -5,12 +5,14 @@ package helper
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/stelviodev/traforo/darwin"
 	"github.com/stelviodev/traforo/protocol"
 	"golang.org/x/sys/unix"
-	"os"
-	"strings"
 )
 
 const resolverDirectory = "/etc/resolver"
@@ -40,7 +42,7 @@ func owned(parent int, name string, receipt Receipt, expected []byte, prefix boo
 		return false, e
 	}
 	if st.Mode&0777 != 0644 || (st.Nlink != 1 && st.Nlink != 2) || uint64(st.Dev) != receipt.Device || st.Ino != receipt.Inode || !prefix && len(data) != len(expected) || !bytes.Equal(data, expected[:len(data)]) {
-		return false, uncertain
+		return false, errUncertain
 	}
 	return true, nil
 }
@@ -54,15 +56,15 @@ func saveReceipt(store Store, state *Snapshot, i, j int, r Receipt) error {
 	*state = next
 	return nil
 }
-func stageResolver(store Store, state *Snapshot, i, j int) error {
+func stageResolver(store Store, state *Snapshot, i, j int) (returnErr error) {
 	if !store.Current(*state) || state.Units[i].Phase != Preparing || state.Units[i].Files[j].Phase != 0 {
-		return uncertain
+		return errUncertain
 	}
 	p, e := safeDirectory(darwin.State)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	s := spec(*state, i, j)
 	fd, st, e := prefixAt(p, s.private, s.contents, 0644)
 	if e != nil {
@@ -76,31 +78,28 @@ func stageResolver(store Store, state *Snapshot, i, j int) error {
 		e = unix.Fsync(p)
 	}
 	if e == nil && !namedCurrent(p, s.private, st) {
-		e = uncertain
+		e = errUncertain
 	}
-	c := unix.Close(fd)
-	if e == nil {
-		e = c
-	}
+	e = errors.Join(e, unix.Close(fd))
 	if e != nil {
 		return e
 	}
 	return saveReceipt(store, state, i, j, Receipt{1, uint64(st.Dev), st.Ino})
 }
-func publishResolver(store Store, state *Snapshot, i, j int) error {
+func publishResolver(store Store, state *Snapshot, i, j int) (returnErr error) {
 	if !store.Current(*state) || state.Units[i].Phase != Preparing || state.Units[i].Files[j].Phase != 1 {
-		return uncertain
+		return errUncertain
 	}
 	p, e := safeDirectory(darwin.State)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	q, e := safeDirectory(resolverDirectory)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(q)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(q)) }()
 	s := spec(*state, i, j)
 	r := state.Units[i].Files[j]
 	staged, e := owned(p, s.private, r, s.contents, false)
@@ -109,7 +108,7 @@ func publishResolver(store Store, state *Snapshot, i, j int) error {
 	}
 	linked, e := owned(q, s.public, r, s.contents, false)
 	if e != nil || !staged && !linked {
-		return uncertain
+		return errUncertain
 	}
 	if !linked {
 		if e = unix.Linkat(p, s.private, q, s.public, 0); e != nil {
@@ -118,7 +117,7 @@ func publishResolver(store Store, state *Snapshot, i, j int) error {
 	}
 	ok, e := owned(q, s.public, r, s.contents, false)
 	if e != nil || !ok {
-		return uncertain
+		return errUncertain
 	}
 	if e = unix.Fsync(q); e != nil {
 		return e
@@ -142,7 +141,7 @@ func resolverCurrent(store Store, state Snapshot, i, j int) bool {
 	if e != nil {
 		return false
 	}
-	defer unix.Close(p)
+	defer func() { _ = unix.Close(p) }() // The descriptor only supports a read-only ownership check.
 	s := spec(state, i, j)
 	ok, e := owned(p, s.public, state.Units[i].Files[j], s.contents, false)
 	return ok && e == nil
@@ -152,20 +151,22 @@ func unpublish(p, q int, s resolverSpec, r Receipt) error {
 	if r.Phase == 0 {
 		var st unix.Stat_t
 		if unix.Fstatat(p, retired, &st, unix.AT_SYMLINK_NOFOLLOW) != unix.ENOENT {
-			return uncertain
+			return errUncertain
 		}
 		found, e := owned(q, s.public, r, s.contents, false)
 		if e != nil || found {
-			return uncertain
+			return errUncertain
 		}
 		return nil
 	}
 	moved, e := owned(p, retired, r, s.contents, false)
 	if e != nil {
-		darwin.RenameExclusive(p, retired, q, s.public)
-		unix.Fsync(p)
-		unix.Fsync(q)
-		return uncertain
+		rollbackErr := errors.Join(
+			darwin.RenameExclusive(p, retired, q, s.public),
+			unix.Fsync(p),
+			unix.Fsync(q),
+		)
+		return errors.Join(errUncertain, rollbackErr)
 	}
 	if !moved {
 		linked, e := owned(q, s.public, r, s.contents, false)
@@ -180,10 +181,12 @@ func unpublish(p, q int, s resolverSpec, r Receipt) error {
 		}
 		moved, e = owned(p, retired, r, s.contents, false)
 		if e != nil || !moved {
-			darwin.RenameExclusive(p, retired, q, s.public)
-			unix.Fsync(q)
-			unix.Fsync(p)
-			return uncertain
+			rollbackErr := errors.Join(
+				darwin.RenameExclusive(p, retired, q, s.public),
+				unix.Fsync(q),
+				unix.Fsync(p),
+			)
+			return errors.Join(errUncertain, rollbackErr)
 		}
 	}
 	if e = unix.Fsync(q); e != nil {
@@ -200,29 +203,29 @@ func unpublish(p, q int, s resolverSpec, r Receipt) error {
 	}
 	found, e := owned(q, s.public, r, s.contents, false)
 	if e != nil || found {
-		return uncertain
+		return errUncertain
 	}
 	return nil
 }
-func removeResolver(store Store, state *Snapshot, i, j int) error {
+func removeResolver(store Store, state *Snapshot, i, j int) (returnErr error) {
 	if !store.Current(*state) || state.Units[i].Phase != Removing {
-		return uncertain
+		return errUncertain
 	}
 	p, e := safeDirectory(darwin.State)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	q, e := safeDirectory(resolverDirectory)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(q)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(q)) }()
 	s := spec(*state, i, j)
 	r := state.Units[i].Files[j]
 	staged, e := owned(p, s.private, r, s.contents, true)
 	if e != nil || r.Phase == 0 && staged {
-		return uncertain
+		return errUncertain
 	}
 	if e = unpublish(p, q, s, r); e != nil {
 		return e
@@ -245,7 +248,7 @@ func removeResolver(store Store, state *Snapshot, i, j int) error {
 }
 func resolverDomain(name string, data []byte) (string, error) {
 	if len(data) > 8192 || bytes.IndexByte(data, 0) >= 0 {
-		return "", uncertain
+		return "", errUncertain
 	}
 	domain := ""
 	found := false
@@ -253,7 +256,7 @@ func resolverDomain(name string, data []byte) (string, error) {
 		fields := strings.Fields(strings.SplitN(line, "#", 2)[0])
 		if len(fields) > 0 && fields[0] == "domain" {
 			if found || len(fields) != 2 {
-				return "", uncertain
+				return "", errUncertain
 			}
 			found = true
 			var e error
@@ -268,9 +271,9 @@ func resolverDomain(name string, data []byte) (string, error) {
 	}
 	return domain, nil
 }
-func resolverConflict(store Store, state Snapshot, r protocol.Request) error {
+func resolverConflict(store Store, state Snapshot, r protocol.Request) (returnErr error) {
 	if !store.Current(state) {
-		return uncertain
+		return errUncertain
 	}
 	domains, e := darwin.DNSDomains()
 	if e != nil {
@@ -283,7 +286,7 @@ func resolverConflict(store Store, state Snapshot, r protocol.Request) error {
 		}
 		for _, endpoint := range r.Resolvers {
 			if protocol.DNSOverlap(domain, endpoint.Domain) {
-				return uncertain
+				return errUncertain
 			}
 		}
 		return nil
@@ -298,13 +301,17 @@ func resolverConflict(store Store, state Snapshot, r protocol.Request) error {
 		return e
 	}
 	file := os.NewFile(uintptr(p), resolverDirectory)
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			returnErr = errors.Join(returnErr, closeErr)
+		}
+	}()
 	names, e := file.Readdirnames(4097)
 	if e != nil && len(names) == 0 && e.Error() != "EOF" {
 		return e
 	}
 	if len(names) > 4096 {
-		return uncertain
+		return errUncertain
 	}
 	for _, name := range names {
 		ours := false
@@ -316,7 +323,7 @@ func resolverConflict(store Store, state Snapshot, r protocol.Request) error {
 				}
 				ok, e := owned(p, name, u.Files[j], s.contents, false)
 				if e != nil || !ok || u.Files[j].Phase == 0 {
-					return uncertain
+					return errUncertain
 				}
 				ours = true
 			}

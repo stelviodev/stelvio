@@ -59,9 +59,13 @@ func pair(t *testing.T) (*net.UnixConn, *net.UnixConn) {
 	for _, fd := range descriptors {
 		file := os.NewFile(uintptr(fd), "fixture")
 		c, err := net.FileConn(file)
-		file.Close()
+		closeErr := file.Close()
 		if err != nil {
 			t.Fatal(err)
+		}
+		if closeErr != nil {
+			_ = c.Close()
+			t.Fatal(closeErr)
 		}
 		result = append(result, c.(*net.UnixConn))
 	}
@@ -69,8 +73,10 @@ func pair(t *testing.T) (*net.UnixConn, *net.UnixConn) {
 }
 func TestCarrierDemultiplexingAndIndependentGenerations(t *testing.T) {
 	a, b := pair(t)
-	defer a.Close()
-	defer b.Close()
+	t.Cleanup(func() {
+		_ = a.Close() // Test teardown is best-effort after assertions complete.
+		_ = b.Close()
+	})
 	m := &manager{units: make(map[uint32]*unit), generations: make(map[uint32]uint64), carrier: a}
 	defer func() {
 		for _, u := range m.units {
@@ -88,7 +94,9 @@ func TestCarrierDemultiplexingAndIndependentGenerations(t *testing.T) {
 	}
 	check := func(id uint32, generation uint64, octet byte, port uint16) {
 		t.Helper()
-		b.SetDeadline(time.Now().Add(2 * time.Second))
+		if err := b.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := b.Write(syn(id, generation, octet, port)); err != nil {
 			t.Fatal(err)
 		}

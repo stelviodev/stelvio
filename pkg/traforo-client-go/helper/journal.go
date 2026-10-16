@@ -5,17 +5,19 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"hash/fnv"
+
 	"github.com/stelviodev/traforo/darwin"
 	"github.com/stelviodev/traforo/protocol"
 	"golang.org/x/sys/unix"
-	"hash/fnv"
 )
 
 type Store struct{ Image, Lease int }
 
 func (s Store) directory() (int, error) {
 	if !trusted() {
-		return -1, uncertain
+		return -1, errUncertain
 	}
 	for _, v := range []struct {
 		fd   int
@@ -25,7 +27,7 @@ func (s Store) directory() (int, error) {
 		st, e := stat(v.fd)
 		var n unix.Stat_t
 		if e != nil || st.Uid != 0 || st.Nlink != 1 || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&v.mask != 0 || !darwin.NoACL(v.fd) || unix.Lstat(v.path, &n) != nil || !same(st, n) || unix.Flock(v.fd, unix.LOCK_EX|unix.LOCK_NB) != nil {
-			return -1, uncertain
+			return -1, errUncertain
 		}
 	}
 	return safeDirectory(darwin.State)
@@ -33,11 +35,11 @@ func (s Store) directory() (int, error) {
 func checksum(data []byte) uint32 { h := fnv.New32a(); h.Write(data); return h.Sum32() }
 func journalPayload(data []byte) ([]byte, error) {
 	if len(data) < 16 || len(data) > protocol.MaxJournal+16 || string(data[:8]) != "STLVJNL1" {
-		return nil, uncertain
+		return nil, errUncertain
 	}
 	n := int(binary.BigEndian.Uint32(data[8:]))
 	if n == 0 || n != len(data)-16 || binary.BigEndian.Uint32(data[12:]) != checksum(data[16:]) {
-		return nil, uncertain
+		return nil, errUncertain
 	}
 	return data[16:], nil
 }
@@ -80,7 +82,7 @@ func readJournal(parent int, name string) ([]byte, unix.Stat_t, error) {
 		return nil, st, e
 	}
 	if st.Nlink != 1 || st.Mode&0777 != 0600 {
-		return nil, st, uncertain
+		return nil, st, errUncertain
 	}
 	return data, st, nil
 }
@@ -129,10 +131,10 @@ func (s Store) recover(parent int) error {
 	}
 	if !accepted(old, next) {
 		if !accepted(old, nil) || !incomplete(next) {
-			return uncertain
+			return errUncertain
 		}
 		if !namedCurrent(parent, "journal.next", st) {
-			return uncertain
+			return errUncertain
 		}
 		if e = unix.Unlinkat(parent, "journal.next", 0); e != nil {
 			return e
@@ -145,8 +147,7 @@ func (s Store) recover(parent int) error {
 	}
 	opened, e := stat(fd)
 	if e != nil || !same(st, opened) || !darwin.NoACL(fd) || !namedCurrent(parent, "journal.next", st) || unix.Fsync(fd) != nil {
-		unix.Close(fd)
-		return uncertain
+		return errors.Join(errUncertain, unix.Close(fd))
 	}
 	if e = unix.Close(fd); e != nil {
 		return e
@@ -156,12 +157,12 @@ func (s Store) recover(parent int) error {
 	}
 	return unix.Fsync(parent)
 }
-func (s Store) Load() (Snapshot, bool, error) {
+func (s Store) Load() (snapshot Snapshot, exists bool, returnErr error) {
 	p, e := s.directory()
 	if e != nil {
 		return Snapshot{}, false, e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	if e = s.recover(p); e != nil {
 		return Snapshot{}, false, e
 	}
@@ -179,7 +180,7 @@ func (s Store) Load() (Snapshot, bool, error) {
 	state, e := DecodeSnapshot(payload)
 	return state, e == nil, e
 }
-func (s Store) Save(state Snapshot) error {
+func (s Store) Save(state Snapshot) (returnErr error) {
 	payload, e := EncodeSnapshot(state)
 	if e != nil {
 		return e
@@ -188,7 +189,7 @@ func (s Store) Save(state Snapshot) error {
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	if e = s.recover(p); e != nil {
 		return e
 	}
@@ -205,7 +206,7 @@ func (s Store) Save(state Snapshot) error {
 	binary.BigEndian.PutUint32(data[12:], checksum(payload))
 	copy(data[16:], payload)
 	if !accepted(old, data) {
-		return uncertain
+		return errUncertain
 	}
 	fd, e := unix.Openat(p, "journal.next", unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if e != nil {
@@ -213,29 +214,25 @@ func (s Store) Save(state Snapshot) error {
 	}
 	created, e := stat(fd)
 	if e != nil || !darwin.NoACL(fd) || created.Nlink != 1 || created.Uid != 0 || created.Mode&0777 != 0600 {
-		unix.Close(fd)
-		return uncertain
+		return errors.Join(errUncertain, unix.Close(fd))
 	}
 	if e = writeAll(fd, data); e == nil {
 		e = unix.Fsync(fd)
 	}
 	if e == nil && !namedCurrent(p, "journal.next", created) {
-		e = uncertain
+		e = errUncertain
 	}
-	c := unix.Close(fd)
-	if e == nil {
-		e = c
-	}
+	e = errors.Join(e, unix.Close(fd))
 	if e != nil {
 		return e
 	}
 	if old != nil && !namedCurrent(p, "journal", st) {
-		return uncertain
+		return errUncertain
 	}
 	if old == nil {
 		var target unix.Stat_t
 		if unix.Fstatat(p, "journal", &target, unix.AT_SYMLINK_NOFOLLOW) != unix.ENOENT {
-			return uncertain
+			return errUncertain
 		}
 	}
 	if e = unix.Renameat(p, "journal.next", p, "journal"); e != nil {
@@ -255,22 +252,22 @@ func (s Store) Current(state Snapshot) bool {
 	b, e := EncodeSnapshot(current)
 	return e == nil && bytes.Equal(a, b)
 }
-func (s Store) Remove() error {
+func (s Store) Remove() (returnErr error) {
 	p, e := s.directory()
 	if e != nil {
 		return e
 	}
-	defer unix.Close(p)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
 	var st unix.Stat_t
 	if unix.Fstatat(p, "journal.next", &st, unix.AT_SYMLINK_NOFOLLOW) != unix.ENOENT {
-		return uncertain
+		return errUncertain
 	}
 	data, st, e := readJournal(p, "journal")
 	if e == unix.ENOENT {
 		return unix.Fsync(p)
 	}
 	if e != nil || !accepted(data, nil) || !namedCurrent(p, "journal", st) {
-		return uncertain
+		return errUncertain
 	}
 	if e = unix.Unlinkat(p, "journal", 0); e != nil {
 		return e

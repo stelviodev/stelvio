@@ -5,14 +5,20 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/stelviodev/traforo/protocol"
 	"reflect"
 	"testing"
+
+	"github.com/stelviodev/traforo/protocol"
 )
 
-func snapshotFixture() []byte {
+func snapshotFixture(t testing.TB) []byte {
+	t.Helper()
 	var b bytes.Buffer
-	put := func(v any) { binary.Write(&b, binary.BigEndian, v) }
+	put := func(v any) {
+		if err := binary.Write(&b, binary.BigEndian, v); err != nil {
+			t.Fatal(err)
+		}
+	}
 	b.WriteString("STLVSNP3")
 	put(uint64(1))
 	put(uint32(502))
@@ -27,7 +33,7 @@ func snapshotFixture() []byte {
 	return b.Bytes()
 }
 func TestSnapshotHistoricalFixture(t *testing.T) {
-	data := snapshotFixture()
+	data := snapshotFixture(t)
 	s, e := DecodeSnapshot(data)
 	if e != nil || s.Peer.UID != 502 || s.Peer.PID != 1234 {
 		t.Fatal(s, e)
@@ -46,7 +52,7 @@ func TestSnapshotHistoricalFixture(t *testing.T) {
 	}
 }
 func TestJournalFraming(t *testing.T) {
-	s := snapshotFixture()
+	s := snapshotFixture(t)
 	p := make([]byte, len(s)+16)
 	copy(p, "STLVJNL1")
 	binary.BigEndian.PutUint32(p[8:], uint32(len(s)))
@@ -83,7 +89,7 @@ func TestResolverDomain(t *testing.T) {
 	}
 }
 func TestSuccessorRejectsIdentityAndRevisionChanges(t *testing.T) {
-	a, e := DecodeSnapshot(snapshotFixture())
+	a, e := DecodeSnapshot(snapshotFixture(t))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -103,7 +109,7 @@ func TestSuccessorRejectsIdentityAndRevisionChanges(t *testing.T) {
 	}
 }
 func FuzzSnapshot(f *testing.F) {
-	f.Add(snapshotFixture())
+	f.Add(snapshotFixture(f))
 	f.Fuzz(func(t *testing.T, p []byte) {
 		s, e := DecodeSnapshot(p)
 		if e == nil {
@@ -116,7 +122,7 @@ func FuzzSnapshot(f *testing.F) {
 }
 
 func TestSnapshotParentFence(t *testing.T) {
-	s, e := DecodeSnapshot(snapshotFixture())
+	s, e := DecodeSnapshot(snapshotFixture(t))
 	if e != nil {
 		t.Fatal(e)
 	}

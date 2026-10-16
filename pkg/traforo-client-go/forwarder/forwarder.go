@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/stelviodev/traforo/protocol"
 	"io"
 	"net"
 	"net/netip"
@@ -18,6 +17,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/stelviodev/traforo/protocol"
 
 	"github.com/xjasonlyu/tun2socks/v2/core"
 	"github.com/xjasonlyu/tun2socks/v2/core/adapter"
@@ -79,7 +80,9 @@ func (u *unit) Write(packet []byte) (int, error) {
 	// Bound a full carrier without sharing write deadlines across VPC workers.
 	u.writer.Lock()
 	defer u.writer.Unlock()
-	u.carrier.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+	if err := u.carrier.SetWriteDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		return 0, err
+	}
 	_, _, err := u.carrier.WriteMsgUnix(wire, nil, nil)
 	if err != nil {
 		return 0, err
@@ -107,24 +110,26 @@ func (u *unit) retain(connection net.Conn) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.ctx.Err() != nil {
-		connection.Close()
+		_ = connection.Close() // Best-effort close while refusing a new connection.
 		return false
 	}
 	u.connections[connection] = struct{}{}
 	return true
 }
 func (u *unit) discard(connection net.Conn) {
-	connection.Close()
+	_ = connection.Close() // Best-effort teardown after the connection leaves the unit.
 	u.mu.Lock()
 	delete(u.connections, connection)
 	u.mu.Unlock()
 }
-func (u *unit) HandleUDP(connection adapter.UDPConn) { connection.Close() }
+func (u *unit) HandleUDP(connection adapter.UDPConn) {
+	_ = connection.Close() // UDP is unsupported; close the rejected endpoint.
+}
 func (u *unit) HandleTCP(connection adapter.TCPConn) {
 	u.mu.Lock()
 	if u.ctx.Err() != nil {
 		u.mu.Unlock()
-		connection.Close()
+		_ = connection.Close() // Best-effort close while refusing a new connection.
 		return
 	}
 	select {
@@ -132,7 +137,7 @@ func (u *unit) HandleTCP(connection adapter.TCPConn) {
 		u.workers.Add(1)
 	default:
 		u.mu.Unlock()
-		connection.Close()
+		_ = connection.Close() // Best-effort close after the worker limit is reached.
 		return
 	}
 	u.mu.Unlock()
@@ -166,35 +171,45 @@ func (u *unit) HandleTCP(connection adapter.TCPConn) {
 		}
 		defer u.discard(remote)
 		deadline, _ := ctx.Deadline()
-		remote.SetDeadline(deadline)
+		if err = remote.SetDeadline(deadline); err != nil {
+			cancel()
+			return
+		}
 		if _, err = socks5.ClientHandshake(remote, socks5.ParseAddrString(destination.String()), socks5.CmdConnect, nil); err != nil {
 			cancel()
 			return
 		}
 		cancel()
-		remote.SetDeadline(time.Time{})
+		if err = remote.SetDeadline(time.Time{}); err != nil {
+			return
+		}
 		done := make(chan struct{})
 		var once sync.Once
-		finish := func() {
+		var finishErr error
+		finish := func() error {
 			once.Do(func() {
 				end := time.Now().Add(30 * time.Second)
-				remote.SetDeadline(end)
-				connection.SetDeadline(end)
+				finishErr = errors.Join(remote.SetDeadline(end), connection.SetDeadline(end))
+				if finishErr != nil {
+					_ = remote.Close()
+					_ = connection.Close()
+				}
 			})
+			return finishErr
 		}
 		go func() {
-			io.Copy(remote, connection)
+			_, _ = io.Copy(remote, connection) // Stream termination is handled by half-close/deadline below.
 			if half, ok := remote.(interface{ CloseWrite() error }); ok {
-				half.CloseWrite()
+				_ = half.CloseWrite()
 			}
-			finish()
+			_ = finish()
 			close(done)
 		}()
-		io.Copy(connection, remote)
+		_, _ = io.Copy(connection, remote) // Stream termination is handled by half-close/deadline below.
 		if half, ok := any(connection).(interface{ CloseWrite() error }); ok {
-			half.CloseWrite()
+			_ = half.CloseWrite()
 		}
-		finish()
+		_ = finish()
 		<-done
 	}()
 }
@@ -202,7 +217,7 @@ func (u *unit) close() {
 	u.mu.Lock()
 	u.cancel()
 	for connection := range u.connections {
-		connection.Close()
+		_ = connection.Close() // Shutdown revokes all active streams before waiting.
 	}
 	u.mu.Unlock()
 	if u.stack != nil {
@@ -347,21 +362,24 @@ func Run(arguments []string) error {
 	}
 	file := os.NewFile(uintptr(fd), "carrier")
 	connection, err := net.FileConn(file)
-	file.Close()
+	closeErr := file.Close()
 	if err != nil {
-		return err
+		return errors.Join(err, closeErr)
+	}
+	if closeErr != nil {
+		_ = connection.Close()
+		return closeErr
 	}
 	carrier, ok := connection.(*net.UnixConn)
 	if !ok {
-		connection.Close()
+		_ = connection.Close()
 		return errors.New("invalid carrier")
 	}
-	defer carrier.Close()
 	// A single bounded write deadline is process-wide. The kernel endpoint is a
 	// datagram socket; dropping under pressure is preferable to wedging cleanup.
 	m := &manager{units: make(map[uint32]*unit), generations: make(map[uint32]uint64), carrier: carrier}
 	defer func() {
-		carrier.Close()
+		_ = carrier.Close() // Process teardown closes the carrier after unit shutdown.
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		for _, u := range m.units {

@@ -13,17 +13,18 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"github.com/stelviodev/traforo/protocol"
-	"golang.org/x/sys/unix"
 	"net"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
 	"unsafe"
+
+	"github.com/stelviodev/traforo/protocol"
+	"golang.org/x/sys/unix"
 )
 
-var Err = errors.New("Darwin operation unavailable or uncertain")
+var Err = errors.New("darwin operation unavailable or uncertain")
 
 const Installed = "/Library/PrivilegedHelperTools/stelvio-traforo"
 const StateParent = "/Library/Application Support/Stelvio"
@@ -126,7 +127,12 @@ func Listener() (int, error) {
 	if fd < 0 {
 		return -1, Err
 	}
-	fail := func() (int, error) { unix.Close(fd); return -1, Err }
+	fail := func() (int, error) {
+		if closeErr := unix.Close(fd); closeErr != nil {
+			return -1, errors.Join(Err, closeErr)
+		}
+		return -1, Err
+	}
 	addr, e := unix.Getsockname(fd)
 	a, ok := addr.(*unix.SockaddrUnix)
 	if e != nil || !ok || a.Name != Socket {
@@ -159,8 +165,7 @@ func OpenDevice() (Device, error) {
 	name := strings.TrimRight(string(buf), "\x00")
 	iface, e := net.InterfaceByName(name)
 	if e != nil || !strings.HasPrefix(name, "utun") || Nonblocking(fd) != nil {
-		unix.Close(fd)
-		return Device{FD: -1}, Err
+		return Device{FD: -1}, errors.Join(Err, unix.Close(fd))
 	}
 	return Device{fd, name, uint32(iface.Index)}, nil
 }
@@ -260,7 +265,9 @@ func Receive(fd int, buf []byte) (int, error) {
 		if header.Level == unix.SOL_SOCKET && header.Type == unix.SCM_RIGHTS {
 			for i := pos + unix.CmsgLen(0); i+4 <= pos+available; i += 4 {
 				fd := int(int32(binary.NativeEndian.Uint32(control[i:])))
-				unix.Close(fd)
+				if unix.Close(fd) != nil {
+					bad = true
+				}
 			}
 		}
 		padded := unix.CmsgSpace(length - unix.CmsgLen(0))
@@ -279,16 +286,18 @@ func Pair() ([2]int, error) {
 	if e != nil {
 		return p, e
 	}
+	closePair := func(cause error) ([2]int, error) {
+		return p, errors.Join(cause, unix.Close(p[0]), unix.Close(p[1]))
+	}
 	for _, fd := range p {
-		if Nonblocking(fd) != nil {
-			unix.Close(p[0])
-			unix.Close(p[1])
-			return p, Err
+		if e = Nonblocking(fd); e != nil {
+			return closePair(errors.Join(Err, e))
 		}
-		if unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_SNDBUF, 256*1024) != nil || unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_RCVBUF, 256*1024) != nil {
-			unix.Close(p[0])
-			unix.Close(p[1])
-			return p, Err
+		if e = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_SNDBUF, 256*1024); e != nil {
+			return closePair(errors.Join(Err, e))
+		}
+		if e = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_RCVBUF, 256*1024); e != nil {
+			return closePair(errors.Join(Err, e))
 		}
 	}
 	return p, nil

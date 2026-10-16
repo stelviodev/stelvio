@@ -12,11 +12,11 @@ type Frame struct {
 
 func DecodeFrame(data []byte) (Frame, error) {
 	if len(data) < 36 || len(data) > 1516 {
-		return Frame{}, Invalid
+		return Frame{}, ErrInvalid
 	}
 	f := Frame{binary.BigEndian.Uint32(data), binary.BigEndian.Uint64(data[4:]), data[12:]}
 	if f.Unit == 0 || f.Generation == 0 {
-		return Frame{}, Invalid
+		return Frame{}, ErrInvalid
 	}
 	return f, nil
 }

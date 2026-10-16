@@ -5,14 +5,15 @@ package helper
 import (
 	"bytes"
 	"errors"
-	"github.com/stelviodev/traforo/darwin"
-	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/stelviodev/traforo/darwin"
+	"golang.org/x/sys/unix"
 )
 
-var uncertain = errors.New("ownership cannot be certified")
+var errUncertain = errors.New("ownership cannot be certified")
 
 func same(a, b unix.Stat_t) bool       { return a.Dev == b.Dev && a.Ino == b.Ino }
 func stat(fd int) (unix.Stat_t, error) { var st unix.Stat_t; e := unix.Fstat(fd, &st); return st, e }
@@ -24,8 +25,7 @@ func safeDirectory(path string) (int, error) {
 	st, e := stat(fd)
 	var named unix.Stat_t
 	if e != nil || unix.Lstat(path, &named) != nil || !same(st, named) || st.Uid != 0 || st.Mode&022 != 0 || !darwin.NoACL(fd) {
-		unix.Close(fd)
-		return -1, uncertain
+		return -1, errors.Join(errUncertain, unix.Close(fd))
 	}
 	return fd, nil
 }
@@ -34,12 +34,7 @@ func syncDirectory(path string) error {
 	if e != nil {
 		return e
 	}
-	e = unix.Fsync(fd)
-	c := unix.Close(fd)
-	if e != nil {
-		return e
-	}
-	return c
+	return errors.Join(unix.Fsync(fd), unix.Close(fd))
 }
 func noACLPath(path string) bool { return darwin.NoACLPath(path) }
 func trusted() bool              { ok, _ := trustStage(); return ok }
@@ -60,7 +55,9 @@ func trustStage() (bool, int) {
 		if e != nil {
 			return false, 4
 		}
-		unix.Close(fd)
+		if unix.Close(fd) != nil {
+			return false, 4
+		}
 	}
 	return true, 0
 }
@@ -87,8 +84,7 @@ func lockFile(path string, private, shared, create bool) (int, error) {
 		mode = unix.LOCK_SH | unix.LOCK_NB
 	}
 	if e != nil || st.Uid != 0 || st.Nlink != 1 || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&mask != 0 || !darwin.NoACL(fd) || unix.Flock(fd, mode) != nil || unix.Lstat(path, &named) != nil || !same(st, named) {
-		unix.Close(fd)
-		return -1, uncertain
+		return -1, errors.Join(errUncertain, unix.Close(fd))
 	}
 	return fd, nil
 }
@@ -103,19 +99,14 @@ func readAt(parent int, name string, max int) ([]byte, unix.Stat_t, error) {
 	}
 	st, e := stat(fd)
 	if e != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&022 != 0 || st.Size < 0 || st.Size > int64(max) || !darwin.NoACL(fd) {
-		unix.Close(fd)
-		return nil, st, uncertain
+		return nil, st, errors.Join(errUncertain, unix.Close(fd))
 	}
 	file := os.NewFile(uintptr(fd), name)
 	data, e := io.ReadAll(io.LimitReader(file, int64(max)+1))
 	if e == nil && (!namedCurrent(parent, name, st) || int64(len(data)) != st.Size) {
-		e = uncertain
+		e = errUncertain
 	}
-	c := file.Close()
-	if e == nil {
-		e = c
-	}
-	return data, st, e
+	return data, st, errors.Join(e, file.Close())
 }
 func writeAll(fd int, data []byte) error {
 	for len(data) > 0 {
@@ -133,17 +124,17 @@ func writeAll(fd int, data []byte) error {
 	}
 	return nil
 }
-func moveExclusive(source, target string) error {
+func moveExclusive(source, target string) (returnErr error) {
 	a, e := safeDirectory(filepath.Dir(source))
 	if e != nil {
 		return e
 	}
-	defer unix.Close(a)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(a)) }()
 	b, e := safeDirectory(filepath.Dir(target))
 	if e != nil {
 		return e
 	}
-	defer unix.Close(b)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(b)) }()
 	return darwin.RenameExclusive(a, filepath.Base(source), b, filepath.Base(target))
 }
 func prefixAt(parent int, name string, expected []byte, mode uint32) (int, unix.Stat_t, error) {
@@ -156,8 +147,7 @@ func prefixAt(parent int, name string, expected []byte, mode uint32) (int, unix.
 	}
 	st, e := stat(fd)
 	if e != nil || st.Uid != 0 || st.Nlink != 1 || st.Mode&unix.S_IFMT != unix.S_IFREG || (uint32(st.Mode)&0777 != mode && st.Mode&0777 != 0600) || st.Size < 0 || st.Size > int64(len(expected)) || !darwin.NoACL(fd) {
-		unix.Close(fd)
-		return -1, st, uncertain
+		return -1, st, errors.Join(errUncertain, unix.Close(fd))
 	}
 	data := make([]byte, st.Size)
 	offset := 0
@@ -167,14 +157,12 @@ func prefixAt(parent int, name string, expected []byte, mode uint32) (int, unix.
 			continue
 		}
 		if e != nil || n <= 0 {
-			unix.Close(fd)
-			return -1, st, uncertain
+			return -1, st, errors.Join(errUncertain, unix.Close(fd))
 		}
 		offset += n
 	}
 	if !bytes.Equal(data, expected[:len(data)]) || !namedCurrent(parent, name, st) || unix.Fchmod(fd, mode) != nil {
-		unix.Close(fd)
-		return -1, st, uncertain
+		return -1, st, errors.Join(errUncertain, unix.Close(fd))
 	}
 	return fd, st, nil
 }

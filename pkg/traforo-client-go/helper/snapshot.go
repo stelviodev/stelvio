@@ -3,8 +3,10 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/stelviodev/traforo/protocol"
+	"io"
 	"math"
+
+	"github.com/stelviodev/traforo/protocol"
 )
 
 const (
@@ -47,29 +49,29 @@ func (s Snapshot) Clone() Snapshot {
 }
 func (s *Snapshot) Validate() error {
 	if s.Parent != (protocol.DarwinParent{}) && (!s.Parent.Valid() || s.Parent.UID != s.Peer.UID) {
-		return protocol.Invalid
+		return protocol.ErrInvalid
 	}
 	if s.Revision == 0 || !s.Peer.ValidV3() || !protocol.Nonzero(s.Session[:]) || !protocol.Nonzero(s.Capability[:]) || s.Carrier != 1 || len(s.Units) > 8 {
-		return protocol.Invalid
+		return protocol.ErrInvalid
 	}
 	for i := range s.Units {
 		u := &s.Units[i]
 		r, e := protocol.Decode(u.Packet)
 		if e != nil || r.Operation != protocol.Configure || r.Generation > u.Generation || r.Session != s.Session || r.Capability != s.Capability || u.Phase < Preparing || u.Phase > Removed || u.Generation == 0 || u.Index == 0 || u.Index > math.MaxUint16 || len(u.Files) != len(r.Resolvers) {
-			return protocol.Invalid
+			return protocol.ErrInvalid
 		}
 		u.Request = r
 		if u.Generation == math.MaxUint64 && (u.KeepDNS || u.Phase == Preparing || u.Phase == Active) || (u.Phase == Preparing || u.Phase == Active || u.Phase == Removed) && u.KeepDNS || u.Phase == Retained && !u.KeepDNS || (u.Phase == Preparing || u.Phase == Active) && r.Generation != u.Generation {
-			return protocol.Invalid
+			return protocol.ErrInvalid
 		}
 		for _, f := range u.Files {
 			if f.Phase > 2 || f.Phase == 0 && (f.Device != 0 || f.Inode != 0) || f.Phase != 0 && (f.Device == 0 || f.Inode == 0) || u.Phase == Removed && f.Phase != 0 || (u.Phase == Active || u.Phase == Retained || u.Phase == Removing && u.KeepDNS) && f.Phase != 2 {
-				return protocol.Invalid
+				return protocol.ErrInvalid
 			}
 		}
 		for _, p := range s.Units[:i] {
 			if r.Unit == p.Request.Unit || r.VPC == p.Request.VPC {
-				return protocol.Invalid
+				return protocol.ErrInvalid
 			}
 			if u.Phase == Removed || p.Phase == Removed {
 				continue
@@ -77,14 +79,14 @@ func (s *Snapshot) Validate() error {
 			for _, a := range r.Ranges {
 				for _, b := range p.Request.Ranges {
 					if a.Overlaps(b) {
-						return protocol.Invalid
+						return protocol.ErrInvalid
 					}
 				}
 			}
 			for _, a := range r.Resolvers {
 				for _, b := range p.Request.Resolvers {
 					if protocol.DNSOverlap(a.Domain, b.Domain) {
-						return protocol.Invalid
+						return protocol.ErrInvalid
 					}
 				}
 			}
@@ -97,12 +99,17 @@ func EncodeSnapshot(s Snapshot) ([]byte, error) {
 		return nil, e
 	}
 	var out bytes.Buffer
+	var writeErr error
 	if s.Parent.PID != 0 {
 		out.WriteString("STLVSNP4")
 	} else {
 		out.WriteString("STLVSNP3")
 	}
-	put := func(v any) { binary.Write(&out, binary.BigEndian, v) }
+	put := func(v any) {
+		if writeErr == nil {
+			writeErr = binary.Write(&out, binary.BigEndian, v)
+		}
+	}
 	put(s.Revision)
 	put(s.Peer.UID)
 	put(s.Peer.PID)
@@ -133,32 +140,37 @@ func EncodeSnapshot(s Snapshot) ([]byte, error) {
 			put(f.Inode)
 		}
 	}
+	if writeErr != nil {
+		return nil, writeErr
+	}
 	if out.Len() > protocol.MaxJournal {
-		return nil, protocol.Invalid
+		return nil, protocol.ErrInvalid
 	}
 	return out.Bytes(), nil
 }
 func DecodeSnapshot(data []byte) (Snapshot, error) {
 	var s Snapshot
 	if len(data) > protocol.MaxJournal || len(data) < 8 || (string(data[:8]) != "STLVSNP3" && string(data[:8]) != "STLVSNP4") {
-		return s, protocol.Invalid
+		return s, protocol.ErrInvalid
 	}
 	buf := bytes.NewReader(data[8:])
 	read := func(v any) bool { return binary.Read(buf, binary.BigEndian, v) == nil }
 	var n byte
 	if !read(&s.Revision) || !read(&s.Peer.UID) || !read(&s.Peer.PID) || !read(&s.Peer.Seconds) || !read(&s.Peer.Micros) || !read(&s.Peer.Token) || (string(data[:8]) == "STLVSNP4" && (!read(&s.Parent) || !s.Parent.Valid())) || !read(&s.Session) || !read(&s.Capability) || !read(&s.Carrier) || !read(&n) || n > 8 {
-		return Snapshot{}, protocol.Invalid
+		return Snapshot{}, protocol.ErrInvalid
 	}
 	for i := byte(0); i < n; i++ {
 		var u Unit
 		var keep byte
 		var length uint32
 		if !read(&u.Phase) || !read(&keep) || keep > 1 || !read(&u.Generation) || !read(&u.Index) || !read(&length) || length > protocol.Header+protocol.MaxBody || int(length) > buf.Len() {
-			return Snapshot{}, protocol.Invalid
+			return Snapshot{}, protocol.ErrInvalid
 		}
 		u.KeepDNS = keep == 1
 		u.Packet = make([]byte, length)
-		buf.Read(u.Packet)
+		if _, e := io.ReadFull(buf, u.Packet); e != nil {
+			return Snapshot{}, protocol.ErrInvalid
+		}
 		r, e := protocol.Decode(u.Packet)
 		if e != nil {
 			return Snapshot{}, e
@@ -167,14 +179,14 @@ func DecodeSnapshot(data []byte) (Snapshot, error) {
 		for range r.Resolvers {
 			var f Receipt
 			if !read(&f.Phase) || !read(&f.Device) || !read(&f.Inode) {
-				return Snapshot{}, protocol.Invalid
+				return Snapshot{}, protocol.ErrInvalid
 			}
 			u.Files = append(u.Files, f)
 		}
 		s.Units = append(s.Units, u)
 	}
 	if buf.Len() != 0 {
-		return Snapshot{}, protocol.Invalid
+		return Snapshot{}, protocol.ErrInvalid
 	}
 	if e := s.Validate(); e != nil {
 		return Snapshot{}, e

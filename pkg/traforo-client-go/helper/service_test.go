@@ -100,7 +100,10 @@ func servicePair(t *testing.T, kind int) [2]int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unix.Close(fds[0]); unix.Close(fds[1]) })
+	t.Cleanup(func() {
+		_ = unix.Close(fds[0]) // Fixtures may deliberately close one side during revocation tests.
+		_ = unix.Close(fds[1])
+	})
 	return fds
 }
 
@@ -202,7 +205,7 @@ func TestReleaseRevokesImmediatelyAndRetainsFailedCleanupEvidence(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Close(gate)
+	t.Cleanup(func() { _ = unix.Close(gate) }) // The tested service may already revoke this gate.
 	s.gate = gate
 	s.lease = lease[0]
 	s.carrier = carrier[0]
@@ -304,23 +307,33 @@ func TestFragmentedRequestsRejectBodyRightsAndShortEOF(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer unix.Close(pair[0])
-			defer unix.Close(pair[1])
-			darwin.Nonblocking(pair[1])
+			t.Cleanup(func() {
+				_ = unix.Close(pair[0]) // Receive fixtures may close or shut down one side first.
+				_ = unix.Close(pair[1])
+			})
+			if e = darwin.Nonblocking(pair[1]); e != nil {
+				t.Fatal(e)
+			}
 			c := client{fd: pair[1], deadline: time.Now().Add(time.Second)}
-			unix.Write(pair[0], packet[:20])
+			if n, writeErr := unix.Write(pair[0], packet[:20]); writeErr != nil || n != 20 {
+				t.Fatalf("write partial header: n=%d err=%v", n, writeErr)
+			}
 			_, complete, e := c.receive()
 			if e != nil || complete {
 				t.Fatal("partial frame accepted", e)
 			}
 			if mode == "short-eof" {
-				unix.Shutdown(pair[0], unix.SHUT_WR)
+				if e = unix.Shutdown(pair[0], unix.SHUT_WR); e != nil {
+					t.Fatal(e)
+				}
 				if _, done, e := c.receive(); e == nil || done {
 					t.Fatal("short EOF accepted")
 				}
 				return
 			}
-			unix.Write(pair[0], packet[20:protocol.Header])
+			if n, writeErr := unix.Write(pair[0], packet[20:protocol.Header]); writeErr != nil || n != protocol.Header-20 {
+				t.Fatalf("write incomplete body: n=%d err=%v", n, writeErr)
+			}
 			_, complete, e = c.receive()
 			if e != nil || complete {
 				t.Fatal("header without body accepted", e)
@@ -329,7 +342,7 @@ func TestFragmentedRequestsRejectBodyRightsAndShortEOF(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer unix.Close(source)
+			t.Cleanup(func() { _ = unix.Close(source) }) // The ancillary-rights fixture owns this source FD.
 			var rights []byte
 			if mode == "body-rights" {
 				rights = unix.UnixRights(source)
@@ -359,26 +372,35 @@ func TestMaintenanceRevokesAndRetriesWithoutPythonCleanup(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer os.RemoveAll(directory)
+			t.Cleanup(func() {
+				if err := os.RemoveAll(directory); err != nil {
+					t.Errorf("remove fixture directory: %v", err)
+				}
+			})
 			path := filepath.Join(directory, "s")
 			listener, e := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer listener.Close()
+			t.Cleanup(func() { _ = listener.Close() }) // Listener teardown follows the peer-liveness assertion.
 			sender, e := net.Dial("unix", path)
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer sender.Close()
+			t.Cleanup(func() { _ = sender.Close() }) // Sender teardown is best-effort after the fixture.
 			receiver, e := listener.AcceptUnix()
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer receiver.Close()
-			raw, _ := receiver.SyscallConn()
+			t.Cleanup(func() { _ = receiver.Close() }) // Receiver teardown is best-effort after the fixture.
+			raw, e := receiver.SyscallConn()
+			if e != nil {
+				t.Fatal(e)
+			}
 			var peer darwin.Peer
-			raw.Control(func(fd uintptr) { peer, e = darwin.ReadPeer(int(fd)) })
+			if e = raw.Control(func(fd uintptr) { peer, e = darwin.ReadPeer(int(fd)) }); e != nil {
+				t.Fatal(e)
+			}
 			if e != nil || !darwin.Alive(peer) {
 				t.Fatal(peer, e)
 			}
@@ -391,16 +413,16 @@ func TestMaintenanceRevokesAndRetriesWithoutPythonCleanup(t *testing.T) {
 				t.Fatal(e)
 			}
 			s.gate = gate
-			defer unix.Close(gate)
+			t.Cleanup(func() { _ = unix.Close(gate) }) // The service fixture may close the gate during cleanup.
 			pair, e := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer unix.Close(pair[1])
+			t.Cleanup(func() { _ = unix.Close(pair[1]) }) // The service owns the peer side until teardown.
 			s.lease = pair[0]
 			s.grants[0].active = true
 			if reason != "parent-dead" {
-				unix.Close(s.lease)
+				_ = unix.Close(s.lease) // Simulate an already-lost lease descriptor.
 				s.lease = -1
 			}
 			if reason == "lease-lost" {

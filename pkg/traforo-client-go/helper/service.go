@@ -5,13 +5,16 @@ package helper
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"github.com/stelviodev/traforo/darwin"
-	"github.com/stelviodev/traforo/protocol"
-	"golang.org/x/sys/unix"
+	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/protocol"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -72,7 +75,7 @@ func (s *service) maintain(now time.Time) error {
 	}
 	if !s.working && !now.Before(s.cleanupAfter) && (s.revoke || s.owned && (s.lease < 0 || !s.ownerAlive())) {
 		if !s.start(protocol.Reconcile, nil, protocol.Request{}) {
-			return uncertain
+			return errUncertain
 		}
 		s.revoke = false
 	}
@@ -102,10 +105,13 @@ func reply(fd int, status uint16, body []byte, descriptor int) bool {
 	n, e := unix.SendmsgN(fd, packet, control, nil, unix.MSG_DONTWAIT)
 	return e == nil && n == len(packet)
 }
-func replyClose(fd int, status uint16) { reply(fd, status, nil, -1); unix.Close(fd) }
+func replyClose(fd int, status uint16) {
+	reply(fd, status, nil, -1)
+	_ = unix.Close(fd) // The response has been sent; closing the peer is best-effort.
+}
 func (c *client) close() {
 	if c.fd >= 0 {
-		unix.Close(c.fd)
+		_ = unix.Close(c.fd) // Client teardown cannot safely retry this descriptor.
 	}
 	*c = client{fd: -1}
 }
@@ -114,7 +120,7 @@ func (c *client) receive() (protocol.Request, bool, error) {
 	if len(c.data) >= target {
 		length := binary.BigEndian.Uint32(c.data[12:])
 		if length > protocol.MaxBody {
-			return protocol.Request{}, false, protocol.Invalid
+			return protocol.Request{}, false, protocol.ErrInvalid
 		}
 		target += int(length)
 	}
@@ -125,7 +131,7 @@ func (c *client) receive() (protocol.Request, bool, error) {
 			return protocol.Request{}, false, nil
 		}
 		if e != nil || n <= 0 {
-			return protocol.Request{}, false, uncertain
+			return protocol.Request{}, false, errUncertain
 		}
 		c.data = append(c.data, buf[:n]...)
 	}
@@ -134,7 +140,7 @@ func (c *client) receive() (protocol.Request, bool, error) {
 	}
 	length := binary.BigEndian.Uint32(c.data[12:])
 	if length > protocol.MaxBody {
-		return protocol.Request{}, false, protocol.Invalid
+		return protocol.Request{}, false, protocol.ErrInvalid
 	}
 	if len(c.data) != protocol.Header+int(length) {
 		return protocol.Request{}, false, nil
@@ -144,10 +150,10 @@ func (c *client) receive() (protocol.Request, bool, error) {
 }
 func (s *service) revokeLease() {
 	if s.lease >= 0 {
-		unix.Close(s.lease)
+		_ = unix.Close(s.lease) // Lease revocation is enforced by invalidating the descriptor.
 	}
 	if s.carrier >= 0 {
-		unix.Close(s.carrier)
+		_ = unix.Close(s.carrier) // Carrier revocation is enforced by invalidating the descriptor.
 	}
 	s.lease = -1
 	s.carrier = -1
@@ -158,14 +164,16 @@ func (s *service) revokeLease() {
 }
 func gate(shared bool) (int, error) {
 	if !trusted() {
-		return -1, uncertain
+		return -1, errUncertain
 	}
 	for _, p := range []string{darwin.StateParent, darwin.State} {
 		fd, e := safeDirectory(p)
 		if e != nil {
 			return -1, e
 		}
-		unix.Close(fd)
+		if e = unix.Close(fd); e != nil {
+			return -1, e
+		}
 	}
 	return lockFile(darwin.State+"/admission", true, shared, false)
 }
@@ -238,11 +246,11 @@ func (s *service) acquire(c *client, r protocol.Request) {
 		c.fd = -1
 		return
 	}
-	defer unix.Close(pair[1])
+	defer func() { _ = unix.Close(pair[1]) }() // The retained peer descriptor is owned by the service.
 	if s.gate < 0 {
 		s.gate, e = gate(true)
 		if e != nil {
-			unix.Close(pair[0])
+			_ = unix.Close(pair[0]) // No carrier is published when admission setup fails.
 			replyClose(c.fd, Busy)
 			c.fd = -1
 			return
@@ -250,20 +258,20 @@ func (s *service) acquire(c *client, r protocol.Request) {
 	}
 	parent, e := darwin.Parent(c.peer)
 	if e != nil {
-		unix.Close(pair[0])
+		_ = unix.Close(pair[0]) // The unusable carrier is discarded before replying.
 		replyClose(c.fd, Uncertain)
 		c.fd = -1
 		return
 	}
 	state := Snapshot{Revision: 1, Carrier: 1, Peer: c.peer, Parent: parent, Session: r.Session}
 	if _, e = rand.Read(state.Capability[:]); e != nil {
-		unix.Close(pair[0])
+		_ = unix.Close(pair[0]) // The unusable carrier is discarded before replying.
 		replyClose(c.fd, Uncertain)
 		c.fd = -1
 		return
 	}
 	if e = s.store.Save(state); e != nil {
-		unix.Close(pair[0])
+		_ = unix.Close(pair[0]) // The uncommitted carrier is discarded on journal failure.
 		s.uncertain = true
 		if current, exists, e := s.store.Load(); e == nil && exists {
 			s.state = current
@@ -321,7 +329,7 @@ func (s *service) complete(j jobResult) {
 		s.session = [16]byte{}
 		s.capability = [16]byte{}
 		if s.gate >= 0 {
-			unix.Close(s.gate)
+			_ = unix.Close(s.gate) // The completed cleanup removes admission before closing this handle.
 			s.gate = -1
 		}
 	} else if disposal {
@@ -346,7 +354,7 @@ func (s *service) complete(j jobResult) {
 			}
 		} else if j.kind == protocol.Configure && j.err != nil && j.stage != 0 {
 			reply(j.client.fd, Uncertain, []byte{'C', 'F', 1, j.stage}, -1)
-			unix.Close(j.client.fd)
+			_ = unix.Close(j.client.fd) // The staged failure reply is sent before client teardown.
 		} else {
 			status := OK
 			if j.err != nil {
@@ -455,12 +463,12 @@ func (s *service) accept() {
 		return
 	}
 	if darwin.Nonblocking(fd) != nil {
-		unix.Close(fd)
+		_ = unix.Close(fd) // Reject and discard a client that cannot be made nonblocking.
 		return
 	}
 	peer, e := darwin.ReadPeer(fd)
 	if e != nil {
-		unix.Close(fd)
+		_ = unix.Close(fd) // Reject and discard an unauthenticated client.
 		return
 	}
 	if s.owned && (s.lease >= 0 || s.ownerAlive()) && peer != s.peer {
@@ -546,26 +554,26 @@ func (s *service) pumpHost(i int) {
 		s.grants[i].failed = true
 	}
 }
-func serve() error {
+func serve() (returnErr error) {
 	if !trusted() || darwin.Supported() != nil {
-		return uncertain
+		return errUncertain
 	}
 	unix.Umask(077)
 	image, e := lockFile(darwin.Installed, false, false, false)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(image)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(image)) }()
 	lease, e := lockFile(darwin.State+"/lease", true, false, true)
 	if e != nil {
 		return e
 	}
-	defer unix.Close(lease)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(lease)) }()
 	listener, e := darwin.Listener()
 	if e != nil {
 		return e
 	}
-	defer unix.Close(listener)
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(listener)) }()
 	s := service{store: Store{image, lease}, gate: -1, listener: listener, lease: -1, carrier: -1, devices: initDevices(), completion: make(chan jobResult, 1)}
 	for i := range s.clients {
 		s.clients[i].fd = -1
@@ -576,10 +584,13 @@ func serve() error {
 			s.clients[i].close()
 		}
 		for i := range s.devices {
-			s.devices[i].Close()
+			if err := s.devices[i].Close(); err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("close utun device %d: %w", i, err))
+			}
 		}
 		if s.gate >= 0 {
-			unix.Close(s.gate)
+			returnErr = errors.Join(returnErr, unix.Close(s.gate))
+			s.gate = -1
 		}
 	}()
 	s.gate, e = gate(true)
@@ -595,8 +606,11 @@ func serve() error {
 		s.session = state.Session
 		s.capability = state.Capability
 	} else if e == nil {
-		unix.Close(s.gate)
+		e = unix.Close(s.gate)
 		s.gate = -1
+		if e != nil {
+			return e
+		}
 	}
 	s.refresh()
 	signals := make(chan os.Signal, 1)
@@ -624,7 +638,7 @@ func serve() error {
 			if s.working {
 				os.Exit(1)
 			} // Kernel closes FDs; preserve durable recovery evidence.
-			return uncertain
+			return errUncertain
 		}
 		if e := s.maintain(time.Now()); e != nil {
 			return e

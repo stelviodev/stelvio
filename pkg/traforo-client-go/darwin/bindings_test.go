@@ -3,8 +3,9 @@
 package darwin
 
 import (
+	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestRejectedDescriptorsAreClosed(t *testing.T) {
@@ -19,13 +22,22 @@ func TestRejectedDescriptorsAreClosed(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer unix.Close(pair[0])
-	defer unix.Close(pair[1])
+	t.Cleanup(func() {
+		for _, fd := range pair {
+			if err := unix.Close(fd); err != nil {
+				t.Errorf("close socketpair descriptor %d: %v", fd, err)
+			}
+		}
+	})
 	file, e := os.CreateTemp(t.TempDir(), "rights")
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer file.Close()
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close rights fixture: %v", err)
+		}
+	})
 	inventory := func() map[int]int {
 		fds := make(map[int]int)
 		for fd := 0; fd < 1024; fd++ {
@@ -77,7 +89,7 @@ func TestUnixSocketACLInventory(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer listener.Close()
+	t.Cleanup(func() { _ = listener.Close() }) // Listener teardown is best-effort after the ACL assertion.
 	if !NoACLPath(path) {
 		t.Fatal("plain Unix socket ACL query failed")
 	}
@@ -91,20 +103,26 @@ func TestOwnerFixture(t *testing.T) {
 	if mode == "leaf" {
 		c, e := net.Dial("unix", os.Getenv("TRAFORO_OWNER_SOCKET"))
 		if e != nil {
-			os.Exit(3)
+			t.Fatal(e)
 		}
-		defer c.Close()
-		c.Write([]byte("ready"))
+		defer func() { _ = c.Close() }() // The child process is exiting after its fixture exchange.
+		if n, err := c.Write([]byte("ready")); err != nil || n != len("ready") {
+			t.Fatalf("write readiness: n=%d err=%v", n, err)
+		}
 		var b [1]byte
-		c.Read(b[:])
+		if _, e = io.ReadFull(c, b[:]); e != nil {
+			t.Fatal(e)
+		}
 		return
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestOwnerFixture$")
 	cmd.Env = append(os.Environ(), "TRAFORO_OWNER_FIXTURE=leaf")
 	if e := cmd.Start(); e != nil {
-		os.Exit(4)
+		t.Fatal(e)
 	}
-	cmd.Wait()
+	if e := cmd.Wait(); e != nil {
+		t.Fatal(e)
+	}
 }
 
 func TestParentDeathWithLiveRuntime(t *testing.T) {
@@ -112,28 +130,46 @@ func TestParentDeathWithLiveRuntime(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer os.RemoveAll(directory)
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Errorf("remove fixture directory: %v", err)
+		}
+	})
 	path := filepath.Join(directory, "s")
 	listener, e := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer listener.Close()
-	listener.SetDeadline(time.Now().Add(10 * time.Second))
+	t.Cleanup(func() { _ = listener.Close() }) // Listener teardown is best-effort after the fixture.
+	if e = listener.SetDeadline(time.Now().Add(10 * time.Second)); e != nil {
+		t.Fatal(e)
+	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestOwnerFixture$")
 	cmd.Env = append(os.Environ(), "TRAFORO_OWNER_FIXTURE=parent", "TRAFORO_OWNER_SOCKET="+path)
 	if e = cmd.Start(); e != nil {
 		t.Fatal(e)
 	}
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				t.Errorf("kill owner fixture: %v", err)
+			}
+			_ = cmd.Wait() // The fixture is expected to be killed if the test exits early.
+		}
+	})
 	c, e := listener.AcceptUnix()
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer c.Close()
-	raw, _ := c.SyscallConn()
+	t.Cleanup(func() { _ = c.Close() }) // The accepted connection is test-owned.
+	raw, e := c.SyscallConn()
+	if e != nil {
+		t.Fatal(e)
+	}
 	var peer Peer
-	raw.Control(func(fd uintptr) { peer, e = ReadPeer(int(fd)) })
+	if e = raw.Control(func(fd uintptr) { peer, e = ReadPeer(int(fd)) }); e != nil {
+		t.Fatal(e)
+	}
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -146,15 +182,21 @@ func TestParentDeathWithLiveRuntime(t *testing.T) {
 	if ParentAlive(stale) {
 		t.Fatal("accepted stale parent birth")
 	}
-	cmd.Process.Kill()
-	cmd.Wait()
+	if e = cmd.Process.Kill(); e != nil {
+		t.Fatal(e)
+	}
+	if e = cmd.Wait(); e == nil {
+		t.Fatal("owner fixture was not terminated")
+	}
 	if !Alive(peer) {
 		t.Fatal("runtime should remain live for this proof")
 	}
 	if ParentAlive(parent) {
 		t.Fatal("dead command retained host authority")
 	}
-	c.Write([]byte("q"))
+	if n, writeErr := c.Write([]byte("q")); writeErr != nil || n != 1 {
+		t.Fatalf("release runtime fixture: n=%d err=%v", n, writeErr)
+	}
 }
 
 func TestExtendedACLRejected(t *testing.T) {
@@ -208,13 +250,22 @@ func TestAncillaryAbuseAcrossStreamAndDatagram(t *testing.T) {
 					if e != nil {
 						t.Fatal(e)
 					}
-					defer unix.Close(pair[0])
-					defer unix.Close(pair[1])
+					t.Cleanup(func() {
+						for _, fd := range pair {
+							if err := unix.Close(fd); err != nil {
+								t.Errorf("close socketpair descriptor %d: %v", fd, err)
+							}
+						}
+					})
 					source, e := unix.Open("/dev/null", unix.O_RDONLY, 0)
 					if e != nil {
 						t.Fatal(e)
 					}
-					defer unix.Close(source)
+					t.Cleanup(func() {
+						if err := unix.Close(source); err != nil {
+							t.Errorf("close rights source descriptor: %v", err)
+						}
+					})
 					rights := make([]int, count)
 					for i := range rights {
 						rights[i] = source

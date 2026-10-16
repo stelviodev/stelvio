@@ -5,12 +5,14 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/stelviodev/traforo/darwin"
-	"github.com/stelviodev/traforo/protocol"
+	"errors"
 	"math"
 	"net"
 	"net/netip"
 	"time"
+
+	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/protocol"
 )
 
 func network(p netip.Prefix) (uint32, uint32) {
@@ -42,7 +44,7 @@ func routeConflict(n, m, index uint32) error {
 	for _, r := range routes {
 		common := m & r.Mask
 		if r.Mask != 0 && n&common == r.Network&common && (index == 0 || r.Index != index) {
-			return uncertain
+			return errUncertain
 		}
 	}
 	return nil
@@ -66,7 +68,7 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 	d := devices[i]
 	*stage = 2
 	if !live(u, d) {
-		return uncertain
+		return errUncertain
 	}
 	*stage = 3
 	if e := resolverConflict(store, *state, u.Request); e != nil {
@@ -75,7 +77,7 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 	*stage = 4
 	local := uint32(0xc0000201 + 2*i)
 	if routeConflict(local, math.MaxUint32, d.Index) != nil || routeConflict(local+1, math.MaxUint32, d.Index) != nil {
-		return uncertain
+		return errUncertain
 	}
 	if e := d.Configure(local); e != nil {
 		return e
@@ -84,12 +86,12 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 	for _, p := range u.Request.Ranges {
 		status, e := routeStatus(p, d.Index)
 		if e != nil || status == 2 {
-			return uncertain
+			return errUncertain
 		}
 		if status == 0 {
 			n, m := network(p)
 			if routeConflict(n, m, d.Index) != nil {
-				return uncertain
+				return errUncertain
 			}
 			if e = d.AddRoute(n, m); e != nil {
 				return e
@@ -97,7 +99,7 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 		}
 		status, e = routeStatus(p, d.Index)
 		if e != nil || status != 1 || !d.Current() {
-			return uncertain
+			return errUncertain
 		}
 	}
 	for j := range u.Request.Resolvers {
@@ -121,14 +123,14 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 	*stage = 9
 	for j := range u.Request.Resolvers {
 		if !resolverCurrent(store, *state, i, j) {
-			return uncertain
+			return errUncertain
 		}
 	}
 	*stage = 10
 	for _, p := range u.Request.Ranges {
 		status, e := routeStatus(p, d.Index)
 		if e != nil || status != 1 {
-			return uncertain
+			return errUncertain
 		}
 	}
 	*stage = 11
@@ -138,7 +140,7 @@ func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, pack
 	*stage = 1
 	r, e := protocol.Decode(packet)
 	if e != nil || r.Operation != protocol.Configure || r.Generation == math.MaxUint64 || state.Revision == math.MaxUint64 || r.Session != state.Session || r.Capability != state.Capability || !store.Current(*state) {
-		return uncertain
+		return errUncertain
 	}
 	i := len(state.Units)
 	for j, u := range state.Units {
@@ -151,17 +153,17 @@ func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, pack
 		u := state.Units[i]
 		*stage = 12
 		if !live(u, devices[i]) {
-			return uncertain
+			return errUncertain
 		}
 		if !bytes.Equal(u.Packet, packet) {
 			*stage = 13
 			if u.Phase != Active || !protocol.Extension(u.Request, r) || resolverConflict(store, *state, r) != nil {
-				return uncertain
+				return errUncertain
 			}
 			*stage = 14
 			for j := range u.Files {
 				if !resolverCurrent(store, *state, i, j) {
-					return uncertain
+					return errUncertain
 				}
 			}
 			*stage = 21
@@ -183,26 +185,26 @@ func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, pack
 		}
 		*stage = 16
 		if u.Phase != Active || resolverConflict(store, *state, r) != nil {
-			return uncertain
+			return errUncertain
 		}
 		*stage = 17
 		for j := range u.Files {
 			if !resolverCurrent(store, *state, i, j) {
-				return uncertain
+				return errUncertain
 			}
 		}
 		*stage = 18
 		for _, p := range r.Ranges {
 			status, e := routeStatus(p, devices[i].Index)
 			if e != nil || status != 1 {
-				return uncertain
+				return errUncertain
 			}
 		}
 		return nil
 	}
 	*stage = 19
 	if i >= 8 || devices[i].FD != -1 || i < len(state.Units) && r.Generation <= state.Units[i].Generation || resolverConflict(store, *state, r) != nil {
-		return uncertain
+		return errUncertain
 	}
 	*stage = 20
 	for _, p := range r.Ranges {
@@ -229,8 +231,7 @@ func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, pack
 	}
 	*stage = 23
 	if e = store.Save(next); e != nil {
-		devices[i].Close()
-		return e
+		return errors.Join(e, devices[i].Close())
 	}
 	*state = next
 	return finishPrepare(store, state, devices, i, stage)
@@ -269,7 +270,7 @@ func detached(u Unit) bool {
 }
 func removeUnit(store Store, state *Snapshot, devices *[8]darwin.Device, id uint32, generation uint64, keep bool) error {
 	if generation == 0 || keep && generation == math.MaxUint64 || !store.Current(*state) {
-		return uncertain
+		return errUncertain
 	}
 	i := -1
 	for j, u := range state.Units {
@@ -279,34 +280,34 @@ func removeUnit(store Store, state *Snapshot, devices *[8]darwin.Device, id uint
 		}
 	}
 	if i < 0 {
-		return uncertain
+		return errUncertain
 	}
 	u := state.Units[i]
 	if u.Phase == Removed {
 		if generation == u.Generation && !keep && devices[i].FD == -1 {
 			return nil
 		}
-		return uncertain
+		return errUncertain
 	}
 	if u.Phase == Retained && keep && generation == u.Generation {
 		if devices[i].FD != -1 {
-			return uncertain
+			return errUncertain
 		}
 		for j := range u.Files {
 			if !resolverCurrent(store, *state, i, j) {
-				return uncertain
+				return errUncertain
 			}
 		}
 		return nil
 	}
 	if u.Phase != Removing {
 		if generation <= u.Generation {
-			return uncertain
+			return errUncertain
 		}
 		if keep {
 			for _, f := range u.Files {
 				if f.Phase != 2 {
-					return uncertain
+					return errUncertain
 				}
 			}
 		} else if u.Phase == Preparing {
@@ -326,24 +327,24 @@ func removeUnit(store Store, state *Snapshot, devices *[8]darwin.Device, id uint
 			return e
 		}
 	} else if generation != u.Generation || keep != u.KeepDNS {
-		return uncertain
+		return errUncertain
 	}
 	u = state.Units[i]
 	if devices[i].FD >= 0 {
 		if !live(u, devices[i]) {
-			return uncertain
+			return errUncertain
 		}
 		if e := devices[i].Close(); e != nil {
 			return e
 		}
 	}
 	if !detached(u) {
-		return uncertain
+		return errUncertain
 	}
 	for j := range u.Files {
 		if keep {
 			if !resolverCurrent(store, *state, i, j) {
-				return uncertain
+				return errUncertain
 			}
 		} else if e := removeResolver(store, state, i, j); e != nil {
 			return e
@@ -377,7 +378,7 @@ func cleanup(store Store, state *Snapshot, devices *[8]darwin.Device) error {
 		generation := u.Generation
 		if u.Phase != Removing || u.KeepDNS {
 			if generation == math.MaxUint64 {
-				return uncertain
+				return errUncertain
 			}
 			generation++
 		}
@@ -385,7 +386,7 @@ func cleanup(store Store, state *Snapshot, devices *[8]darwin.Device) error {
 			failure = e
 			current, exists, e := store.Load()
 			if e != nil || !exists {
-				return uncertain
+				return errUncertain
 			}
 			*state = current
 		}
@@ -394,7 +395,7 @@ func cleanup(store Store, state *Snapshot, devices *[8]darwin.Device) error {
 		return failure
 	}
 	if !store.Current(*state) {
-		return uncertain
+		return errUncertain
 	}
 	if e = store.Remove(); e != nil {
 		return e

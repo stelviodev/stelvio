@@ -25,7 +25,7 @@ const (
 	Reconcile  byte   = 6
 )
 
-var Invalid = errors.New("invalid bounded protocol value")
+var ErrInvalid = errors.New("invalid bounded protocol value")
 var vpcPattern = regexp.MustCompile(`^vpc-([0-9a-f]{8}|[0-9a-f]{17})$`)
 
 type Resolver struct {
@@ -53,15 +53,15 @@ func Nonzero(value []byte) bool {
 func Domain(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSuffix(value, "."))
 	if len(value) == 0 || len(value) > 253 {
-		return "", Invalid
+		return "", ErrInvalid
 	}
 	for _, label := range strings.Split(value, ".") {
 		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return "", Invalid
+			return "", ErrInvalid
 		}
 		for _, v := range []byte(label) {
-			if !(v >= 'a' && v <= 'z' || v >= '0' && v <= '9' || v == '-') {
-				return "", Invalid
+			if (v < 'a' || v > 'z') && (v < '0' || v > '9') && v != '-' {
+				return "", ErrInvalid
 			}
 		}
 	}
@@ -73,17 +73,17 @@ func DNSOverlap(a, b string) bool {
 func Prefix(value string) (netip.Prefix, error) {
 	p, err := netip.ParsePrefix(value)
 	if err != nil || !p.Addr().Is4() || p.Bits() < 16 || p.Bits() > 28 || p != p.Masked() || p.String() != value {
-		return netip.Prefix{}, Invalid
+		return netip.Prefix{}, ErrInvalid
 	}
 	for _, private := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
 		if q := netip.MustParsePrefix(private); q.Bits() <= p.Bits() && q.Contains(p.Addr()) {
 			return p, nil
 		}
 	}
-	return netip.Prefix{}, Invalid
+	return netip.Prefix{}, ErrInvalid
 }
 func Decode(packet []byte) (r Request, err error) {
-	err = Invalid
+	err = ErrInvalid
 	if len(packet) < Header || len(packet) > Header+MaxBody || string(packet[:8]) != "STLVTUN1" || packet[10] != 0 || packet[11] != 0 || int(binary.BigEndian.Uint32(packet[12:])) != len(packet)-Header {
 		return
 	}
