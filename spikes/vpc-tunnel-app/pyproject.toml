@@ -1,0 +1,13 @@
+[project]
+name = "vpc-tunnel-app"
+version = "0.1.0"
+description = "Stelvio example: a public Lambda linked to DocumentDB, with a dev bastion"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pymongo",
+    "stelvio",
+]
+
+[tool.uv.sources]
+stelvio = { path = "../..", editable = true }
