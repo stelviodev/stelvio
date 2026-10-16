@@ -15,7 +15,7 @@ from stelvio.bridge.local.listener import _handle_data_message
 from stelvio.command_run import CommandRun
 from stelvio.component import BridgeableMixin
 from stelvio.exceptions import StelvioValidationError
-from stelvio.tunnel.session import DevNetworkSession, VpcUnavailableError
+from stelvio.tunnel.session import NetworkSession, VpcUnavailableError
 
 
 @fixture
@@ -37,7 +37,14 @@ def network_state():
                         "vpc_id": f"vpc-0123456789abcdef{index}",
                         "provider": "provider",
                         "cidrs": [f"10.{index}.0.0/16"],
-                        "policy": "temporary",
+                        "policy": "persistent",
+                        "access": {
+                            "instance_id": "i-12345678",
+                            "security_group_id": "sg-12345678",
+                            "az": "us-east-1a",
+                            "identity_document": "identity",
+                            "owner": "vpc-0",
+                        },
                         "dns_domains": [],
                         "public_subnets": [
                             {
@@ -104,17 +111,10 @@ def world(monkeypatch, tmp_path):
         statuses=statuses,
         launches=launches,
         closed=closed,
-        make=lambda state: DevNetworkSession(
+        make=lambda state: NetworkSession(
             state=state,
             app="app",
             env="dev",
-            home={
-                "account": "123456789012",
-                "region": "us-east-1",
-                "profile": None,
-                "bucket": "home",
-            },
-            config_dir=tmp_path,
             report=messages.append,
         ),
     )
@@ -192,12 +192,9 @@ def test_cleanup_failure_reports_exact_recovery_and_is_idempotent(world, network
     with raises(RuntimeError, match="VPC dev cleanup incomplete"):
         session.close()
     session.close()
-    assert any(m == "Host recovery: stlv tunnel reconcile" for m in world.messages)
-    command = next(m for m in world.messages if m.startswith("AWS recovery:"))
-    assert "--bucket home --home-account 123456789012 --home-region us-east-1" in command
     assert (
-        f"--app app --env dev --session {session.description.session_id} --profile startup"
-        in command
+        world.messages[-1]
+        == "Host cleanup incomplete: run stlv tunnel inspect, then stlv tunnel cleanup."
     )
 
 
@@ -283,14 +280,9 @@ def test_global_start_failure_reports_recovery_before_rethrow(
         session.start()
     session.close()
     assert not world.launches
-    assert (
-        world.messages[0]
-        == f"Network recovery ownership: session {session.description.session_id}"
-    )
-    assert world.messages[1] == "Host recovery: stlv tunnel reconcile"
-    assert any(
-        m.startswith("AWS recovery: stlv tunnel recover --bucket home") for m in world.messages
-    )
+    assert world.messages == [
+        "Host cleanup incomplete: run stlv tunnel inspect, then stlv tunnel cleanup."
+    ]
     assert isinstance(session.admit("both"), VpcUnavailableError)
 
 
@@ -343,5 +335,22 @@ def test_bridge_rejection_precedes_handler_import_and_preserves_plain_dispatch(
         asyncio.run(_handle_data_message(data, None, "key", "app", "dev", session.admit))
         assert calls == ["handler import/execute"]
         assert published.call_args.args[0].success_result == {}
+    finally:
+        session.close()
+
+
+def test_standalone_wait_terminates_after_runtime_ipc_failure(world, network_state):
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: session.admit("both") is None)
+
+        def dead():
+            raise EOFError("runtime exited")
+
+        session.runtime.status = dead
+        wait_for(lambda: session._runtime_error is not None)
+        with raises(RuntimeError, match="Network runtime unavailable: EOFError"):
+            session.wait()
     finally:
         session.close()

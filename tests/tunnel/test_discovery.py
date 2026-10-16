@@ -22,7 +22,7 @@ def deployed():
             "vpc-" + name,
             "provider-" + name,
             (IPv4Network(cidr),),
-            BastionPolicy.TEMPORARY,
+            BastionPolicy.PERSISTENT,
             (),
             (),
         )

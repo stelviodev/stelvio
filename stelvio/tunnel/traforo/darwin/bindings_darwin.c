@@ -43,6 +43,17 @@ int tf_peer_live(const tf_peer *p){
  struct proc_bsdinfo info;if(!live_token(p->token)||proc_pidinfo(p->pid,PROC_PIDTBSDINFO,0,&info,sizeof(info))!=sizeof(info)||!live_token(p->token))return 0;
  return info.pbi_status!=5&&info.pbi_uid==p->uid&&info.pbi_ruid==p->uid&&info.pbi_start_tvsec==p->seconds&&info.pbi_start_tvusec==p->micros;
 }
+int tf_parent_read(const tf_peer *peer,tf_parent *parent){
+ struct proc_bsdinfo child,owner;memset(parent,0,sizeof(*parent));
+ if(!tf_peer_live(peer)||proc_pidinfo(peer->pid,PROC_PIDTBSDINFO,0,&child,sizeof(child))!=sizeof(child)||child.pbi_ppid<=1||proc_pidinfo(child.pbi_ppid,PROC_PIDTBSDINFO,0,&owner,sizeof(owner))!=sizeof(owner)||!tf_peer_live(peer))return -1;
+ struct proc_bsdinfo again;if(proc_pidinfo(peer->pid,PROC_PIDTBSDINFO,0,&again,sizeof(again))!=sizeof(again)||again.pbi_ppid!=child.pbi_ppid)return -1;
+ if(owner.pbi_uid!=peer->uid||owner.pbi_ruid!=peer->uid||owner.pbi_status==5)return -1;
+ parent->uid=owner.pbi_uid;parent->pid=child.pbi_ppid;parent->seconds=owner.pbi_start_tvsec;parent->micros=owner.pbi_start_tvusec;return 0;
+}
+int tf_parent_live(const tf_parent *parent){
+ struct proc_bsdinfo info;if(proc_pidinfo(parent->pid,PROC_PIDTBSDINFO,0,&info,sizeof(info))!=sizeof(info))return 0;
+ return info.pbi_status!=5&&info.pbi_uid==parent->uid&&info.pbi_ruid==parent->uid&&info.pbi_start_tvsec==parent->seconds&&info.pbi_start_tvusec==parent->micros;
+}
 int tf_image(uint64_t *dev,uint64_t *ino,char *path,size_t capacity){
  struct proc_regionwithpathinfo loaded;
  if(proc_pidpath(getpid(),path,(uint32_t)capacity)<=0||proc_pidinfo(getpid(),PROC_PIDREGIONPATHINFO,(uint64_t)(uintptr_t)&tf_image,&loaded,sizeof(loaded))!=sizeof(loaded))return -1;

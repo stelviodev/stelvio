@@ -5,8 +5,12 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"math"
+	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -267,5 +271,171 @@ func TestServiceBusyAndStoppingRejectNewMutations(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestFragmentedRequestsRejectBodyRightsAndShortEOF(t *testing.T) {
+	// Frozen independent CONFIGURE bytes, shared with the Python encoder test.
+	data, e := os.ReadFile("testdata/independent_vectors.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var vectors []struct {
+		Kind       string
+		Data       []byte
+		Returncode int
+	}
+	if e = json.Unmarshal(data, &vectors); e != nil {
+		t.Fatal(e)
+	}
+	var packet []byte
+	for _, v := range vectors {
+		if v.Kind == "request" && v.Returncode == 0 && len(v.Data) > protocol.Header && v.Data[8] == protocol.Configure {
+			packet = v.Data
+			break
+		}
+	}
+	if packet == nil {
+		t.Fatal("missing independent configure")
+	}
+	for _, mode := range []string{"valid", "short-eof", "body-rights"} {
+		t.Run(mode, func(t *testing.T) {
+			pair, e := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer unix.Close(pair[0])
+			defer unix.Close(pair[1])
+			darwin.Nonblocking(pair[1])
+			c := client{fd: pair[1], deadline: time.Now().Add(time.Second)}
+			unix.Write(pair[0], packet[:20])
+			_, complete, e := c.receive()
+			if e != nil || complete {
+				t.Fatal("partial frame accepted", e)
+			}
+			if mode == "short-eof" {
+				unix.Shutdown(pair[0], unix.SHUT_WR)
+				if _, done, e := c.receive(); e == nil || done {
+					t.Fatal("short EOF accepted")
+				}
+				return
+			}
+			unix.Write(pair[0], packet[20:protocol.Header])
+			_, complete, e = c.receive()
+			if e != nil || complete {
+				t.Fatal("header without body accepted", e)
+			}
+			source, e := unix.Open("/dev/null", unix.O_RDONLY, 0)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer unix.Close(source)
+			var rights []byte
+			if mode == "body-rights" {
+				rights = unix.UnixRights(source)
+			}
+			if e = unix.Sendmsg(pair[0], packet[protocol.Header:], rights, nil, 0); e != nil {
+				t.Fatal(e)
+			}
+			r, complete, e := c.receive()
+			if mode == "valid" {
+				if e != nil || !complete || r.Operation != protocol.Configure {
+					t.Fatal(r, complete, e)
+				}
+			} else if e == nil || complete {
+				t.Fatal("body ancillary descriptor accepted")
+			}
+			if _, e := unix.FcntlInt(uintptr(source), unix.F_GETFD, 0); e != nil {
+				t.Fatal("closed sentinel")
+			}
+		})
+	}
+}
+
+func TestMaintenanceRevokesAndRetriesWithoutPythonCleanup(t *testing.T) {
+	for _, reason := range []string{"parent-dead", "lease-lost", "restart"} {
+		t.Run(reason, func(t *testing.T) {
+			directory, e := os.MkdirTemp("/private/tmp", "tf-peer-")
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer os.RemoveAll(directory)
+			path := filepath.Join(directory, "s")
+			listener, e := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer listener.Close()
+			sender, e := net.Dial("unix", path)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer sender.Close()
+			receiver, e := listener.AcceptUnix()
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer receiver.Close()
+			raw, _ := receiver.SyscallConn()
+			var peer darwin.Peer
+			raw.Control(func(fd uintptr) { peer, e = darwin.ReadPeer(int(fd)) })
+			if e != nil || !darwin.Alive(peer) {
+				t.Fatal(peer, e)
+			}
+			s := serviceFixture()
+			s.peer = peer
+			s.state.Peer = peer
+			s.state.Parent = protocol.DarwinParent{UID: peer.UID, PID: int32(os.Getppid()), Seconds: 1}
+			gate, e := unix.Open("/dev/null", unix.O_RDONLY, 0)
+			if e != nil {
+				t.Fatal(e)
+			}
+			s.gate = gate
+			defer unix.Close(gate)
+			pair, e := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer unix.Close(pair[1])
+			s.lease = pair[0]
+			s.grants[0].active = true
+			if reason != "parent-dead" {
+				unix.Close(s.lease)
+				s.lease = -1
+			}
+			if reason == "lease-lost" {
+				s.revoke = true
+			}
+			if e = s.maintain(time.Now()); e != nil {
+				t.Fatal(e)
+			}
+			if s.lease >= 0 || !s.working || s.grants[0].active {
+				t.Fatal("owner loss did not revoke/schedule cleanup")
+			}
+			select {
+			case j := <-s.completion:
+				s.complete(j)
+			case <-time.After(time.Second):
+				t.Fatal("cleanup job stalled")
+			}
+			if !s.uncertain || !s.owned || s.cleanupBackoff != time.Second {
+				t.Fatal("failed cleanup lost ownership or backoff")
+			}
+			if e = s.maintain(s.cleanupAfter.Add(-time.Millisecond)); e != nil || s.working {
+				t.Fatal("retried before cleanup deadline", e)
+			}
+			if e = s.maintain(s.cleanupAfter); e != nil || !s.working {
+				t.Fatal("stale state not retried", e)
+			}
+			select {
+			case j := <-s.completion:
+				s.complete(j)
+			case <-time.After(time.Second):
+				t.Fatal("retry job stalled")
+			}
+			if s.cleanupBackoff != 2*time.Second {
+				t.Fatal("cleanup backoff did not increase")
+			}
+		})
 	}
 }

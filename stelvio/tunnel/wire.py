@@ -7,7 +7,7 @@ import struct
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
-from stelvio.tunnel.manifest import SessionDescription, manifest_from_records
+from stelvio.tunnel.manifest import VERSION, SessionDescription, manifest_from_records
 
 if TYPE_CHECKING:
     import socket
@@ -46,7 +46,7 @@ def session_to_wire(session: SessionDescription) -> dict:
     for network in session.manifest.vpcs:
         data = asdict(network)
         data.update(
-            version=1,
+            version=VERSION,
             kind="vpc",
             cidrs=[str(cidr) for cidr in network.cidrs],
             policy=network.policy.value,
@@ -62,7 +62,7 @@ def session_to_wire(session: SessionDescription) -> dict:
         ("resource", session.manifest.resources),
         ("endpoint", session.manifest.endpoints),
     ):
-        records.extend({"version": 1, "kind": kind, **asdict(value)} for value in values)
+        records.extend({"version": VERSION, "kind": kind, **asdict(value)} for value in values)
     # json roundtrip turns immutable sequences into the established metadata lists.
     return json.loads(
         json.dumps(

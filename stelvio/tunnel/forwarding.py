@@ -34,7 +34,7 @@ def packaged_forwarder() -> Iterator[Path]:
     with packaged_helper() as asset:
         expected = hashlib.sha256(asset.read_bytes()).hexdigest()
         if _installed_digest() != expected:
-            raise RuntimeError("The installed Traforo differs; clean up and install this package")
+            raise RuntimeError("The installed Traforo differs; run stlv tunnel install")
         yield INSTALLED_HELPER
 
 

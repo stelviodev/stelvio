@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 import time
 from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
@@ -11,7 +10,6 @@ from uuid import uuid4
 
 from stelvio.exceptions import StelvioValidationError
 from stelvio.stack_outputs import read_network_manifest
-from stelvio.tunnel.actors import AWS_VERSION
 from stelvio.tunnel.credentials import AwsExecutionContext
 from stelvio.tunnel.installation import install_helper
 from stelvio.tunnel.manifest import SessionDescription
@@ -20,7 +18,6 @@ from stelvio.tunnel.runtime import NetworkRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 STATUS_MAX_AGE = 5
@@ -30,15 +27,13 @@ class VpcUnavailableError(RuntimeError):
     """The endpoint's current network dependencies cannot admit an invocation."""
 
 
-class DevNetworkSession:
-    def __init__(  # noqa: PLR0913 - captured deployment/home inputs
+class NetworkSession:
+    def __init__(
         self,
         *,
         state: dict | None,
         app: str,
         env: str,
-        home: dict,
-        config_dir: Path,
         report: Callable[[str], None],
     ) -> None:
         try:
@@ -47,12 +42,12 @@ class DevNetworkSession:
             raise StelvioValidationError(str(error)) from error
         self.description = None
         self.contexts = ()
-        self.settings = None
         self.report = report
         self.runtime = None
         self._lock = Lock()
         self._stop = Event()
         self._thread = None
+        self._runtime_error = None
         self._statuses = {}
         self._observed = 0.0
         self._closed = False
@@ -121,25 +116,7 @@ class DevNetworkSession:
                 raise StelvioValidationError(
                     "Conflicting AWS provider identities in network metadata."
                 )
-        home_provider = "stelvio-home"
-        contexts[home_provider] = AwsExecutionContext.capture(
-            provider=home_provider,
-            account=home["account"],
-            region=home["region"],
-            profile=home["profile"],
-        )
         self.contexts = tuple(contexts.values())
-        self.settings = {
-            "bucket": home["bucket"],
-            "home_provider": home_provider,
-            "cli": str(config_dir / "bin/pulumi"),
-            "aws_provider": str(
-                config_dir
-                / ".pulumi/plugins"
-                / f"resource-aws-v{AWS_VERSION}"
-                / "pulumi-resource-aws"
-            ),
-        }
 
     def start(self) -> None:
         if self._closed or self.runtime is not None:
@@ -149,9 +126,7 @@ class DevNetworkSession:
             return
         try:
             install_helper()
-            self.runtime = NetworkRuntime(
-                self.description, self.contexts, access_settings=self.settings
-            )
+            self.runtime = NetworkRuntime(self.description, self.contexts)
         except Exception:
             self._report_recovery()
             raise
@@ -202,14 +177,25 @@ class DevNetworkSession:
                             f"retained_dns={s.get('dns_retained', False)}"
                         )
                     previous = signature
-            except Exception:
+            except Exception as error:
                 with self._lock:
+                    self._runtime_error = type(error).__name__
                     self._statuses = {}
                     self._observed = 0.0
                 if previous != "unavailable":
                     self.report("Network DEGRADED: runtime status unavailable.")
                     previous = "unavailable"
             self._stop.wait(1)
+
+    def wait(self) -> None:
+        """Keep a standalone session alive; terminal failures produce a nonzero exit."""
+        while not self._stop.wait(1):
+            with self._lock:
+                if self._runtime_error is not None:
+                    raise RuntimeError("Network runtime unavailable: " + self._runtime_error)
+                failed = [v for v, status in self._statuses.items() if status["state"] == "failed"]
+            if failed:
+                raise RuntimeError("VPC access failed: " + ", ".join(failed))
 
     def admit(self, endpoint: str) -> VpcUnavailableError | None:
         required = self.dependencies.get(endpoint, ())
@@ -242,45 +228,11 @@ class DevNetworkSession:
                 self.report(f"Network cleanup incomplete: {error}")
                 self._report_recovery()
                 raise RuntimeError(
-                    "VPC dev cleanup incomplete; preserve recovery ownership"
+                    "VPC networking cleanup incomplete; preserve recovery ownership"
                 ) from error
 
     def _report_recovery(self) -> None:
-        self.report(f"Network recovery ownership: session {self.description.session_id}")
-        self.report("Host recovery: stlv tunnel reconcile")
-        for vpc in self.manifest.enabled_vpcs:
-            self.report(f"  Inspect residual VPC access: {vpc.identity} ({vpc.vpc_id})")
-        home = next(c for c in self.contexts if c.provider == self.settings["home_provider"])
-        for target in self.contexts:
-            if target is home:
-                continue
-            command = [
-                "stlv",
-                "tunnel",
-                "recover",
-                "--bucket",
-                self.settings["bucket"],
-                "--home-account",
-                home.account,
-                "--home-region",
-                home.region,
-                "--account",
-                target.account,
-                "--region",
-                target.region,
-                "--app",
-                self.description.app,
-                "--env",
-                self.description.environment,
-                "--session",
-                self.description.session_id,
-            ]
-            if home.profile:
-                command.extend(["--home-profile", home.profile])
-            if target.profile:
-                command.extend(["--profile", target.profile])
-            self.report("AWS recovery: " + shlex.join(command))
-        self.report("Run recovery as the original user with the original AWS credential sources.")
+        self.report("Host cleanup incomplete: run stlv tunnel inspect, then stlv tunnel cleanup.")
 
 
 def _resources(state: dict | None) -> list[dict]:

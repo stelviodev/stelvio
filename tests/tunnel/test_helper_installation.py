@@ -16,6 +16,7 @@ from stelvio.tunnel.helper_client import HelperBusyError, HelperError, HelperIns
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    monkeypatch.setattr("stelvio.tunnel.plugin.ensure_plugin", lambda: None)
     asset = tmp_path / "asset with 'quotes' $(touch SHOULD_NOT_EXIST)"
     asset.write_bytes(b"native-test-asset")
     installed = tmp_path / "installed"
@@ -76,13 +77,13 @@ def test_healthy_matching_install_is_idempotent_without_elevation(setup, monkeyp
     assert calls == []
 
 
-def test_incompatible_install_refuses_before_authorization(setup, monkeypatch):
+def test_changed_install_uses_current_package_upgrade(setup, monkeypatch):
     _, _, calls = setup
     monkeypatch.setattr(installation, "_installed_digest", lambda: "0" * 64)
     result = CliRunner().invoke(tunnel, ["install"])
-    assert result.exit_code == 1
-    assert "matching package" in result.output
-    assert calls == []
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert "helper uninstall" in calls[0]
 
 
 def test_uncertain_host_state_requires_recovery_before_install(setup, monkeypatch):
@@ -98,7 +99,7 @@ def test_uncertain_host_state_requires_recovery_before_install(setup, monkeypatc
     )
     result = CliRunner().invoke(tunnel, ["install"])
     assert result.exit_code == 1
-    assert "stlv tunnel reconcile" in result.output
+    assert "stlv tunnel cleanup" in result.output
     assert calls == []
 
 
@@ -113,7 +114,7 @@ def test_cleanup_passes_active_refusal_through_without_success_message(setup, mo
         raise HelperError("Helper is active; close its session and retry")
 
     monkeypatch.setattr(installation, "_authorize", refuse)
-    result = CliRunner().invoke(tunnel, ["cleanup"])
+    result = CliRunner().invoke(tunnel, ["uninstall"])
     assert result.exit_code == 1
     assert "Helper is active" in result.output
     assert "Native VPC helper removed" not in result.output

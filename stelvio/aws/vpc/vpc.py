@@ -5,7 +5,7 @@ from enum import StrEnum
 from functools import cached_property
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple, Required, TypedDict, final
 
-from pulumi import InvokeOutputOptions, log
+from pulumi import InvokeOutputOptions
 from pulumi_aws import get_availability_zones, get_caller_identity_output
 from pulumi_aws.ec2 import (
     DefaultSecurityGroup,
@@ -117,10 +117,8 @@ class BastionConfigDict(TypedDict, total=False):
 
 
 def _normalize_bastion(
-    value: bool | BastionConfig | BastionConfigDict | None,
+    value: bool | BastionConfig | BastionConfigDict,
 ) -> tuple[BastionPolicy, BastionConfig]:
-    if value is None:
-        return BastionPolicy.TEMPORARY, BastionConfig()
     if value is False:
         return BastionPolicy.DISABLED, BastionConfig()
     if value is True:
@@ -134,7 +132,7 @@ def _normalize_bastion(
         value = BastionConfig(**value)
     if isinstance(value, BastionConfig):
         return BastionPolicy.PERSISTENT, value
-    raise TypeError("'bastion' must be None, a bool, a BastionConfig, or a dict")
+    raise TypeError("'bastion' must be a bool, a BastionConfig, or a dict")
 
 
 @final
@@ -209,7 +207,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         az: int | list[str] = 2,
         nat: Literal["managed"] | NatConfig | NatConfigDict | None = None,
         *,
-        bastion: bool | BastionConfig | BastionConfigDict | None = None,
+        bastion: bool | BastionConfig | BastionConfigDict = False,
         tags: dict[str, str] | None = None,
         customize: VpcCustomizationDict | None = None,
     ):
@@ -223,12 +221,6 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         _validate_nat_config(self._nat_config, self._az)
 
     def _create_resources(self) -> VpcResources:
-        if self._bastion_policy == BastionPolicy.DISABLED:
-            log.warn(
-                f"Vpc {self.name}: bastion=False disables managed access. "
-                "Local access to its resources requires your own networking.",
-                self,
-            )
         azs = _get_az_names(self._az, aws_region_of(self))
         vpc = self._create_vpc()
         igw = self._create_internet_gateway(vpc)

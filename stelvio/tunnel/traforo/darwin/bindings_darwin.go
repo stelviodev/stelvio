@@ -62,6 +62,22 @@ func ReadPeer(fd int) (Peer, error) {
 	return p, nil
 }
 func Alive(p Peer) bool { v := nativePeer(p); return validPeer(p) && C.tf_peer_live(&v) != 0 }
+func Parent(p Peer) (protocol.DarwinParent, error) {
+	peer := nativePeer(p)
+	var v C.tf_parent
+	if !validPeer(p) || C.tf_parent_read(&peer, &v) != 0 {
+		return protocol.DarwinParent{}, Err
+	}
+	result := protocol.DarwinParent{UID: uint32(v.uid), PID: int32(v.pid), Seconds: uint64(v.seconds), Micros: uint64(v.micros)}
+	if !result.Valid() {
+		return protocol.DarwinParent{}, Err
+	}
+	return result, nil
+}
+func ParentAlive(p protocol.DarwinParent) bool {
+	v := C.tf_parent{uid: C.uint32_t(p.UID), pid: C.int32_t(p.PID), seconds: C.uint64_t(p.Seconds), micros: C.uint64_t(p.Micros)}
+	return p.Valid() && C.tf_parent_live(&v) != 0
+}
 func NoACL(fd int) bool { return C.tf_no_acl(C.int(fd)) != 0 }
 func NoACLPath(path string) bool {
 	var before, after unix.Stat_t

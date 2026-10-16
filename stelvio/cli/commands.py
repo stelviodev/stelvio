@@ -296,10 +296,7 @@ def run_deploy(
         )
 
 
-def run_dev(env: str, show_unchanged: bool = False, *, network_mode: str = "auto") -> None:
-    if network_mode != "auto":
-        raise ValueError("Only --network-mode auto is supported")
-
+def run_dev(env: str, show_unchanged: bool = False) -> None:
     with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
         status.stop()
         operation_str = f"Deploying {'' if run.has_deployed else 'NEW '}app in DEV MODE"

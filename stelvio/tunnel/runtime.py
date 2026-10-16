@@ -21,8 +21,6 @@ class NetworkRuntime:
         self,
         description: SessionDescription,
         contexts: tuple[AwsExecutionContext, ...],
-        *,
-        access_settings: dict | None = None,
     ) -> None:
         if not contexts or description.owner_uid != os.geteuid() or not os.geteuid():
             raise ValueError("Network runtime requires captured nonroot AWS contexts")
@@ -87,7 +85,6 @@ class NetworkRuntime:
                         }
                         for context in contexts
                     ],
-                    "access_settings": access_settings,
                 },
             )
             response = receive(self._control)
@@ -109,19 +106,18 @@ class NetworkRuntime:
         with self._lock:
             try:
                 send(self._control, {"operation": "stop"})
-                # Host authority is released by the child immediately. AWS
-                # instance/IAM deletion needs its bounded reconciliation waits.
+                # Allow bounded transport shutdown and certified host disposal.
                 self.process.wait(timeout=600)
             except (OSError, subprocess.TimeoutExpired):
-                # EOF watchdog closes helper ownership and stops registered
-                # actors while its creator is still alive, before process exit.
+                # EOF watchdog closes helper ownership and stops transports
+                # before the command exits.
                 os.close(self._lease)
                 self._lease = -1
                 try:
                     self.process.wait(timeout=30)
                 except subprocess.TimeoutExpired as error:
                     raise RuntimeError(
-                        "Networking shutdown unfinished; retain recovery ownership"
+                        "Networking shutdown unfinished; run stlv tunnel cleanup"
                     ) from error
             finally:
                 self._control.close()
@@ -129,4 +125,4 @@ class NetworkRuntime:
                     os.close(self._lease)
                     self._lease = -1
             if self.process.returncode != 0:
-                raise RuntimeError("Networking cleanup incomplete; retain AWS recovery ownership")
+                raise RuntimeError("Networking cleanup incomplete; run stlv tunnel cleanup")

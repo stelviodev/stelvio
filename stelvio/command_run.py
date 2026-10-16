@@ -79,8 +79,7 @@ from stelvio.home import Home
 from stelvio.project import get_dot_stelvio_dir, get_project_root, get_user_env
 from stelvio.provider import ProviderStore, aws_default_tags
 from stelvio.pulumi import get_stelvio_config_dir
-from stelvio.stack_outputs import read_network_manifest
-from stelvio.tunnel.session import DevNetworkSession
+from stelvio.tunnel.session import NetworkSession
 
 logger = logging.getLogger(__name__)
 
@@ -365,19 +364,13 @@ class CommandRun:
 
         return False
 
-    def capture_network_session(self, report: "Callable[[str], None]") -> "DevNetworkSession":
+    def capture_network_session(self, report: "Callable[[str], None]") -> "NetworkSession":
         """Capture resolved state/provider/home inputs while the workdir still exists."""
         state = self.load_state()
-        try:
-            enabled = read_network_manifest(state).enabled_vpcs
-        except ValueError as error:
-            raise StelvioValidationError(str(error)) from error
-        return DevNetworkSession(
+        return NetworkSession(
             state=state,
             app=self.app_name,
             env=self.env,
-            home=self._home.network_home() if enabled else {},
-            config_dir=get_stelvio_config_dir(),
             report=report,
         )
 

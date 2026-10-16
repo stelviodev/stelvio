@@ -165,19 +165,19 @@ See the [full setup and recovery guide](../concepts/dev-mode.md#accessing-a-vpc-
 | Symptom | What to check |
 | --- | --- |
 | Unsupported platform | Managed VPC access needs macOS 15+ on arm64 or x86_64; Linux, WSL, and Windows backends are not implemented |
-| Helper missing or version mismatch | Install from the active Stelvio environment; clean an older image with its matching old package before upgrading |
-| Session Manager plugin missing | Install `session-manager-plugin` and put it on the `PATH` used to start `stlv` |
+| Helper missing or version mismatch | Install from the active Stelvio environment; close active sessions and run `stlv tunnel install` to replace an older image |
+| Session Manager plugin missing | Run `stlv tunnel install` to download/verify the pinned private plugin |
 | Network still starting | Wait for EC2 and SSM startup; check the selected AWS credentials, region, and permissions |
 | Network unavailable after a disconnect | Watch for reconnection; new dependent handlers are gated, but an in-flight database request may fail |
 | Route or resolver conflict | Check VPNs, other dev sessions, overlapping CIDRs, and existing resolver files; do not delete foreign resources to bypass the refusal |
-| Active owner or uncertain cleanup | Stop the original session, retain ownership records, and follow reconciliation and AWS recovery before retrying |
+| Active owner or uncertain cleanup | Stop the original session, retain ownership records, and run `stlv tunnel cleanup` before retrying |
 | `ModuleNotFoundError: pymongo` | Install PyMongo in the environment running `stlv`; Function requirements only control Lambda packaging |
 | DocumentDB TLS or discovery failure | Use the linked hostname, port, and CA file; keep TLS verification and replica settings enabled |
 | Secrets Manager access denied locally | Your local AWS credentials need access to the linked secret; the Lambda IAM role does not supply local credentials |
 
 `stlv unlock` only addresses application deployment locks. It does not recover
-host networking or delete a temporary VPC access stack. `stlv tunnel cleanup`
-only removes the local helper and host resources; it is not AWS teardown.
+host networking. `stlv tunnel cleanup` removes only stale owned host networking,
+while `stlv tunnel uninstall` removes the helper. Neither performs AWS teardown.
 
 ## Getting Help
 

@@ -154,9 +154,10 @@ SecurityGroupIngressRule(
 
 Follow the [VPC dev setup](../../concepts/dev-mode.md#accessing-a-vpc-from-your-local-handler)
 to install Traforo and the Session Manager plugin, then run `stlv dev`.
-Keep the Function attached to the same `Vpc` as the linked cluster. You do not
-need `bastion=True`: omitting it selects temporary dev access. A persistent
-bastion is an explicit [VPC policy](vpc.md#dev-access-policy).
+Keep the Function attached to the same `Vpc` as the linked cluster. Set
+`bastion=True` on that VPC and deploy to enable managed access. Omitting it
+defaults to disabled access and a warning. Use `stlv tunnel start [ENV]` to
+connect a database client without starting dev mode. See [VPC policy](vpc.md#dev-access-policy).
 
 Install `pymongo` in the local Python environment as well as listing it in the
 Function's `requirements`. Your local AWS credentials must allow reading the

@@ -33,8 +33,6 @@ from stelvio.tunnel.transport import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     import boto3
 
     from stelvio.tunnel.forwarding import Forwarding
@@ -84,9 +82,6 @@ class VpcWorker:
         lease: NativeLease,
         forwarding: Forwarding,
         discovery: ResourceDiscovery,
-        *,
-        cleanup: Callable[[], None],
-        record: Callable[[str, dict], None] | None = None,
     ) -> None:
         self.description = description
         self.network = network
@@ -94,7 +89,6 @@ class VpcWorker:
         self.lease = lease
         self.forwarding = forwarding
         self.discovery = discovery
-        self.cleanup = cleanup
         self.stop = Event()
         self._lock = Lock()
         self._status = VpcStatus(network.identity)
@@ -108,7 +102,6 @@ class VpcWorker:
                 "stelvio:app": description.app,
                 "stelvio:env": description.environment,
             },
-            record=record,
             owner_id=description.session_id,
         )
         self.relay: DnsRelay | None = None
@@ -451,7 +444,6 @@ class VpcWorker:
             operations = [self._reject]
             if terminal and not self.stop.is_set():
                 operations.append(self._retire_host)
-            operations.append(self.cleanup)
             for operation in operations:
                 try:
                     operation()
@@ -471,7 +463,7 @@ class VpcWorker:
         if self.listener:
             self.listener.close()
         if self.status.cause == "cleanup-incomplete":
-            raise RuntimeError("VPC cleanup incomplete; retain AWS recovery ownership")
+            raise RuntimeError("VPC cleanup incomplete; run stlv tunnel cleanup")
 
 
 def statuses(workers: tuple[VpcWorker, ...]) -> list[dict]:

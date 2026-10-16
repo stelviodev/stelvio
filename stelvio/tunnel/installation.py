@@ -13,13 +13,14 @@ from pathlib import Path
 
 from stelvio.tunnel.assets import packaged_helper
 from stelvio.tunnel.helper_client import HelperBusyError, HelperError, NativeHelper
+from stelvio.tunnel.plugin import ensure_plugin
 
 MIN_MACOS_MAJOR = 15
 INSTALLED_HELPER = Path("/Library/PrivilegedHelperTools/stelvio-traforo")
 SYSTEM_CHANGES = (
     "Install the native helper in /Library/PrivilegedHelperTools/stelvio-traforo; "
     "register dev.stelvio.tunnel with launchd; create its private state and control socket "
-    "in /Library/Application Support/Stelvio/tunnel. During a dev session it owns "
+    "in /Library/Application Support/Stelvio/tunnel. During a networking session it owns "
     "temporary VPC routes, interfaces, and resolver files."
 )
 
@@ -81,12 +82,35 @@ safe_file() {{
     acl=$(/bin/ls -le "$1")
     case "$acl" in *+*) exit 1;; esac
 }}
+# Finish a previously interrupted uninstall before replacing the image.
 if [ ! -e {installed} ] && [ ! -L {installed} ] && [ -e "$retired" ]; then
     safe_file "$retired"
     [ "$(/usr/bin/stat -f %l "$retired")" = 1 ]
-    [ "$(/usr/bin/shasum -a 256 "$retired")" = "{digest}  $retired" ]
     /bin/ln "$retired" {installed}
     /bin/rm "$retired"
+fi
+legacy=/Library/PrivilegedHelperTools/dev.stelvio.tunnel
+if [ -e "$legacy" ] || [ -L "$legacy" ]; then
+    safe_file "$legacy"
+    /usr/bin/xattr -p dev.stelvio.tunnel.installation "$legacy" >/dev/null
+    [ "$(/usr/bin/env -i PATH=/usr/bin:/bin "$legacy" --version)" = 'stelvio-tunnel-helper/1' ]
+    /usr/bin/env -i PATH=/usr/bin:/bin "$legacy" --uninstall
+fi
+if [ -e {installed} ] &&
+   [ "$(/usr/bin/shasum -a 256 {installed})" != "{digest}  {INSTALLED_HELPER}" ]; then
+    safe_file {installed}
+    /usr/bin/xattr -p dev.stelvio.traforo.installation {installed} >/dev/null
+    current=$(/usr/bin/env -i PATH=/usr/bin:/bin {installed} version)
+    [ "$current" = 'stelvio-traforo/1 helper=1 carrier=1' ]
+    # Validate and retain the replacement before retiring the previous installation.
+    if [ ! -e "$stage" ]; then (set -C; : > "$stage"); fi
+    safe_file "$stage"
+    [ "$(/usr/bin/stat -f %l "$stage")" = 1 ]
+    /bin/cp {source} "$stage"
+    /bin/chmod 0755 "$stage"
+    [ "$(/usr/bin/shasum -a 256 "$stage")" = "{digest}  $stage" ]
+    /bin/sync
+    /usr/bin/env -i PATH=/usr/bin:/bin {installed} helper uninstall
 fi
 if [ ! -e {installed} ] && [ ! -L {installed} ]; then
     if [ ! -e "$stage" ] && [ ! -L "$stage" ]; then
@@ -126,6 +150,20 @@ fi
 
 
 def _authorize(script: str) -> None:
+    # Lock the existing trusted parent directory: stable across image replacement
+    # and uninstall, without leaving a lock artifact or unlinking a live lock.
+    prefix = """set -eu
+PATH=/usr/bin:/bin
+export PATH
+parent=/Library/PrivilegedHelperTools
+[ ! -L "$parent" ] && [ -d "$parent" ]
+[ "$(/usr/bin/stat -f %u "$parent")" = 0 ]
+mode=$(/usr/bin/stat -f %Lp "$parent")
+[ $((0$mode & 022)) = 0 ]
+acl=$(/bin/ls -lde "$parent")
+case "$acl" in *+*) exit 1;; esac
+"""
+    script = prefix + '/usr/bin/lockf -k -n -t 0 "$parent" /bin/sh -c ' + shlex.quote(script)
     # AppleScript string literals accept escaped quotes/backslashes; actual
     # newlines are retained. No shell interpolation of the script argument.
     literal = '"' + script.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -140,28 +178,18 @@ def _authorize(script: str) -> None:
     if result.returncode:
         raise HelperError(
             "Native helper administration did not finish. Close active sessions and retry; "
-            "owned recovery records are retained. " + result.stderr.strip()
+            "owned host cleanup records are retained. " + result.stderr.strip()
         )
 
 
 def install_helper() -> None:
     """Install once; a compatible healthy installation needs no elevation."""
     _supported()
-    legacy = Path("/Library/PrivilegedHelperTools/dev.stelvio.tunnel")
-    if legacy.exists() or legacy.is_symlink():
-        raise HelperError(
-            "A legacy helper is installed. Close its sessions and run stlv tunnel cleanup "
-            "using its matching Stelvio package before installing Traforo."
-        )
+    ensure_plugin()
     with packaged_helper() as asset:
         digest = hashlib.sha256(asset.read_bytes()).hexdigest()
         installed = _installed_digest()
-        if installed is not None and installed != digest:
-            raise HelperError(
-                "The installed helper differs from this package. Close its sessions and run "
-                "stlv tunnel cleanup using its matching package before installing this version."
-            )
-        if installed is not None and INSTALLED_HELPER.lstat().st_nlink == 1:
+        if installed == digest and INSTALLED_HELPER.lstat().st_nlink == 1:
             try:
                 inspection = NativeHelper().inspect()
             except HelperBusyError:
@@ -173,7 +201,7 @@ def install_helper() -> None:
             else:
                 if inspection.uncertain:
                     raise HelperError(
-                        "The helper has unfinished host cleanup; run stlv tunnel reconcile"
+                        "The helper has unfinished host cleanup; run stlv tunnel cleanup"
                     )
                 return
         _authorize(_bootstrap(asset, digest))
@@ -197,7 +225,7 @@ def _wait_ready() -> None:
             return
 
 
-def cleanup_helper() -> None:
+def uninstall_helper() -> None:
     """Remove the owned installation. Native admission excludes active sessions."""
     _supported(activation=False)
     installed = _installed_digest()
@@ -212,11 +240,7 @@ def cleanup_helper() -> None:
             ):
                 raise HelperError(
                     "The native helper is missing but recovery artifacts remain; "
-                    "restore its matching package"
+                    "run stlv tunnel install to resume the interrupted installation"
                 )
             return
-        if installed is not None and installed != digest:
-            raise HelperError(
-                "Use the matching installed helper package for ownership-safe cleanup"
-            )
         _authorize(_bootstrap(asset, digest, cleanup=True))

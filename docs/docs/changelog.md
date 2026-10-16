@@ -5,7 +5,8 @@
 ### VPC dev mode
 
 - **Local handlers can reach private VPC services on macOS 15+.** Install the bundled Traforo helper with `stlv tunnel install`; `stlv dev` manages routes, private DNS, and SSH over SSM.
-- Access is temporary by default; `bastion=True` keeps it between sessions. Clean an older helper with its matching Stelvio package before installing a changed binary.
+- **Bastions are explicit and persistent.** Set `bastion=True` and deploy; omitted access warns and runs.
+- **Standalone access:** `stlv tunnel start [ENV]` connects without dev mode. Install manages the private AWS plugin and helper upgrades; cleanup repairs host networking, and uninstall removes the helper.
 
     → [VPC dev setup and recovery](concepts/dev-mode.md#accessing-a-vpc-from-your-local-handler)
 

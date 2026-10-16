@@ -74,7 +74,14 @@ def deployed_state():
                                 "vpc_id": "vpc-0123456789abcdef0",
                                 "provider": "urn:pulumi:dev::sample::pulumi:providers:aws::main",
                                 "cidrs": ["10.0.0.0/16"],
-                                "policy": "temporary",
+                                "policy": "persistent",
+                                "access": {
+                                    "instance_id": "i-12345678",
+                                    "security_group_id": "sg-12345678",
+                                    "az": "us-east-1a",
+                                    "identity_document": "identity",
+                                    "owner": "vpc-0",
+                                },
                                 "dns_domains": [],
                                 "public_subnets": [
                                     {
@@ -153,7 +160,7 @@ def add_second_vpc(state, *, cidr="10.2.0.0/16", policy="persistent", domains=()
 @mark.parametrize(
     ("index", "key", "value", "message"),
     [
-        param(0, "version", 2, "metadata version", id="version"),
+        param(0, "version", 3, "metadata version", id="version"),
         param(0, "version", True, "metadata version", id="bool-version"),
         param(0, "account", "bad", "AWS account", id="account"),
         param(0, "cidrs", ["10.0.0.1/16"], "canonical IPv4", id="noncanonical-cidr"),
@@ -191,7 +198,7 @@ def test_distinct_vpcs_and_disabled_dependencies_remain_separate(deployed_state)
         deployed_state["checkpoint"]["latest"]["resources"][0]["urn"],
     }
     assert len(manifest.enabled_vpcs) == 1
-    assert manifest.enabled_vpcs[0].policy == BastionPolicy.TEMPORARY
+    assert manifest.enabled_vpcs[0].policy == BastionPolicy.PERSISTENT
 
 
 def test_enabled_vpc_overlap_names_both_owners_and_full_ranges(deployed_state):
@@ -405,3 +412,28 @@ def test_inventory_refuses_changed_aws_ownership(deployed_state, mismatch):
         with raises(ValueError, match=r"different AWS owner|subnet identity changed"):
             resolve_vpc_inventory(manifest, lambda network: client)
         stub.assert_no_pending_responses()
+
+
+def test_legacy_temporary_metadata_requires_explicit_redeploy(deployed_state):
+    metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
+        "_stelvio_network"
+    ]
+    metadata["version"] = 1
+    metadata["policy"] = "temporary"
+    with raises(ValueError, match="set bastion=True and redeploy"):
+        read_network_manifest(deployed_state)
+
+
+def test_disabled_resource_names_do_not_claim_managed_dns(deployed_state):
+    entries = deployed_state["checkpoint"]["latest"]["resources"]
+    original = deepcopy(entries[1])
+    second = add_second_vpc(deployed_state, policy="disabled")
+    original["urn"] += "-disabled"
+    original["outputs"]["_stelvio_network"].update(
+        identity=original["urn"],
+        vpc=second["identity"],
+        resource_id="disabled-cluster",
+        security_groups=["sg-disabled"],
+    )
+    entries.append(original)
+    assert len(read_network_manifest(deployed_state).enabled_vpcs) == 1

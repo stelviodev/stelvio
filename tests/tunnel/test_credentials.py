@@ -23,9 +23,6 @@ def factory(**kwargs):
     response={"Account":"123456789012","UserId":"fixture","Arn":"arn:aws:iam::123456789012:user/fixture"}
     initial=dict(response,Account="999999999999") if failure=="initial-account" else response
     stub.add_response("get_caller_identity",initial,{})
-    if failure in ("none","refresh-account"):
-        refreshed=dict(response,Account="999999999999") if failure=="refresh-account" else response
-        stub.add_response("get_caller_identity",refreshed,{})
     stub.activate();stubs.append(stub)
     original=session.client
     session.client=lambda service,**config: sts if service=="sts" else original(service,**config)
@@ -44,29 +41,20 @@ if failure=="initial-account":
     print("credential boundary refused");sys.exit(0)
 session=context.open_session()
 assert context.open_session() is session
-if failure!="none":
-    if failure=="child-environment": os.environ["AWS_ACCESS_KEY_ID"]="CHILD_MUTATION"
-    try:
-        context.frozen_credentials(real_factory() if failure=="foreign-session" else session)
+if failure=="child-environment":
+    os.environ["AWS_ACCESS_KEY_ID"]="CHILD_MUTATION"
+    try: context.open_session()
     except RuntimeError as error:
-        expected={
-            "refresh-account":"Refreshed AWS credential source belongs to another account",
-            "foreign-session":"Credential refresh received another provider's SDK session",
-            "child-environment":"AWS runtime was launched with a different credential context",
-        }
-        assert str(error)==expected[failure]
-    else: raise AssertionError("accepted invalid credential boundary")
-    if failure=="child-environment": os.environ["AWS_ACCESS_KEY_ID"]=sys.argv[3]
-    assert context.open_session() is session
+        assert str(error)=="AWS runtime was launched with a different credential context"
+    else: raise AssertionError("accepted changed runtime environment")
     for stub in stubs: stub.assert_no_pending_responses()
     print("credential boundary refused");sys.exit(0)
-credentials=context.frozen_credentials(session)
+credentials=session.get_credentials().get_frozen_credentials()
 assert credentials.access_key==sys.argv[3]
 assert credentials.secret_key=="public-test-secret"
 assert credentials.token=="public-test-token"
 assert session.get_credentials().method==sys.argv[4]
 assert "public-test-secret" not in repr(context)
-assert "public-test-secret" not in repr(credentials)
 for stub in stubs: stub.assert_no_pending_responses()
 print("captured source and cached provider preserved")
 """
@@ -78,8 +66,6 @@ print("captured source and cached provider preserved")
         (None, "none"),
         ("isolated-profile", "none"),
         (None, "initial-account"),
-        (None, "refresh-account"),
-        (None, "foreign-session"),
         (None, "child-environment"),
     ],
 )

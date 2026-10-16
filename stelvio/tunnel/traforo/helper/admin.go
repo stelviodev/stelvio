@@ -425,7 +425,7 @@ func uninstall(fd int, r *installationReceipt, gateFD int) error {
 		}
 		store := Store{image, lease}
 		state, exists, e := store.Load()
-		if e == nil && exists && darwin.Alive(state.Peer) {
+		if e == nil && exists && darwin.Alive(state.Peer) && (state.Parent.PID == 0 || darwin.ParentAlive(state.Parent)) {
 			e = uncertain
 		}
 		if e == nil {

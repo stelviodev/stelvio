@@ -145,22 +145,24 @@ cross-region runs.
 
 `tests/integration/test_tunnel.py` runs the actual CLI and public Function URL
 against local DocumentDB handlers. It keeps persistent (`bastion=True`) and
-omitted-policy cases, plus non-overlapping multiple VPCs. `test_tunnel_dns.py`
+explicit configuration cases, plus non-overlapping multiple VPCs. `test_tunnel_dns.py`
 checks the real OS resolver, private aliases, outage rejection, and restoration.
 These are four serial cases. Do not combine tier flags or run another dev
 session during this lane. `run_all.sh` waits for the ordinary tiers before
 running it with `-n 0`, and only when `STLV_TEST_TUNNEL=1`.
 
 The current native fixtures explicitly require macOS **15.7.5**, although the
-product targets macOS 15+. Historical native and AWS acceptance used arm64 and
-Go 1.25.3. Go 1.27.2 assets have build/race/package checks; repeat native and AWS
-acceptance when certifying that exact release artifact. Native Intel and other
-macOS releases remain pending. Rosetta command tests do not replace networking
-acceptance.
+product targets macOS 15+. The 2026-10-16 v2 run used arm64 and Go 1.27.2:
+native routing/DNS, upgrades and crash cleanup passed, along with the one-VPC
+dev/standalone DocumentDB TLS, member discovery, read/write and reconnection
+workflow. Its application teardown and independent absence audits passed.
+Additional configuration/multi-VPC AWS cases and a separate full dev-command
+SIGKILL run remain unverified for v2. Native Intel and other macOS releases also
+remain pending. Rosetta package tests do not replace native Intel networking
+acceptance. Keep dated results in `tasks/dev-vpc.md` separate from earlier builds.
 
 Prepare a clean Python environment containing the wheel under test **and
-PyMongo**, then install that wheel's helper with `stlv tunnel install`. Install
-the Session Manager plugin on PATH. Run as a nonroot user and obtain permission
+PyMongo**, then install that wheel's helper with `stlv tunnel install`. The install command downloads the pinned private Session Manager plugin. Run as a nonroot user and obtain permission
 for billable AWS provisioning and administrator-authorized host changes before
 starting. `stlv tunnel inspect` must show an empty, certain helper baseline.
 
@@ -185,13 +187,16 @@ The fixture copies the example into an isolated app and records ownership,
 resolved resources, and evidence under `spikes/dev-vpc-v1/build/p6/<run>/`.
 Wait for the final pytest summary: `[100%]` is followed by potentially lengthy
 AWS teardown. Preserve `ownership.json`, `resolved-ownership*.json`, logs,
-and `evidence.jsonl` if teardown fails. Use the exact `AWS recovery:` commands from the session logs for access cleanup
-and destroy the recorded application through its state owner. The
-`tests/integration/tunnel_cleanup.py` library only purges test metadata after
-certified teardown; it is not a standalone recovery CLI. Generic tag cleanup alone is not proof that temporary access, SSM
-sessions, host routes, and resolver state were removed. Finish with an independent
-AWS absence audit and host-baseline comparison. Uninstall the matching helper
-only after its state is empty and certain.
+and `evidence.jsonl` if teardown fails. Run `stlv tunnel cleanup` for stale owned
+host state and destroy the recorded application through its state owner. There
+is no temporary access stack or AWS recover command. Finish with an independent
+AWS absence audit and host-baseline comparison. Use `stlv tunnel uninstall` only
+after the helper state is empty and certain.
+
+Go parser, journal, packet, identity, and native syscall tests run with
+`go test -race ./...` from `stelvio/tunnel/traforo`. Frozen independent vectors
+live in Go testdata. Pytest covers Python behavior, packaged assets, and genuine
+process interoperability, and must not compile Go or run native algorithm harnesses.
 
 ### Native asset preparation
 

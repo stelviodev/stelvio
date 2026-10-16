@@ -6,7 +6,6 @@ from ipaddress import ip_address
 
 
 class BastionPolicy(StrEnum):
-    TEMPORARY = "temporary"
     PERSISTENT = "persistent"
     DISABLED = "disabled"
 

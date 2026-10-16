@@ -65,19 +65,17 @@ or a separate handler for dev mode.
    precompiled **Stelvio Traforo** executable for both architectures. You do not
    need Go or Xcode. Linux, WSL, and Windows VPC networking are not implemented;
    ordinary dev mode without managed VPC access still works on those platforms.
-2. Install the [AWS Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-   and make `session-manager-plugin` available on your `PATH`. Stelvio uses the
-   macOS OpenSSH tools and your configured AWS credentials. Those credentials
-   need permission to deploy the access resources, use Systems Manager and
-   EC2 Instance Connect, and read any secrets your local handler uses.
-   Managed access supports AWS profiles and the normal SDK credential chain.
-   Explicit credentials, assume-role settings, custom endpoints, and proxies
-   configured directly on a custom Pulumi provider are rejected. Configure the
-   supported AWS credential source before starting the session.
+2. Configure your AWS profile or normal SDK credential chain. Those credentials
+   need Systems Manager, EC2 Instance Connect, resource discovery, and access to
+   any secrets your local handler reads. Custom Pulumi-provider credentials,
+   assume-role settings, endpoints, and proxies are not supported for tunnels.
+   `stlv tunnel install` downloads a pinned AWS Session Manager plugin into
+   Stelvio's private `bin` directory alongside Pulumi. No manual plugin install,
+   Homebrew, or PATH configuration is required.
 3. Install your handler's dependencies in the Python environment running `stlv`.
    For DocumentDB, install `pymongo` there as well as declaring it in the
    Function's `requirements`. Lambda packaging does not install local packages.
-4. Install the helper once from that Stelvio environment:
+4. Install the helper and private plugin from that Stelvio environment:
 
     ```bash
     stlv tunnel install
@@ -88,11 +86,11 @@ or a separate handler for dev mode.
     authorization. Do not run `stlv dev` with `sudo`.
 
 !!! info "Platform validation"
-    Native routing, DNS, recovery, and the DocumentDB workflow have passed on
-    macOS 15.7.5 arm64. Intel assets have build and Rosetta checks; native Intel
-    networking and other macOS releases remain unverified. The current Go 1.27.2
-    assets pass build, race, packaging, and command checks; the native and AWS
-    acceptance runs used the earlier Go 1.25.3 build.
+    Traforo v2 native routing, private DNS, crash cleanup, helper restart, upgrades,
+    and legacy migration have passed on macOS 15.7.5 arm64 with Go 1.27.2.
+    Both architectures have build checks and x86_64 Go tests pass through Rosetta.
+    Native Intel networking and other macOS releases remain unverified. See the
+    contributor validation record for the current live AWS acceptance status.
 
 ### Start and use the session
 
@@ -126,9 +124,11 @@ stlv dev
 ```
 
 Stelvio deploys the stub Lambda, discovers the VPCs used by local handlers,
-and starts access for each enabled VPC. With `bastion` omitted, access resources
-are temporary. For persistent access or custom private DNS domains, see
-[VPC policy and DNS](../components/aws/vpc.md#dev-access-policy).
+and connects handler dependencies whose VPC explicitly enables a bastion.
+Set `bastion=True` (or a `BastionConfig`) and deploy to create the persistent
+bastion. Omitting `bastion` defaults to `False`: Stelvio warns and runs the
+handler without establishing or checking an external network path. Explicit
+`None` is rejected. See [VPC access policy](../components/aws/vpc.md#dev-access-policy).
 
 Wait for the networking readiness output, then call the printed Function URL
 or API URL in another terminal. Initial access can take several minutes while
@@ -157,78 +157,69 @@ keeps its VPC attachment on an ordinary deploy.
     are refused rather than overwritten. Multiple VPCs need non-overlapping
     CIDRs and unambiguous DNS ownership.
 
+### Connect without dev mode
+
+```bash
+stlv deploy staging
+stlv tunnel start staging
+```
+
+`tunnel start` reads the deployed environment and connects the VPC dependencies
+of its handlers, including linked databases. It does not deploy infrastructure,
+start the Lambda bridge, or connect unreferenced VPCs. Use another terminal for
+your database client or agent, with the original hostname, port, and TLS settings.
+The tunnel stays in the foreground until Ctrl+C. With no eligible dependencies,
+it prints warnings where applicable and exits without activating the helper.
+
 ### Transport loss and stopping
 
-If the connection drops, Stelvio withdraws readiness for that VPC and tries to
-reconnect. New dependent invocations receive an unavailable response until access is
-restored. Already-running handlers and database sockets can fail;
-Stelvio does not replay their requests. Retry writes according to your
-application's own rules. Changed server identity or revoked authorization
-requires attention instead of an automatic trust change.
+Stelvio reconnects an interrupted transport using the existing deployed bastion.
+It never creates a replacement instance. New dependent dev invocations are
+rejected while their VPC is unavailable; unrelated handlers continue. Existing
+database calls can fail and are not replayed automatically.
 
-Press `Ctrl+C` and wait for shutdown to finish. Stelvio closes the transports,
-removes owned routes and resolvers, and deletes temporary access resources.
-Persistent bastions, DocumentDB, NAT, and the application stay in AWS and can
-continue billing. Run `stlv deploy` for the same environment to restore your
-production Lambda, or `stlv destroy` to remove the application, including its
-database. See [cost and lifetime](../components/aws/vpc.md#dev-access-cost-and-lifetime).
+Ctrl+C stops the session and removes its owned routes, interfaces, and resolver
+files. If the command dies, the helper detects lease loss or owner death and
+cleans those resources itself. A helper restart resumes cleanup from its durable
+journal. Persistent bastions, DocumentDB, NAT, and the application remain deployed
+and continue to incur their applicable charges.
 
 ### Recover an interrupted session
 
-Keep the terminal output and recovery records if cleanup reports a failure.
-Do not delete the helper journal, local recovery files, or the session's remote
-state to make an error disappear.
-
-1. Stop the original dev process. Recovery refuses to take over a live owner.
-2. Inspect and reconcile stale host resources:
-
-    ```bash
-    stlv tunnel inspect
-    stlv tunnel reconcile
-    stlv tunnel inspect
-    ```
-
-3. For AWS cleanup, run the **`AWS recovery:` command printed by Stelvio** as
-   the original user with the original credential sources. It includes the
-   home state bucket/account/region, target account/region, app, environment,
-   session ID, and any selected profiles. See the
-   [`tunnel recover` reference](../intro/using-cli.md#tunnel-recover).
-   If the process died before printing it, retain the logs and ownership state
-   and establish those exact identities before recovery. Do not guess a session.
-4. Wait for successful cleanup before starting another managed session.
-   Restore expired AWS credentials and rerun the same recovery command when
-   necessary. Host reconciliation alone does not delete AWS resources.
-
-### Remove or upgrade the helper
-
-After closing dev sessions and completing recovery:
+If automatic host cleanup cannot finish:
 
 ```bash
+stlv tunnel inspect
 stlv tunnel cleanup
 ```
 
-This removes owned host resources and uninstalls the helper. It does not destroy
-the application or its AWS access resources. Active or uncertain installations
-cannot be overwritten or silently removed.
+`cleanup` retries removal of stale Stelvio-owned host state and leaves the helper
+installed. It refuses live sessions and foreign resources. Preserve the journal
+when ownership is uncertain; resolve the reported conflict and retry. This
+command does not delete AWS resources. The former temporary AWS access stack and
+`tunnel recover` command have been removed.
 
-For an upgrade that changes the binary, run cleanup using the **matching old
-Stelvio installation**, then install with the new one. Keep the old Python
-environment available until cleanup succeeds. Legacy helper installations also
-require their matching package's cleanup; Traforo does not automatically
-replace them. The installed image is shared across Python environments, and
-both helper and forwarder use that same verified image.
+### Upgrades and uninstall
 
-## Limitations
+`stlv tunnel install`, `stlv dev`, and `stlv tunnel start` ensure the packaged
+Traforo version is installed. Close active tunnel/dev sessions before replacing
+an older helper. Stelvio requests macOS administrator authorization for the
+replacement, handles compatible legacy ownership records, and retains evidence
+if an interrupted upgrade cannot finish safely. You do not need the old Python
+package. Conflicting or unsupported ownership records must be resolved before
+replacement; they are never overwritten blindly.
 
-### Target Architecture
+```bash
+stlv tunnel uninstall
+```
 
-Stelvio's dev mode will execute your local Lambda functions natively, i.e. the Python interpreter is used on your workstation's operating system and CPU architecture, no matter your Lambda function definition. There is no emulator in place that would match the os/architecture on AWS with the one on your workstation.
+`uninstall` removes the local helper after safe host cleanup and refuses active
+sessions. The private AWS plugin cache remains available. Neither cleanup nor
+uninstall destroys your application or bastion. Remove the bastion with a deploy
+using `bastion=False`, or destroy the application.
 
-Since your workstation is likely equipped with more RAM than your Lambda function, this also mean that you're less likely to run into memory limits on your workstation.
-
-### Request/Response Size Limits
-
-Dev mode supports the same payload limits as [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html) (internally, large payloads are chunked into multiple AppSync events and reassembled on the other end):
-
-- **6 MB** for request and response (synchronous invocations)
-- **1 MB** for asynchronous invocations
+Applications deployed with the former temporary policy must set `bastion=True`
+and redeploy before managed access works. Existing compatible persistent and
+disabled deployment metadata can still be read. Any old temporary AWS resources
+must be disposed of through their original ownership workflow before upgrading;
+v2 does not adopt or delete that infrastructure.

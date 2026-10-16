@@ -157,7 +157,7 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
             }
         ]
         if cleanup_failure:
-            with raises(RuntimeError, match="cleanup incomplete; retain AWS recovery ownership"):
+            with raises(RuntimeError, match="cleanup incomplete; run stlv tunnel cleanup"):
                 runtime.close()
             assert runtime.process.returncode == 70
         else:

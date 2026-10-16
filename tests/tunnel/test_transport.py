@@ -8,6 +8,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from ipaddress import IPv4Network
+from pathlib import Path
 from threading import Event, Thread
 from unittest.mock import Mock
 
@@ -31,7 +32,6 @@ from stelvio.tunnel.transport import (
 
 @fixture
 def transport_world():
-    owner = "11111111-1111-4111-8111-111111111111"
     network = VpcNetwork(
         "vpc-owner",
         "123456789012",
@@ -39,16 +39,16 @@ def transport_world():
         "vpc-12345678",
         "provider",
         (IPv4Network("10.254.0.0/16"),),
-        BastionPolicy.TEMPORARY,
+        BastionPolicy.PERSISTENT,
         (),
         (),
-        AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "owned-identity", owner),
+        AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "owned-identity", "vpc-owner"),
     )
     session = Mock(region_name="us-east-1")
     clients = {service: Mock() for service in ("ec2", "ssm", "sts")}
     session.client.side_effect = lambda name, **kwargs: clients[name]
     clients["sts"].get_caller_identity.return_value = {"Account": "123456789012"}
-    tags = [{"Key": "stlv:tunnel-session", "Value": owner}]
+    tags = [{"Key": "stelvio:app", "Value": "app"}]
     node = {
         "VpcId": "vpc-12345678",
         "Placement": {"AvailabilityZone": "us-east-1a"},
@@ -77,7 +77,7 @@ def transport_world():
         "Status": "Success",
         "StandardOutputContent": f"ssh-ed25519 {encoded}\nstelvio-tunnel-ready\n",
     }
-    transport = SshTransport(network, session, Event())
+    transport = SshTransport(network, session, Event(), ownership={"stelvio:app": "app"})
     transport.pin = "another previously authenticated server key"
     return transport, clients, node, group, document, description
 
@@ -105,7 +105,7 @@ def test_actual_child_birth_registration_finishes_before_shutdown_fence(  # noqa
     transport, clients, _, _, _, _ = transport_world
     transport.pin = None
     monkeypatch.setattr(transport, "_bootstrap", lambda: "fixture authenticated pin")
-    monkeypatch.setattr("stelvio.tunnel.transport.shutil.which", lambda _: "/usr/bin/true")
+    monkeypatch.setattr("stelvio.tunnel.transport.installed_plugin", lambda: Path("/usr/bin/true"))
     clients["ssm"].start_session.return_value = {"SessionId": "owned-fixture"}
     clients["ssm"].meta.endpoint_url = "https://ssm.us-east-1.amazonaws.com"
     eic = Mock()

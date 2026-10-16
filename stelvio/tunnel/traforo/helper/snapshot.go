@@ -31,6 +31,7 @@ type Unit struct {
 type Snapshot struct {
 	Revision            uint64
 	Peer                protocol.DarwinOwner
+	Parent              protocol.DarwinParent
 	Session, Capability [16]byte
 	Carrier             uint32
 	Units               []Unit
@@ -45,6 +46,9 @@ func (s Snapshot) Clone() Snapshot {
 	return n
 }
 func (s *Snapshot) Validate() error {
+	if s.Parent != (protocol.DarwinParent{}) && (!s.Parent.Valid() || s.Parent.UID != s.Peer.UID) {
+		return protocol.Invalid
+	}
 	if s.Revision == 0 || !s.Peer.ValidV3() || !protocol.Nonzero(s.Session[:]) || !protocol.Nonzero(s.Capability[:]) || s.Carrier != 1 || len(s.Units) > 8 {
 		return protocol.Invalid
 	}
@@ -93,7 +97,11 @@ func EncodeSnapshot(s Snapshot) ([]byte, error) {
 		return nil, e
 	}
 	var out bytes.Buffer
-	out.WriteString("STLVSNP3")
+	if s.Parent.PID != 0 {
+		out.WriteString("STLVSNP4")
+	} else {
+		out.WriteString("STLVSNP3")
+	}
 	put := func(v any) { binary.Write(&out, binary.BigEndian, v) }
 	put(s.Revision)
 	put(s.Peer.UID)
@@ -101,6 +109,9 @@ func EncodeSnapshot(s Snapshot) ([]byte, error) {
 	put(s.Peer.Seconds)
 	put(s.Peer.Micros)
 	put(s.Peer.Token)
+	if s.Parent.PID != 0 {
+		put(s.Parent)
+	}
 	put(s.Session)
 	put(s.Capability)
 	put(s.Carrier)
@@ -129,13 +140,13 @@ func EncodeSnapshot(s Snapshot) ([]byte, error) {
 }
 func DecodeSnapshot(data []byte) (Snapshot, error) {
 	var s Snapshot
-	if len(data) > protocol.MaxJournal || len(data) < 8 || string(data[:8]) != "STLVSNP3" {
+	if len(data) > protocol.MaxJournal || len(data) < 8 || (string(data[:8]) != "STLVSNP3" && string(data[:8]) != "STLVSNP4") {
 		return s, protocol.Invalid
 	}
 	buf := bytes.NewReader(data[8:])
 	read := func(v any) bool { return binary.Read(buf, binary.BigEndian, v) == nil }
 	var n byte
-	if !read(&s.Revision) || !read(&s.Peer.UID) || !read(&s.Peer.PID) || !read(&s.Peer.Seconds) || !read(&s.Peer.Micros) || !read(&s.Peer.Token) || !read(&s.Session) || !read(&s.Capability) || !read(&s.Carrier) || !read(&n) || n > 8 {
+	if !read(&s.Revision) || !read(&s.Peer.UID) || !read(&s.Peer.PID) || !read(&s.Peer.Seconds) || !read(&s.Peer.Micros) || !read(&s.Peer.Token) || (string(data[:8]) == "STLVSNP4" && (!read(&s.Parent) || !s.Parent.Valid())) || !read(&s.Session) || !read(&s.Capability) || !read(&s.Carrier) || !read(&n) || n > 8 {
 		return Snapshot{}, protocol.Invalid
 	}
 	for i := byte(0); i < n; i++ {
@@ -243,7 +254,7 @@ func transition(a, b Unit) bool {
 	return changes == 1
 }
 func Successor(a, b Snapshot) bool {
-	if a.Validate() != nil || b.Validate() != nil || a.Revision == math.MaxUint64 || b.Revision != a.Revision+1 || a.Peer != b.Peer || a.Session != b.Session || a.Capability != b.Capability || a.Carrier != b.Carrier || len(b.Units) < len(a.Units) || len(b.Units) > len(a.Units)+1 {
+	if a.Validate() != nil || b.Validate() != nil || a.Revision == math.MaxUint64 || b.Revision != a.Revision+1 || a.Peer != b.Peer || a.Parent != b.Parent || a.Session != b.Session || a.Capability != b.Capability || a.Carrier != b.Carrier || len(b.Units) < len(a.Units) || len(b.Units) > len(a.Units)+1 {
 		return false
 	}
 	changes := 0

@@ -234,31 +234,29 @@ Vpc with `vpc=`, or Stelvio raises `ValueError` when you create the Function. Se
 
 ## Dev access policy
 
-The `bastion` argument controls access for local handlers. It does not control
-production Lambda VPC attachment. The default enables automatic temporary
-access for VPCs actually used by dev handlers.
+The `bastion` argument enables a persistent, application-owned access instance.
+It does not control production Lambda VPC attachment. Access is disabled by default.
 
-| `bastion` value | Policy | Ordinary deploy | `stlv dev` exit |
-| --- | --- | --- | --- |
-| Omitted or `None` | Temporary | No dev access instance | Deletes session-owned access resources on successful cleanup |
-| `True` | Persistent | Creates app-owned access resources | Keeps the access instance |
-| `BastionConfig(...)` or a dict, including `{}` | Persistent | Creates app-owned access resources with that configuration | Keeps the access instance |
-| `False` | Disabled | No managed access | No managed access to clean up |
+| `bastion` value | Ordinary deploy | Tunnel/dev session exit |
+| --- | --- | --- |
+| Omitted or `False` | No managed bastion | Warns for handler dependencies and runs without managed networking |
+| `True` | Creates app-owned access resources | Keeps the access instance |
+| `BastionConfig(...)` or a dict, including `{}` | Creates a configured app-owned bastion | Keeps the access instance |
 
 ```python
 from stelvio.aws.vpc import Vpc
 
-vpc = Vpc("main")  # Temporary access during dev; no bastion on normal deploy.
+vpc = Vpc("main", bastion=True)
 ```
 
-For access that persists between sessions, use `Vpc("main", bastion=True)`.
-Changing a persistent policy to the default and deploying removes the app-owned
-bastion; destroying the app removes it too. Temporary access is owned separately
-from the application and must be recovered if session cleanup fails.
+The bastion is created by deployment and stays until a deploy changes `bastion`
+to `False`, or the app is destroyed. There are no temporary instances or separate
+access stacks. Explicit `None` is invalid. Without a bastion, provide your own
+connectivity if the local handler needs a private resource; Stelvio does not
+establish or verify that external path. The warning does not block execution.
 
-With `bastion=False`, Stelvio warns and skips managed networking and readiness
-checks for that VPC. Use it only when you provide your own connectivity, such
-as an existing VPN. Stelvio does not establish or verify that external path.
+`stlv tunnel start [ENV]` uses the same handler dependencies as dev mode without
+running the invocation bridge. It connects to deployed bastions and never deploys.
 
 The access instance uses a public subnet and public IP for outbound AWS
 connectivity. Its SSH server is reached through Systems Manager, with no public
@@ -291,15 +289,12 @@ unrelated names continue using your normal DNS.
 
 Managed access adds EC2, public IPv4, storage, and any applicable transfer or
 service usage charges. See [EC2 pricing](https://aws.amazon.com/ec2/pricing/)
-and [VPC pricing](https://aws.amazon.com/vpc/pricing/) for your region. Temporary
-access bills while it exists, including startup, reconnects, and unfinished
-cleanup. Persistent access bills between dev sessions until a deployment removes
-it or you destroy the app.
+and [VPC pricing](https://aws.amazon.com/vpc/pricing/) for your region. Access
+bills continuously while deployed, including between tunnel/dev sessions.
 
-Stopping dev mode does not delete DocumentDB, NAT, or your application.
-Uninstalling the local helper does not delete AWS resources either. Follow the
-[shutdown and recovery instructions](../../concepts/dev-mode.md#transport-loss-and-stopping)
-and retain ownership records until cleanup succeeds.
+Stopping a tunnel does not delete the bastion, DocumentDB, NAT, or application.
+Local `tunnel cleanup` repairs host networking; `tunnel uninstall` removes the
+helper. Neither performs AWS teardown. See [shutdown and cleanup](../../concepts/dev-mode.md#transport-loss-and-stopping).
 
 ## Cost
 
@@ -350,7 +345,7 @@ Persistent access also supports these customization keys: `bastion`
 (`RoleArgs`), `bastion_profile` (`InstanceProfileArgs`), and
 `bastion_identity_document` (`DocumentArgs`). Preserve the ownership, identity,
 and transport configuration required by managed access when customizing them.
-These keys do not customize the separate temporary access stack.
+
 
 ### Example
 

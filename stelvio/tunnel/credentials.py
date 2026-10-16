@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 import boto3
 from botocore.config import Config
 
-from stelvio.tunnel.access_program import CapturedCredentials
 from stelvio.tunnel.manifest import ACCOUNT
 
 if TYPE_CHECKING:
@@ -99,17 +98,3 @@ class AwsExecutionContext:
             raise RuntimeError("Captured AWS credential source belongs to another account")
         object.__setattr__(self, "_session", session)
         return session
-
-    def frozen_credentials(self, session: boto3.Session) -> CapturedCredentials:
-        """Refresh through the original SDK provider before a new engine/transport."""
-        self._require_runtime()
-        if session is not self._session:
-            raise RuntimeError("Credential refresh received another provider's SDK session")
-        if session.region_name != self.region:
-            raise RuntimeError("Captured AWS provider region changed")
-        # get_frozen_credentials preserves SDK refresh and propagates expiration
-        # of fixed startup credentials. No fallback to the handler environment.
-        captured = CapturedCredentials.capture(session)
-        if captured.account != self.account:
-            raise RuntimeError("Refreshed AWS credential source belongs to another account")
-        return captured

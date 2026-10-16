@@ -1,13 +1,15 @@
 """Exclusive actual macOS CLI → Function URL → local DocumentDB scenarios."""
 
+import json
 import platform
 import socket
+import subprocess
 import time
 
 from pytest import fixture, mark, raises
 
 from stelvio.tunnel.helper_client import HelperError, NativeHelper
-from stelvio.tunnel.installation import INSTALLED_HELPER, cleanup_helper
+from stelvio.tunnel.installation import INSTALLED_HELPER, uninstall_helper
 
 from .assert_tunnel import (
     assert_example_response,
@@ -41,8 +43,8 @@ def cli_session(request):
         session.destroy()
 
 
-@mark.parametrize("cli_session", ["True", "omitted"], indirect=True)
-def test_example_actual_cli_tls_discovery_reconnect_and_cleanup(cli_session):
+@mark.parametrize("cli_session", ["True", "{}"], indirect=True)
+def test_example_actual_cli_tls_discovery_reconnect_and_cleanup(cli_session):  # noqa: PLR0915 - complete session acceptance
     session = cli_session
     session.start()  # Actual stlv dev with no additional arguments.
     session.wait_ready()
@@ -51,7 +53,7 @@ def test_example_actual_cli_tls_discovery_reconnect_and_cleanup(cli_session):
     vpc = manifest.enabled_vpcs[0]
     before = assert_example_response(url, marker=session.marker, pid=session.process.pid)
     assert before["expected_host"].endswith(".docdb.amazonaws.com")
-    instance = vpc.access.instance_id if vpc.access else _temporary_instance(session, vpc.vpc_id)
+    instance = vpc.access.instance_id
     original = owned_transport(instance, session.transport_owner())["SessionId"]
     handler = session.project / "functions/ping.py"
     handler.write_text(handler.read_text() + "\n# Acceptance: reload the handler.\n")
@@ -82,37 +84,21 @@ def test_example_actual_cli_tls_discovery_reconnect_and_cleanup(cli_session):
     assert not host.owned
     assert not host.uncertain
     assert not host.units
-    # Normal stop retains the application; temporary access is a separate owner.
+    # Normal stop retains the application and its explicitly deployed bastion.
     assert session.manifest().vpcs[0].vpc_id == vpc.vpc_id
-    if vpc.access is None:
-        _assert_no_temporary_instances(session, vpc.vpc_id)
-        session.command("deploy", "--yes", "--json")
-        _assert_no_temporary_instances(session, vpc.vpc_id)
-        session.evidence("ordinary-deploy-no-temporary-access", {"vpc": vpc.vpc_id})
-
-
-def _assert_no_temporary_instances(session, vpc_id):
-    reservations = session.sdk.client("ec2").describe_instances(
-        Filters=[
-            {"Name": "vpc-id", "Values": [vpc_id]},
-            {"Name": "tag-key", "Values": ["stlv:tunnel-session"]},
-        ]
-    )["Reservations"]
-    assert all(i["State"]["Name"] == "terminated" for r in reservations for i in r["Instances"])
-
-
-def _temporary_instance(session, vpc_id):
-    ec2 = session.sdk.client("ec2")
-    reservations = ec2.describe_instances(
-        Filters=[
-            {"Name": "vpc-id", "Values": [vpc_id]},
-            {"Name": "tag-key", "Values": ["stlv:tunnel-session"]},
-            {"Name": "instance-state-name", "Values": ["running"]},
-        ]
-    )["Reservations"]
-    instances = [i["InstanceId"] for r in reservations for i in r["Instances"]]
-    assert len(instances) == 1
-    return instances[0]
+    retained = session.sdk.client("ec2").describe_instances(InstanceIds=[instance])["Reservations"]
+    assert retained[0]["Instances"][0]["State"]["Name"] == "running"
+    before_state = session.state()
+    session.start(tunnel=True)
+    session.wait_ready()
+    assert "local dev server connected to AppSync" not in session.log.read_text()
+    _standalone_database(session)
+    old = interrupt_transport(instance, session.transport_owner())
+    wait_new_transport(instance, old, session.transport_owner())
+    session.wait_ready()
+    _standalone_database(session)
+    session.crash_and_recover()
+    assert session.state() == before_state
 
 
 @mark.parametrize("cli_session", ["multi"], indirect=True)
@@ -120,7 +106,7 @@ def test_multi_vpc_partial_failure_distinct_markers_and_crash_recovery(cli_sessi
     session = cli_session
     # Establish existing private records before starting OS resolver ownership.
     ordinary = session.command("deploy", "--yes")
-    assert "bastion=False disables managed access" in ordinary
+    assert ordinary
     deployed = session.manifest()
     zone_vpc = next(v for v in deployed.enabled_vpcs if v.identity.endswith("::net2"))
     resource = next(r for r in deployed.resources if r.vpc == zone_vpc.identity)
@@ -138,7 +124,7 @@ def test_multi_vpc_partial_failure_distinct_markers_and_crash_recovery(cli_sessi
         session.evidence(f"database-{number}", payload)
     assert baseline[1]["expected_host"] != baseline[2]["expected_host"]
     with raises(HelperError, match="active"):
-        cleanup_helper()
+        uninstall_helper()
     for number in (1, 2):
         assert_example_response(
             urls[f"api{number}"], marker=session.marker, pid=session.process.pid
@@ -174,8 +160,6 @@ def test_multi_vpc_partial_failure_distinct_markers_and_crash_recovery(cli_sessi
     assert session.manifest().vpcs
     _exercise_startup_outage(session, urls, manifest, baseline)
     session.stop()
-    temporary = next(v for v in manifest.enabled_vpcs if v.identity.endswith("::net1"))
-    _assert_no_temporary_instances(session, temporary.vpc_id)
     persistent = next(v for v in manifest.enabled_vpcs if v.identity.endswith("::net2"))
     retained = session.sdk.client("ec2").describe_instances(
         InstanceIds=[persistent.access.instance_id]
@@ -183,7 +167,7 @@ def test_multi_vpc_partial_failure_distinct_markers_and_crash_recovery(cli_sessi
     assert retained[0]["Instances"][0]["State"]["Name"] == "running"
     session.evidence("mixed-policy-stop", {"retained": persistent.access.instance_id})
     ordinary = session.command("deploy", "--yes")
-    assert "bastion=False disables managed access" in ordinary
+    assert ordinary
     assert not session.sdk.client("ec2").describe_instances(
         Filters=[{"Name": "vpc-id", "Values": [opted.vpc_id]}]
     )["Reservations"]
@@ -264,7 +248,7 @@ def _assert_private_alias(session, alias, hostname):
 
 def _exercise_outage(session, urls, manifest, baseline, number):
     vpc = next(v for v in manifest.enabled_vpcs if v.identity.endswith(f"::net{number}"))
-    instance = vpc.access.instance_id if vpc.access else _temporary_instance(session, vpc.vpc_id)
+    instance = vpc.access.instance_id
     old = owned_transport(instance, session.transport_owner())["SessionId"]
     ec2 = session.sdk.client("ec2")
     # Stop only this app's recorded bastion to hold a real outage long enough
@@ -320,3 +304,51 @@ def _exercise_outage(session, urls, manifest, baseline, number):
             time.sleep(1)
     assert restored["expected_host"] == baseline[number]["expected_host"]
     session.evidence(f"reconnected-{number}", restored)
+
+
+def _standalone_database(session):
+    script = r"""
+import json,os,sys,uuid
+import boto3
+from pymongo import MongoClient
+sdk=boto3.Session()
+cluster=sdk.client("docdb").describe_db_clusters(DBClusterIdentifier=sys.argv[1])["DBClusters"][0]
+secret=sdk.client("secretsmanager").get_secret_value(SecretId=cluster["MasterUserSecret"]["SecretArn"])
+password=json.loads(secret["SecretString"])["password"]
+client=MongoClient(cluster["Endpoint"],cluster["Port"],username=cluster["MasterUsername"],password=password,
+ tls=True,tlsCAFile=sys.argv[2],replicaSet="rs0",retryWrites=False,serverSelectionTimeoutMS=30000)
+try:
+ assert client.admin.command("ping")["ok"]==1
+ marker=uuid.uuid4().hex
+ collection=client.stelvio.standalone_proof
+ collection.replace_one({"_id":"proof"},{"_id":"proof","marker":marker},upsert=True)
+ assert collection.find_one({"_id":"proof"})["marker"]==marker
+ assert client.nodes and client.topology_description.replica_set_name=="rs0"
+ result={"read_write":True,"replica_set":"rs0"}
+ result["members"]=sorted(host for host,port in client.nodes)
+ print(json.dumps(result))
+finally: client.close()
+"""
+    resource = session.manifest().resources[0]
+    ca_file = session.project / ".stelvio/aws/documentdb/global-bundle.pem"
+    result = subprocess.run(  # noqa: S603 - fixture wheel interpreter, fixed proof script
+        [
+            str(session.cli.with_name("python")),
+            "-I",
+            "-c",
+            script,
+            resource.resource_id,
+            str(ca_file),
+        ],
+        cwd=session.project,
+        env=session.environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    observed = json.loads(result.stdout)
+    assert observed["read_write"] is True
+    assert observed["replica_set"] == "rs0"
+    assert observed["members"]
+    session.evidence("standalone-database", observed)

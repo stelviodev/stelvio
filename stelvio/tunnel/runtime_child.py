@@ -12,13 +12,11 @@ from threading import Event, Lock, Thread
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from stelvio.tunnel.access_runtime import RuntimeAccess
 from stelvio.tunnel.aws_inventory import resolve_vpc_inventory
 from stelvio.tunnel.credentials import AWS_IO, AwsExecutionContext
 from stelvio.tunnel.discovery import ResourceDiscovery
 from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
 from stelvio.tunnel.helper_client import NativeHelper
-from stelvio.tunnel.policy import BastionPolicy
 from stelvio.tunnel.supervisor import VpcStatus, VpcWorker
 from stelvio.tunnel.wire import receive, send, session_from_wire
 
@@ -44,13 +42,11 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
         captured = contexts[network.provider]
         if captured.account != network.account or captured.region != network.region:
             raise ValueError("VPC provider/account/region differs from captured context")
-    settings = inputs["access_settings"]
     stop = Event()
     lock = Lock()
     sdk_lock = Lock()
     fencing_lock = Lock()
     workers = []
-    accesses = []
     snapshots = {
         network.identity: VpcStatus(network.identity)
         for network in description.manifest.enabled_vpcs
@@ -64,60 +60,18 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
         scope.callback(forwarding.close)
 
         def bootstrap(network: VpcNetwork) -> None:
-            access = None
-            worker = None
             try:
-                context = contexts[network.provider]
-                # SDK provider initialization serializes; the original refresh
-                # chain remains alive in this process, outside handlers.
                 with sdk_lock:
-                    session = context.open_session()
-                if network.policy == BastionPolicy.TEMPORARY:
-                    if settings is None:
-                        raise ValueError(  # noqa: TRY301 - classified at per-VPC boundary
-                            "Temporary VPC access requires independent state ownership"
-                        )
-                    access = RuntimeAccess(
-                        description,
-                        network,
-                        context,
-                        contexts[settings["home_provider"]],
-                        settings,
-                    )
-                    with lock:
-                        if stop.is_set():
-                            return  # constructor performed only read-only SDK/artifact checks
-                        accesses.append(access)
-                    network = replace(network, access=access.start())
+                    session = contexts[network.provider].open_session()
                 if stop.is_set():
-                    if access:
-                        access.close()
                     return
-                worker = VpcWorker(
-                    description,
-                    network,
-                    session,
-                    lease,
-                    forwarding,
-                    discovery,
-                    cleanup=access.close if access else lambda: None,
-                    record=access.journal.record if access else None,
-                )
+                worker = VpcWorker(description, network, session, lease, forwarding, discovery)
                 with lock:
                     if stop.is_set():
-                        worker.stop.set()
+                        return
                     workers.append(worker)
                 worker.start()
             except Exception:
-                if access and worker is None:
-                    try:
-                        access.close()
-                    except Exception:
-                        with lock:
-                            snapshots[network.identity] = VpcStatus(
-                                network.identity, "failed", cause="cleanup-incomplete"
-                            )
-                        return
                 with lock:
                     snapshots[network.identity] = VpcStatus(
                         network.identity, "failed", cause="startup-ownership"
@@ -161,17 +115,12 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             with fencing_lock:
                 while True:
                     with lock:
-                        owned_workers, owned_accesses = tuple(workers), tuple(accesses)
+                        owned_workers = tuple(workers)
                     failures = []
                     for worker in owned_workers:
                         worker.stop.set()
                         try:
                             worker.transport.stop_local()
-                        except Exception as error:
-                            failures.append(error)
-                    for access in owned_accesses:
-                        try:
-                            access.abort()
                         except Exception as error:
                             failures.append(error)
                     if not failures:
@@ -234,15 +183,6 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             for worker in owned:
                 try:
                     worker.close()
-                except Exception as error:
-                    failures.append(error)
-            # Include partially created access with no worker, and retry each
-            # idempotent owner independently after a worker cleanup failure.
-            with lock:
-                owned_accesses = tuple(accesses)
-            for access in owned_accesses:
-                try:
-                    access.close()
                 except Exception as error:
                     failures.append(error)
             if failures:

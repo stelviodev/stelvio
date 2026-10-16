@@ -6,7 +6,6 @@ import base64
 import json
 import os
 import shlex
-import shutil
 import signal
 import socket
 import subprocess
@@ -24,7 +23,7 @@ from botocore.exceptions import ClientError
 
 from stelvio.tunnel.bastion import SSH_USER, identity_document
 from stelvio.tunnel.credentials import AWS_IO
-from stelvio.tunnel.policy import BastionPolicy
+from stelvio.tunnel.plugin import installed_plugin
 from stelvio.tunnel.processes import identity, process_group_empty, unreaped_child
 from stelvio.tunnel.socks import SocksConnector, TransportInterruptedError
 
@@ -165,8 +164,6 @@ class SshTransport:
             raise TransportInterruptedError("VPC transport attempt cancelled")
 
     def _owned(self, tags: dict[str, str]) -> bool:
-        if self.network.policy == BastionPolicy.TEMPORARY:
-            return tags.get("stlv:tunnel-session") == self.network.access.owner
         return (
             self.network.access.owner == self.network.identity
             and bool(self.ownership)
@@ -302,11 +299,7 @@ class SshTransport:
         if self.pin is not None and self.pin != pin:
             raise ServerIdentityError("VPC SSH server identity changed; reconnect refused")
         self.pin = pin
-        plugin = shutil.which("session-manager-plugin")
-        if not plugin:
-            raise TransportAuthorizationError(
-                "Install session-manager-plugin for VPC dev networking"
-            )
+        plugin = installed_plugin()
         self._temporary = tempfile.TemporaryDirectory(prefix="stelvio-ssh-")
         directory = Path(self._temporary.name)
         key = directory / "client"

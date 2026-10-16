@@ -2,14 +2,12 @@
 
 from collections.abc import Callable
 
-import boto3
 import click
 
-from stelvio.pulumi import get_stelvio_config_dir
+from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
 from stelvio.tunnel.assets import NativeAssetError
 from stelvio.tunnel.helper_client import HelperError, NativeHelper
-from stelvio.tunnel.installation import SYSTEM_CHANGES, cleanup_helper, install_helper
-from stelvio.tunnel.recovery import recover_session
+from stelvio.tunnel.installation import SYSTEM_CHANGES, install_helper, uninstall_helper
 
 
 @click.group()
@@ -52,40 +50,49 @@ def reconcile() -> None:
     click.echo("Host recovery complete.")
 
 
-@tunnel.command("recover")
-@click.option("--bucket", required=True)
-@click.option("--home-account", required=True)
-@click.option("--home-region", required=True)
-@click.option("--home-profile", default=None)
-@click.option("--account", required=True)
-@click.option("--region", required=True)
-@click.option("--profile", default=None)
-@click.option("--app", required=True)
-@click.option("--env", required=True)
-@click.option("--session", required=True)
-def recover(**options: str) -> None:
-    """Recover this user's stale temporary AWS access; never stop a live owner."""
-    try:
-        home = boto3.Session(
-            profile_name=options.pop("home_profile"), region_name=options.pop("home_region")
-        )
-        target = boto3.Session(
-            profile_name=options.pop("profile"), region_name=options.pop("region")
-        )
-        recover_session(
-            home=home,
-            target=target,
-            config_dir=get_stelvio_config_dir(),
-            report=click.echo,
-            **options,
-        )
-    except Exception as error:
-        raise click.ClickException(str(error)) from error
-
-
 @tunnel.command("cleanup")
 def cleanup() -> None:
-    """Uninstall the helper after owned host cleanup; refuse active sessions."""
-    click.echo("Stop the native helper and remove its owned installation and host changes.")
-    _run(cleanup_helper)
+    """Clean stale owned host networking, leaving the helper installed."""
+    _run(lambda: NativeHelper().reconcile())
+    click.echo("Host cleanup complete.")
+
+
+@tunnel.command("uninstall")
+def uninstall() -> None:
+    """Remove Traforo after safe host cleanup; refuse active sessions."""
+    _run(uninstall_helper)
     click.echo("Native VPC helper removed.")
+
+
+@tunnel.command("start")
+@click.argument("env", required=False)
+def start(env: str | None) -> None:
+    """Connect to deployed handler VPC dependencies without running dev mode."""
+    from stelvio.cli import determine_env  # noqa: PLC0415 - avoid CLI registration cycle
+    from stelvio.command_run import CommandRun  # noqa: PLC0415 - lazy application loading
+
+    try:
+        environment = determine_env(env, require_explicit_in_ci=True, command_name="tunnel start")
+        with CommandRun(environment, state_only=True) as run:
+            if not run.has_deployed:
+                raise click.ClickException("No deployed environment; run stlv deploy first")
+            network = run.capture_network_session(click.echo)
+        try:
+            network.start()
+            if network.description is not None:
+                network.wait()
+        finally:
+            network.close()
+    except KeyboardInterrupt:
+        click.echo("Tunnel stopped.")
+    except (
+        HelperError,
+        NativeAssetError,
+        OSError,
+        RuntimeError,
+        ValueError,
+        StelvioProjectError,
+        StelvioValidationError,
+        StateLockedError,
+    ) as error:
+        raise click.ClickException(str(error)) from error

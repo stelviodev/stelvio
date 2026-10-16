@@ -14,13 +14,9 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
-from botocore.exceptions import ClientError
-
 from stelvio.stack_outputs import read_network_manifest
-from stelvio.tunnel.access_state import AccessIntent
 from stelvio.tunnel.credentials import AWS_IO
 from stelvio.tunnel.helper_client import HelperError, NativeHelper
-from stelvio.tunnel.processes import ProcessIdentity, identity
 
 from .assert_helpers import _boto3_session
 from .assert_tunnel import assert_access_absent, assert_application_absent
@@ -180,14 +176,15 @@ class CliSession:
             )
         return result
 
-    def start(self) -> None:
+    def start(self, *, tunnel: bool = False) -> None:
+        self.standalone = tunnel
         if self.log.exists():
             assert self.process is None or self.process.poll() is not None
             self.log.rename(self.project / f"dev-{uuid4().hex}.log")
         self.started = time.time()
         with self.log.open("wb") as log:
             self.process = subprocess.Popen(  # noqa: S603 - selected test venv's real CLI
-                [str(self.cli), "dev"],
+                [str(self.cli), *(["tunnel", "start", self.env] if tunnel else ["dev"])],
                 cwd=self.project,
                 env=self.environment,
                 stdout=log,
@@ -202,7 +199,9 @@ class CliSession:
             output = self.log.read_text()
             if self.process.poll() is not None:
                 raise RuntimeError(f"Dev stopped; retained log {self.log}: {output[-6000:]}")
-            if "Network READY" in output and "local dev server connected to AppSync" in output:
+            if "Network READY" in output and (
+                self.standalone or "local dev server connected to AppSync" in output
+            ):
                 self.capture_ownership()
                 return
             if "failed attempt=" in output:
@@ -214,7 +213,7 @@ class CliSession:
 
     def capture_ownership(self) -> None:
         """Keep resolved identities from state/journal, never parse deployment prose."""
-        intents = self.access_intents()
+        intents = []
         manifest = self.manifest()
         transports = self.capture_transports(manifest, intents)
         path = self.project / "resolved-ownership.json"
@@ -293,36 +292,6 @@ class CliSession:
             "owner_hash": match[1],
         }
 
-    def access_intents(self) -> list[dict]:
-        """Discover only this fixture's durable access namespace, even before READY."""
-        app_segment = urlsafe_b64encode(self.app.encode()).decode().rstrip("=")
-        env_segment = urlsafe_b64encode(self.env.encode()).decode().rstrip("=")
-        prefix = f"tunnel/{app_segment}/{env_segment}/"
-        s3 = self.sdk.client("s3", config=AWS_IO)
-        intents = []
-        for page in s3.get_paginator("list_objects_v2").paginate(
-            Bucket=self.bucket,
-            ExpectedBucketOwner=self.account,
-            Prefix=prefix,
-        ):
-            for item in page.get("Contents", []):
-                if item["Key"].endswith(("/intent.json", "/metadata-cleanup.json")):
-                    response = s3.get_object(
-                        Bucket=self.bucket, ExpectedBucketOwner=self.account, Key=item["Key"]
-                    )
-                    with response["Body"] as body:
-                        saved = json.loads(body.read())
-                    value = saved.get("intent", saved)
-                    intent = AccessIntent.from_dict(value)
-                    assert intent.app == self.app
-                    assert intent.environment == self.env
-                    assert intent.account == self.account
-                    assert intent.region == self.sdk.region_name
-                    assert intent.owner_uid == os.geteuid()
-                    assert item["Key"].startswith(intent.prefix)
-                    intents.append(value)
-        return intents
-
     def transport_owner(self) -> str:
         saved = json.loads((self.project / "resolved-ownership.json").read_text())
         owners = {i["owner_hash"] for i in saved["transports"]}
@@ -375,7 +344,7 @@ def relocate(octet):
     return {k: adjust for k in ("vpc", "public_subnet", "private_subnet", "isolated_subnet")}
 @app.run
 def run():
-    for number, policy in ((1, None), (2, BastionConfig())):
+    for number, policy in ((1, True), (2, BastionConfig())):
         vpc = Vpc(f"net{number}", nat=NatConfig(type="managed", single=True),
                   bastion=policy, customize=relocate(252+number))
         db = DocumentDb(f"docdb{number}", vpc=vpc)
@@ -510,54 +479,15 @@ def run():
             self._record()
 
     def crash_and_recover(self) -> None:
-        """Crash only our CLI; EOF watchdog stops transport before AWS recovery."""
+        """Crash only our CLI; helper independently cleans host authority."""
         os.kill(self.process.pid, signal.SIGKILL)
         self.process.wait(timeout=10)
         self.recover_access()
         self.evidence("crash-recovered", {"complete": True})
 
     def recover_access(self) -> None:
-        """Wait for EOF cleanup; never steal a live creator's durable claim."""
+        """Wait for automatic helper cleanup; no AWS infrastructure is session-owned."""
         self.wait_host_empty()
-        intents = self.access_intents()
-        if intents:
-            (self.project / f"resolved-ownership-recovery-{uuid4().hex}.json").write_text(
-                json.dumps({"intents": intents, "transports": []})
-            )
-        for saved in intents:
-            self.wait_creator_dead(AccessIntent.from_dict(saved))
-        owners = sorted({(i["session"], i["account"], i["region"]) for i in intents})
-        failures = []
-        for owner, account, region in owners:
-            try:
-                self.command(
-                    "tunnel",
-                    "recover",
-                    "--bucket",
-                    self.bucket,
-                    "--home-account",
-                    self.account,
-                    "--home-region",
-                    self.sdk.region_name,
-                    "--home-profile",
-                    self.environment["AWS_PROFILE"],
-                    "--account",
-                    account,
-                    "--region",
-                    region,
-                    "--profile",
-                    self.environment["AWS_PROFILE"],
-                    "--app",
-                    self.app,
-                    "--env",
-                    self.env,
-                    "--session",
-                    owner,
-                )
-            except Exception as error:
-                failures.append(error)
-        if failures:
-            raise ExceptionGroup(f"Retained access ownership {self.project}", failures)
 
     def wait_host_empty(self) -> None:
         deadline = time.monotonic() + 60
@@ -572,37 +502,6 @@ def run():
             time.sleep(1)
         else:
             raise TimeoutError("EOF host cleanup not certified")
-
-    def wait_creator_dead(self, intent: AccessIntent) -> None:
-        s3 = self.sdk.client("s3", config=AWS_IO)
-        response = s3.list_objects_v2(
-            Bucket=self.bucket, ExpectedBucketOwner=self.account, Prefix=intent.prefix
-        )
-        if not any(i["Key"] == intent.prefix + "claim.json" for i in response.get("Contents", [])):
-            return
-        try:
-            response = s3.get_object(
-                Bucket=self.bucket,
-                ExpectedBucketOwner=self.account,
-                Key=intent.prefix + "claim.json",
-            )
-        except ClientError as error:
-            if error.response["Error"]["Code"] == "NoSuchKey":
-                # Valid disposal can remove the claim after listing. Recovery
-                # and complete AWS absence checks still run in the caller.
-                return
-            raise
-        with response["Body"] as body:
-            creator = ProcessIdentity(**json.loads(body.read())["creator"])
-        # The EOF SDK watchdog may need its 600+30s production disposal bound.
-        deadline = time.monotonic() + SHUTDOWN_SECONDS
-        while True:
-            actual = identity(creator.pid)
-            if actual is None or not creator.same_process(actual) or actual.status == 5:
-                return
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f"Creator still live; retain ownership {self.project}")
-            time.sleep(1)
 
     def destroy(self) -> None:
         failures = []

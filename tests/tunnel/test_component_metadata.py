@@ -40,8 +40,7 @@ def network_state(pulumi_mocks, monkeypatch):
 @mark.parametrize(
     ("value", "policy", "domains"),
     [
-        param(..., BastionPolicy.TEMPORARY, (), id="omitted"),
-        param(None, BastionPolicy.TEMPORARY, (), id="temporary"),
+        param(..., BastionPolicy.DISABLED, (), id="omitted"),
         param(False, BastionPolicy.DISABLED, (), id="disabled"),
         param(True, BastionPolicy.PERSISTENT, (), id="persistent"),
         param({}, BastionPolicy.PERSISTENT, (), id="empty-dict"),
@@ -65,14 +64,7 @@ def test_vpc_policy_survives_deployment_state(  # noqa: PLR0913 - policy table a
         return Vpc("net", **({} if value is ... else {"bastion": value})).resources
 
     deploy()
-    assert warnings == (
-        [
-            "Vpc net: bastion=False disables managed access. "
-            "Local access to its resources requires your own networking."
-        ]
-        if policy == BastionPolicy.DISABLED
-        else []
-    )
+    assert warnings == []
     manifest = read_network_manifest(network_state)
     assert len(manifest.vpcs) == 1
     network = manifest.vpcs[0]
@@ -255,7 +247,7 @@ Match User stlv-tunnel
     )
 
 
-@mark.parametrize("bastion", [None, True])
+@mark.parametrize("bastion", [False, True])
 @mark.parametrize("security_groups", [None, ["sg-customized-cluster"]])
 def test_function_and_documentdb_metadata_preserve_target_and_url(  # noqa: PLR0913
     bastion,
@@ -282,7 +274,7 @@ def test_function_and_documentdb_metadata_preserve_target_and_url(  # noqa: PLR0
 
     deploy()
     manifest = read_network_manifest(network_state)
-    assert len(manifest.enabled_vpcs) == 1
+    assert len(manifest.enabled_vpcs) == int(bool(bastion))
     net = manifest.vpcs[0]
     resource = manifest.resources[0]
     endpoint = manifest.endpoints[0]
@@ -365,6 +357,7 @@ def test_function_and_documentdb_metadata_preserve_target_and_url(  # noqa: PLR0
 @mark.parametrize(
     ("value", "error", "message"),
     [
+        param(None, TypeError, "'bastion' must be", id="none"),
         param(0, TypeError, "'bastion' must be", id="zero-is-not-disabled"),
         param(1, TypeError, "'bastion' must be", id="one-is-not-persistent"),
         param("auto", TypeError, "'bastion' must be", id="string"),
@@ -476,13 +469,14 @@ def test_two_dev_endpoints_keep_exact_vpc_dependencies_and_bridge_ids(
 
     @pulumi.runtime.test
     def deploy():
-        first = Vpc("first")
+        first = Vpc("first", bastion=True)
 
         def subnet(props):
             return {**props, "cidr_block": props["cidr_block"].replace("10.0.", "10.2.")}
 
         second = Vpc(
             "second",
+            bastion=True,
             customize={
                 "vpc": {"cidr_block": "10.2.0.0/16"},
                 "public_subnet": subnet,
@@ -518,10 +512,14 @@ def test_two_dev_endpoints_keep_exact_vpc_dependencies_and_bridge_ids(
             R.SUBNET: 12,
             R.ROUTE_TABLE: 12,
             R.ROUTE_TABLE_ASSOCIATION: 12,
-            R.SECURITY_GROUP: 2,
-            R.SECURITY_GROUP_EGRESS_RULE: 2,
+            R.SECURITY_GROUP: 4,
+            R.SECURITY_GROUP_EGRESS_RULE: 4,
             R.FUNCTION: 2,
-            R.ROLE: 2,
+            R.ROLE: 4,
             R.ROLE_POLICY_ATTACHMENT: 4,
+            R.ROLE_POLICY: 2,
+            R.INSTANCE_PROFILE: 2,
+            R.SSM_DOCUMENT: 2,
+            R.EC2_INSTANCE: 2,
         }
     )

@@ -13,14 +13,13 @@ from stelvio.command_run import CommandRun
 from tests.cli_test_helpers import FakeCommandRun
 
 
-@mark.parametrize("mode", [[], ["--network-mode", "auto"]])
-def test_dev_default_and_explicit_auto(cli, mode):
-    result = CliRunner().invoke(cli.dev, ["dev", "--yes", *mode])
+def test_dev_automatic_networking(cli):
+    result = CliRunner().invoke(cli.dev, ["dev", "--yes"])
     assert result.exit_code == 0
-    cli.run_dev.assert_called_once_with("dev", show_unchanged=False, network_mode="auto")
+    cli.run_dev.assert_called_once_with("dev", show_unchanged=False)
 
 
-@mark.parametrize("mode", ["external", "managed", "invalid"])
+@mark.parametrize("mode", ["auto", "external", "managed", "invalid"])
 def test_dev_rejects_unsupported_modes_before_setup(cli, mode):
     result = CliRunner().invoke(cli.dev, ["dev", "--network-mode", mode])
     assert result.exit_code == 2

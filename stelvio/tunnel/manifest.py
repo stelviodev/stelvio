@@ -14,7 +14,7 @@ from uuid import UUID
 
 from stelvio.tunnel.policy import BastionPolicy, domain_contains, normalize_dns_name
 
-VERSION = 1
+VERSION = 2
 OUTPUT_KEY = "_stelvio_network"
 ACCOUNT = re.compile(r"[0-9]{12}\Z")
 MAX_PORT = 65535
@@ -207,10 +207,17 @@ def _vpc(data: dict) -> VpcNetwork:
         raise ValueError("Duplicate network metadata subnets")
     if any(not any(subnet.cidr.subnet_of(cidr) for cidr in cidrs) for subnet in subnets):
         raise ValueError("Public subnet lies outside its VPC CIDRs")
+    if data["policy"] == "temporary":
+        raise ValueError(
+            "Temporary VPC access is no longer supported; set bastion=True and redeploy"
+        )
     try:
         policy = BastionPolicy(data["policy"])
     except (TypeError, ValueError) as error:
         raise ValueError("Invalid network metadata bastion policy") from error
+    access = _access(data.get("access"))
+    if policy == BastionPolicy.PERSISTENT and access is None:
+        raise ValueError("Persistent bastion metadata is missing; redeploy the app")
     return VpcNetwork(
         _text(data["identity"], "identity"),
         account,
@@ -221,7 +228,7 @@ def _vpc(data: dict) -> VpcNetwork:
         policy,
         domains,
         subnets,
-        _access(data.get("access")),
+        access,
     )
 
 
@@ -284,7 +291,7 @@ def manifest_from_records(records: list[dict]) -> NetworkManifest:
         if (
             not isinstance(data, dict)
             or type(data.get("version")) not in (int, float)
-            or data["version"] != VERSION
+            or data["version"] not in (1, VERSION)
         ):
             raise ValueError(
                 "Unsupported or missing network metadata version; "
@@ -347,7 +354,7 @@ def validate_network_ownership(manifest: NetworkManifest) -> None:
                             f"{right.identity!r} ({second}) overlap"
                         )
     claims = [(domain, vpc.identity) for vpc in enabled for domain in vpc.dns_domains]
-    used = {vpc.identity for vpc in manifest.used_vpcs}
+    used = {vpc.identity for vpc in enabled}
     claims.extend(
         (name, resource.vpc)
         for resource in manifest.resources

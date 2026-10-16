@@ -1,7 +1,7 @@
-"""Shared AWS access resources, with ownership supplied by the caller.
+"""Deployment-owned persistent AWS access resources.
 
-The component owns persistent resources; an independent access stack owns temporary
-ones. This builder never updates a VPC component or the application's checkpoint.
+The VPC component supplies resource ownership and stable names. Networking sessions
+consume its deployed descriptor and never call this builder.
 """
 
 from __future__ import annotations

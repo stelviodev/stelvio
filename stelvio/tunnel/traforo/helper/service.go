@@ -56,7 +56,27 @@ type service struct {
 	session, capability                         [16]byte
 	owned, uncertain, working, revoke, stopping bool
 	cleanupAfter, stopDeadline                  time.Time
+	cleanupBackoff                              time.Duration
 	completion                                  chan jobResult
+}
+
+func (s *service) ownerAlive() bool {
+	return darwin.Alive(s.peer) && (s.state.Parent.PID == 0 || darwin.ParentAlive(s.state.Parent))
+}
+
+// maintain runs on the serialized event loop. Host jobs retain uncertain state
+// and retry only after the bounded cleanup deadline, even after lease revocation.
+func (s *service) maintain(now time.Time) error {
+	if s.lease >= 0 && !s.ownerAlive() {
+		s.revokeLease()
+	}
+	if !s.working && !now.Before(s.cleanupAfter) && (s.revoke || s.owned && (s.lease < 0 || !s.ownerAlive())) {
+		if !s.start(protocol.Reconcile, nil, protocol.Request{}) {
+			return uncertain
+		}
+		s.revoke = false
+	}
+	return nil
 }
 
 func initDevices() [8]darwin.Device {
@@ -228,7 +248,14 @@ func (s *service) acquire(c *client, r protocol.Request) {
 			return
 		}
 	}
-	state := Snapshot{Revision: 1, Carrier: 1, Peer: c.peer, Session: r.Session}
+	parent, e := darwin.Parent(c.peer)
+	if e != nil {
+		unix.Close(pair[0])
+		replyClose(c.fd, Uncertain)
+		c.fd = -1
+		return
+	}
+	state := Snapshot{Revision: 1, Carrier: 1, Peer: c.peer, Parent: parent, Session: r.Session}
 	if _, e = rand.Read(state.Capability[:]); e != nil {
 		unix.Close(pair[0])
 		replyClose(c.fd, Uncertain)
@@ -253,6 +280,8 @@ func (s *service) acquire(c *client, r protocol.Request) {
 	s.owned = true
 	s.uncertain = false
 	s.revoke = false
+	s.cleanupBackoff = 0
+	s.cleanupAfter = time.Time{}
 	s.peer = state.Peer
 	s.session = state.Session
 	s.capability = state.Capability
@@ -287,6 +316,7 @@ func (s *service) complete(j jobResult) {
 	if disposal && j.err == nil {
 		s.owned = false
 		s.uncertain = false
+		s.cleanupBackoff = 0
 		s.peer = darwin.Peer{}
 		s.session = [16]byte{}
 		s.capability = [16]byte{}
@@ -296,7 +326,15 @@ func (s *service) complete(j jobResult) {
 		}
 	} else if disposal {
 		s.uncertain = true
-		s.cleanupAfter = time.Now().Add(time.Second)
+		if s.cleanupBackoff == 0 {
+			s.cleanupBackoff = time.Second
+		} else {
+			s.cleanupBackoff *= 2
+		}
+		if s.cleanupBackoff > 30*time.Second {
+			s.cleanupBackoff = 30 * time.Second
+		}
+		s.cleanupAfter = time.Now().Add(s.cleanupBackoff)
 	}
 	if j.client.fd >= 0 {
 		if j.kind == protocol.Acquire && j.err == nil && !s.stopping && !s.revoke {
@@ -369,7 +407,7 @@ func (s *service) handle(c *client, r protocol.Request) {
 		return
 	}
 	if r.Operation == protocol.Acquire {
-		if s.lease >= 0 || s.owned && darwin.Alive(s.peer) && (c.peer != s.peer || r.Session != s.session) {
+		if s.lease >= 0 || s.owned && s.ownerAlive() && (c.peer != s.peer || r.Session != s.session) {
 			reject(Busy)
 			return
 		}
@@ -387,7 +425,7 @@ func (s *service) handle(c *client, r protocol.Request) {
 		return
 	}
 	if r.Operation == protocol.Reconcile {
-		if s.lease >= 0 || s.owned && darwin.Alive(s.peer) {
+		if s.lease >= 0 || s.owned && s.ownerAlive() {
 			reject(Busy)
 			return
 		}
@@ -425,7 +463,7 @@ func (s *service) accept() {
 		unix.Close(fd)
 		return
 	}
-	if s.owned && (s.lease >= 0 || darwin.Alive(s.peer)) && peer != s.peer {
+	if s.owned && (s.lease >= 0 || s.ownerAlive()) && peer != s.peer {
 		replyClose(fd, Busy)
 		return
 	}
@@ -588,14 +626,8 @@ func serve() error {
 			} // Kernel closes FDs; preserve durable recovery evidence.
 			return uncertain
 		}
-		if s.lease >= 0 && !darwin.Alive(s.peer) {
-			s.revokeLease()
-		}
-		if !s.working && (s.revoke || s.owned && !darwin.Alive(s.peer) && !time.Now().Before(s.cleanupAfter)) {
-			if !s.start(protocol.Reconcile, nil, protocol.Request{}) {
-				return uncertain
-			}
-			s.revoke = false
+		if e := s.maintain(time.Now()); e != nil {
+			return e
 		}
 		if s.stopping && !s.working && !s.owned && !s.uncertain {
 			return nil

@@ -57,7 +57,6 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
     events = []
     published = []
     configurations = []
-    finished = Event()
     network = SimpleNamespace(
         identity="network-a",
         cidrs=(IPv4Network("10.254.0.0/16"),),
@@ -144,7 +143,6 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
         lease,
         forwarding,
         discovery,
-        cleanup=lambda: (events.append(("aws-cleanup",)), finished.set()),
     )
 
     fault_injected = Event()
@@ -195,7 +193,8 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
     monkeypatch.setattr(worker, "_publish", observe)
     worker.start()
     try:
-        assert finished.wait(5), "Worker did not finish its bounded fixture"
+        worker._thread.join(5)
+        assert not worker._thread.is_alive(), "Worker did not finish its bounded fixture"
     finally:
         if terminal in ("configure-unfenced", "foreign-generation"):
             with raises(RuntimeError, match="cleanup incomplete"):
@@ -223,7 +222,7 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
             events.index(("remove", 1)) < events.index(("close", 1)) < events.index(("start", 2))
         )
         assert ("remove", 2) in events
-    assert events.count(("aws-cleanup",)) == 1
+    assert not any(event[0] == "aws-cleanup" for event in events)
     query = dns.message.make_query("private.example.com", "A")
     assert dns.message.from_wire(worker.relay.answer(query.to_wire(), udp=False)).rcode() == 2
     if terminal in ("configure-unfenced", "foreign-generation"):

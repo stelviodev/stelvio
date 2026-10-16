@@ -5,6 +5,8 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/stelviodev/traforo/protocol"
+	"reflect"
 	"testing"
 )
 
@@ -111,4 +113,34 @@ func FuzzSnapshot(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestSnapshotParentFence(t *testing.T) {
+	s, e := DecodeSnapshot(snapshotFixture())
+	if e != nil {
+		t.Fatal(e)
+	}
+	s.Parent = protocol.DarwinParent{UID: s.Peer.UID, PID: 456, Seconds: 123, Micros: 789}
+	encoded, e := EncodeSnapshot(s)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if string(encoded[:8]) != "STLVSNP4" {
+		t.Fatal("missing parent schema version")
+	}
+	decoded, e := DecodeSnapshot(encoded)
+	if e != nil || !reflect.DeepEqual(decoded, s) {
+		t.Fatal(e)
+	}
+	for n := 8; n < len(encoded); n++ {
+		if _, e := DecodeSnapshot(encoded[:n]); e == nil {
+			t.Fatal("accepted truncated parent snapshot", n)
+		}
+	}
+	changed := s.Clone()
+	changed.Revision++
+	changed.Parent.Micros++
+	if Successor(s, changed) {
+		t.Fatal("parent identity changed within a lease")
+	}
 }
