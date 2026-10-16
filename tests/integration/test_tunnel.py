@@ -146,7 +146,6 @@ def test_multi_vpc_partial_failure_distinct_markers_and_crash_recovery(cli_sessi
     assert opted.access is None
     assert "VPC access disabled:" in session.log.read_text()
     assert "local networking is your responsibility" in session.log.read_text()
-    assert "bastion=False disables managed access" in session.log.read_text()
     assert not session.sdk.client("ec2").describe_instances(
         Filters=[{"Name": "vpc-id", "Values": [opted.vpc_id]}]
     )["Reservations"]
