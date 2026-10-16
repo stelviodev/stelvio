@@ -13,7 +13,7 @@ from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, Resol
 def test_python_encoder_matches_independent_wire_fixture(operation):
     path = (
         Path(__file__).parents[2]
-        / "stelvio/tunnel/traforo/helper/testdata/independent_vectors.json"
+        / "pkg/traforo-client-go/helper/testdata/independent_vectors.json"
     )
     vectors = json.loads(path.read_text())
     expected = next(

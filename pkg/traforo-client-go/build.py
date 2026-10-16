@@ -1,3 +1,4 @@
+# ruff: noqa: INP001 - this is a Go module helper, not a Python package.
 """Manual release builder; Python wheel installation never invokes a compiler."""
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ import platform
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -57,7 +59,7 @@ def build() -> None:  # noqa: C901, PLR0915 - bounded two-architecture release t
     if compiler is None:
         raise RuntimeError("The Go release compiler is unavailable")
     source = Path(__file__).resolve().parent
-    assets = source.parent / "_assets"
+    assets = source.parents[1] / "stelvio" / "tunnel" / "_assets"
     sdk = subprocess.check_output(["/usr/bin/xcrun", "--show-sdk-path"], text=True).strip()
     clang = subprocess.check_output(["/usr/bin/xcrun", "--find", "clang"], text=True).strip()
     toolchain = subprocess.check_output(  # noqa: S603 - nonroot build tool
@@ -171,7 +173,41 @@ def build() -> None:  # noqa: C901, PLR0915 - bounded two-architecture release t
         for entry in entries.values():
             (stage / entry["asset"]).replace(assets / entry["asset"])
         metadata.replace(assets / "traforo.json")
+    check()
+
+
+def check() -> None:
+    """Check the committed release assets against this module's source tree."""
+    source = Path(__file__).resolve().parent
+    assets = source.parents[1] / "stelvio" / "tunnel" / "_assets"
+    manifest = json.loads((assets / "traforo.json").read_text())
+    inventory = source_inventory(source)
+    source_hash = source_digest(source)
+    if (
+        manifest.get("source_inventory") != list(inventory)
+        or manifest.get("source_sha256") != source_hash
+    ):
+        raise RuntimeError("Traforo source changed; rebuild both release assets")
+    for architecture, cpu in (("arm64", 0x0100000C), ("x86_64", 0x01000007)):
+        entry = manifest["targets"][architecture]
+        data = (assets / entry["asset"]).read_bytes()
+        if len(data) < struct.calcsize("<4I"):
+            raise RuntimeError(f"Traforo {architecture} asset is truncated")
+        magic, actual_cpu, _, kind = struct.unpack_from("<4I", data)
+        if (
+            len(data) != entry["bytes"]
+            or hashlib.sha256(data).hexdigest() != entry["sha256"]
+            or magic != MACHO_MAGIC
+            or actual_cpu != cpu
+            or kind != MACHO_EXECUTABLE
+        ):
+            raise RuntimeError(f"Traforo {architecture} asset does not match its manifest")
 
 
 if __name__ == "__main__":
-    build()
+    if sys.argv[1:] == ["--check"]:
+        check()
+    elif not sys.argv[1:]:
+        build()
+    else:
+        raise SystemExit("usage: python build.py [--check]")

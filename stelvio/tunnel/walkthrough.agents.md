@@ -49,10 +49,11 @@ readable; ownership is never inferred solely from a PID or saved kernel index.
 Start with CLI in stelvio/cli/tunnel.py and cli/commands.py, capture in command_run.py,
 policy/metadata in aws/vpc/vpc.py and tunnel/manifest.py, shared session in
 `tunnel/session.py`, isolated runtime in runtime.py/runtime_child.py, transport in
-transport.py/ssm_proxy.py, host administration in installation.py and
-traforo/helper/admin.go, kernel identity in traforo/darwin/bindings_darwin.*, and
-cleanup loop in traforo/helper/service.go. Packet and DNS boundaries are in
-traforo/forwarder, helper/unit.go, helper/resolver.go, and tunnel/dns.py.
+transport.py/ssm_proxy.py, and host administration in installation.py. The complete
+Go module, tests, Darwin C bindings, protocol fixtures and pinned release builder live
+in `pkg/traforo-client-go`: inspect helper/admin.go, darwin/bindings_darwin.*,
+helper/service.go, forwarder/forwarder.go, helper/unit.go and helper/resolver.go.
+The builder publishes binary assets and the manifest to `stelvio/tunnel/_assets`.
 
 ## Answering a reviewer
 
@@ -96,9 +97,14 @@ changes using the pinned manual builder; stale-source checks must not be bypasse
 No automated build pipeline changes are part of v2.
 
 Go unit/race/fuzz and Darwin syscall fixtures run under go test, not pytest.
-Independent frozen vectors are in traforo/helper/testdata/independent_vectors.json;
-never regenerate expected snapshots using the implementation being tested. Python
-tests cover installation, CLI, metadata, SDK isolation and real process interop.
+Independent frozen vectors are in
+`pkg/traforo-client-go/helper/testdata/independent_vectors.json`; never regenerate
+expected snapshots using the implementation being tested. Run `go test -race ./...`
+from `pkg/traforo-client-go`. `python pkg/traforo-client-go/build.py --check` verifies
+the repository source fingerprint and both release assets without compiling Go.
+Installed wheels contain the verified binary assets and manifest, not Go source, so
+their checks validate the manifest and binary digests. Python tests cover installation,
+CLI, metadata, SDK isolation and real process interop.
 AWS lane must prove actual example TLS/member discovery/read-write, standalone
 access, transport recovery and persistent bastion retention; destroy fixture
 application resources and independently audit AWS absence and exact host baseline.
