@@ -6,7 +6,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/stelviodev/traforo/protocol"
+	"github.com/stelviodev/traforo/internal/protocol"
 )
 
 const (

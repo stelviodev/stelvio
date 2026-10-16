@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/stelviodev/traforo/protocol"
+	"github.com/stelviodev/traforo/internal/protocol"
 )
 
 func snapshotFixture(t testing.TB) []byte {

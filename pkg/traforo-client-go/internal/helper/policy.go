@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"math"
 
-	"github.com/stelviodev/traforo/protocol"
+	"github.com/stelviodev/traforo/internal/protocol"
 )
 
 // Authorized compares immutable actor receipts. The native backend must obtain

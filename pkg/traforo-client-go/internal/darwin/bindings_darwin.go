@@ -20,7 +20,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/stelviodev/traforo/protocol"
+	"github.com/stelviodev/traforo/internal/protocol"
 	"golang.org/x/sys/unix"
 )
 

@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stelviodev/traforo/protocol"
+	"github.com/stelviodev/traforo/internal/protocol"
 
 	"github.com/xjasonlyu/tun2socks/v2/core"
 	"github.com/xjasonlyu/tun2socks/v2/core/adapter"

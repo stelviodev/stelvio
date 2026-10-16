@@ -11,8 +11,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/stelviodev/traforo/darwin"
-	"github.com/stelviodev/traforo/protocol"
+	"github.com/stelviodev/traforo/internal/darwin"
+	"github.com/stelviodev/traforo/internal/protocol"
 )
 
 func network(p netip.Prefix) (uint32, uint32) {

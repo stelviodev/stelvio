@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/internal/darwin"
 	"golang.org/x/sys/unix"
 )
 

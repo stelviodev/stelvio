@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/stelviodev/traforo/forwarder"
-	"github.com/stelviodev/traforo/helper"
+	"github.com/stelviodev/traforo/internal/forwarder"
+	"github.com/stelviodev/traforo/internal/helper"
 )
 
 func main() {

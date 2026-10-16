@@ -115,7 +115,7 @@ def test_interrupted_or_stale_bundle_is_rejected(bundle, change):
 
 def test_repository_release_assets_match_current_go_source():
     repository = Path(__file__).parents[2]
-    builder_path = repository / "pkg/traforo-client-go/build.py"
+    builder_path = repository / "pkg/traforo-client-go/scripts/build.py"
     spec = importlib.util.spec_from_file_location("traforo_release_builder", builder_path)
     assert spec is not None
     assert spec.loader is not None

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stelviodev/traforo/darwin"
+	"github.com/stelviodev/traforo/internal/darwin"
 	"golang.org/x/sys/unix"
 )
 

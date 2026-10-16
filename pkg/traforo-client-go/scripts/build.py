@@ -58,7 +58,7 @@ def build() -> None:  # noqa: C901, PLR0915 - bounded two-architecture release t
     compiler = shutil.which("go")
     if compiler is None:
         raise RuntimeError("The Go release compiler is unavailable")
-    source = Path(__file__).resolve().parent
+    source = Path(__file__).resolve().parents[1]
     assets = source.parents[1] / "stelvio" / "tunnel" / "_assets"
     sdk = subprocess.check_output(["/usr/bin/xcrun", "--show-sdk-path"], text=True).strip()
     clang = subprocess.check_output(["/usr/bin/xcrun", "--find", "clang"], text=True).strip()
@@ -114,7 +114,7 @@ def build() -> None:  # noqa: C901, PLR0915 - bounded two-architecture release t
                     "-ldflags=-s -w",
                     "-o",
                     str(binary),
-                    ".",
+                    "./cmd/stelvio-traforo",
                 ],
                 cwd=captured,
                 env=environment,
@@ -178,7 +178,7 @@ def build() -> None:  # noqa: C901, PLR0915 - bounded two-architecture release t
 
 def check() -> None:
     """Check the committed release assets against this module's source tree."""
-    source = Path(__file__).resolve().parent
+    source = Path(__file__).resolve().parents[1]
     assets = source.parents[1] / "stelvio" / "tunnel" / "_assets"
     manifest = json.loads((assets / "traforo.json").read_text())
     inventory = source_inventory(source)

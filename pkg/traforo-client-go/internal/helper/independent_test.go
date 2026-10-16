@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/stelviodev/traforo/protocol"
+	"github.com/stelviodev/traforo/internal/protocol"
 )
 
 // These frozen vectors were independently encoded by the former Python harness.

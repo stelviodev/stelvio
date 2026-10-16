@@ -49,11 +49,14 @@ readable; ownership is never inferred solely from a PID or saved kernel index.
 Start with CLI in stelvio/cli/tunnel.py and cli/commands.py, capture in command_run.py,
 policy/metadata in aws/vpc/vpc.py and tunnel/manifest.py, shared session in
 `tunnel/session.py`, isolated runtime in runtime.py/runtime_child.py, transport in
-transport.py/ssm_proxy.py, and host administration in installation.py. The complete
-Go module, tests, Darwin C bindings, protocol fixtures and pinned release builder live
-in `pkg/traforo-client-go`: inspect helper/admin.go, darwin/bindings_darwin.*,
-helper/service.go, forwarder/forwarder.go, helper/unit.go and helper/resolver.go.
-The builder publishes binary assets and the manifest to `stelvio/tunnel/_assets`.
+transport.py/ssm_proxy.py, and host administration in installation.py. The self-contained
+Go module lives in `pkg/traforo-client-go`: the executable entrypoint is
+`cmd/stelvio-traforo`, private implementation and tests are under `internal/`, and the
+pinned release builder is `scripts/build.py`. Inspect `internal/helper/admin.go`,
+`internal/darwin/bindings_darwin.*`, `internal/helper/service.go`,
+`internal/forwarder/forwarder.go`, `internal/helper/unit.go` and
+`internal/helper/resolver.go`. The builder publishes binary assets and the manifest to
+`stelvio/tunnel/_assets`.
 
 ## Answering a reviewer
 
@@ -98,9 +101,9 @@ No automated build pipeline changes are part of v2.
 
 Go unit/race/fuzz and Darwin syscall fixtures run under go test, not pytest.
 Independent frozen vectors are in
-`pkg/traforo-client-go/helper/testdata/independent_vectors.json`; never regenerate
+`pkg/traforo-client-go/internal/helper/testdata/independent_vectors.json`; never regenerate
 expected snapshots using the implementation being tested. Run `go test -race ./...`
-from `pkg/traforo-client-go`. `python pkg/traforo-client-go/build.py --check` verifies
+from `pkg/traforo-client-go`. `python pkg/traforo-client-go/scripts/build.py --check` verifies
 the repository source fingerprint and both release assets without compiling Go.
 Installed wheels contain the verified binary assets and manifest, not Go source, so
 their checks validate the manifest and binary digests. Python tests cover installation,

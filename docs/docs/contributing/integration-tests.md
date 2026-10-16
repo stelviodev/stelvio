@@ -195,18 +195,19 @@ after the helper state is empty and certain.
 
 Go parser, journal, packet, identity, and native syscall tests run with
 `go test -race ./...` from `pkg/traforo-client-go`. Frozen independent vectors
-live in Go testdata. Pytest covers Python behavior, packaged assets, and genuine
-process interoperability, and must not compile Go or run native algorithm harnesses.
+live in `pkg/traforo-client-go/internal/helper/testdata`. Pytest covers Python
+behavior, packaged assets, and genuine process interoperability, and must not
+compile Go or run native algorithm harnesses.
 
 ### Native asset preparation
 
 End users install precompiled Traforo from the wheel. Contributor release
-preparation uses the manual `pkg/traforo-client-go/build.py` builder with its
-pinned Go and macOS SDK inputs; Python builds and installation never compile Go.
+preparation uses the manual `pkg/traforo-client-go/scripts/build.py` builder with
+its pinned Go and macOS SDK inputs; Python builds and installation never compile Go.
 The builder produces both Mach-O architectures under `stelvio/tunnel/_assets` and
 updates the source fingerprint, digests, library inventory, and sizes in the
-manifest. Run `python pkg/traforo-client-go/build.py --check` to verify the checked-in
-source and release assets without compiling Go. Run Go race tests from
+manifest. Run `python pkg/traforo-client-go/scripts/build.py --check` to verify the
+checked-in source and release assets without compiling Go. Run Go race tests from
 `pkg/traforo-client-go` and the Python native asset/installation tests before wheel
 validation. The wheel contains the binaries and manifest, not Go source; installed
 asset checks verify manifest and binary integrity. Preserve the 16 MiB per-asset
