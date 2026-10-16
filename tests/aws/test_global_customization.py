@@ -33,7 +33,6 @@ from stelvio.aws.vpc import Vpc
 from stelvio.component import Component
 from stelvio.config import AwsConfig, StelvioAppConfig
 
-from ..conftest import TP
 from .conftest import create_app_context_with_global_customize
 from .pulumi_mocks import R
 
@@ -42,7 +41,6 @@ from .pulumi_mocks import R
 # =============================================================================
 
 
-@pulumi.runtime.test
 def test_global_customize_applies_to_bucket(pulumi_mocks, project_cwd, clean_registries):
     """Test that global customization applies to Bucket instances."""
     # Arrange - set global customize for Bucket
@@ -54,28 +52,22 @@ def test_global_customize_applies_to_bucket(pulumi_mocks, project_cwd, clean_reg
     bucket2 = Bucket("bucket-two")
 
     # Act
-    _ = bucket1.resources
-    _ = bucket2.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket1.resources, bucket2.resources]
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "bucket-one")
-        assert len(buckets) == 1
-        assert buckets[0].inputs.get("forceDestroy") is True
-        assert buckets[0].inputs.get("tags") == {"Global": "true"}
+    pulumi_mocks.assert_res(
+        "bucket-one", R.BUCKET, {"forceDestroy": True, "tags": {"Global": "true"}}, partial=True
+    )
 
-        buckets2 = pulumi_mocks.created_s3_buckets(TP + "bucket-two")
-        assert len(buckets2) == 1
-        assert buckets2[0].inputs.get("forceDestroy") is True
-        assert buckets2[0].inputs.get("tags") == {"Global": "true"}
-
-    pulumi.Output.all(
-        bucket1.resources.bucket.id,
-        bucket2.resources.bucket.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res(
+        "bucket-two", R.BUCKET, {"forceDestroy": True, "tags": {"Global": "true"}}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_global_customize_applies_to_function(pulumi_mocks, project_cwd, clean_registries):
     """Test that global customization applies to Function instances."""
     # Arrange - set global customize for Function
@@ -87,26 +79,22 @@ def test_global_customize_applies_to_function(pulumi_mocks, project_cwd, clean_r
     fn2 = Function("fn-two", handler="functions/simple.handler")
 
     # Act
-    _ = fn1.resources
-    _ = fn2.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [fn1.resources, fn2.resources]
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        functions1 = pulumi_mocks.created_functions(TP + "fn-one")
-        assert len(functions1) == 1
-        assert functions1[0].inputs.get("reservedConcurrentExecutions") == 100
+    pulumi_mocks.assert_res(
+        "fn-one", R.FUNCTION, {"reservedConcurrentExecutions": 100}, partial=True
+    )
 
-        functions2 = pulumi_mocks.created_functions(TP + "fn-two")
-        assert len(functions2) == 1
-        assert functions2[0].inputs.get("reservedConcurrentExecutions") == 100
-
-    pulumi.Output.all(
-        fn1.resources.function.id,
-        fn2.resources.function.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res(
+        "fn-two", R.FUNCTION, {"reservedConcurrentExecutions": 100}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_global_customize_multiple_component_types(pulumi_mocks, project_cwd, clean_registries):
     """Test that global customization works for multiple component types."""
     # Arrange - set global customize for multiple types
@@ -123,32 +111,17 @@ def test_global_customize_multiple_component_types(pulumi_mocks, project_cwd, cl
     topic = Topic("my-topic")
 
     # Act
-    _ = bucket.resources
-    _ = queue.resources
-    _ = topic.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, queue.resources, topic.resources]
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Check bucket
-        buckets = pulumi_mocks.created_s3_buckets(TP + "my-bucket")
-        assert len(buckets) == 1
-        assert buckets[0].inputs.get("forceDestroy") is True
-
-        # Check queue
-        queues = pulumi_mocks.created_queues(TP + "my-queue")
-        assert len(queues) == 1
-        assert queues[0].inputs.get("tags") == {"GlobalQueue": "yes"}
-
-        # Check topic
-        topics = [t for t in pulumi_mocks.created_topics() if "my-topic" in t.name]
-        assert len(topics) == 1
-        assert topics[0].inputs.get("tags") == {"GlobalTopic": "yes"}
-
-    pulumi.Output.all(
-        bucket.resources.bucket.id,
-        queue.resources.queue.id,
-        topic.resources.topic.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res("my-bucket", R.BUCKET, {"forceDestroy": True}, partial=True)
+    pulumi_mocks.assert_res("my-queue", R.QUEUE, {"tags": {"GlobalQueue": "yes"}}, partial=True)
+    assert len(pulumi_mocks.created(R.TOPIC)) == 1
+    pulumi_mocks.assert_res("my-topic", R.TOPIC, {"tags": {"GlobalTopic": "yes"}}, partial=True)
 
 
 # =============================================================================
@@ -156,7 +129,6 @@ def test_global_customize_multiple_component_types(pulumi_mocks, project_cwd, cl
 # =============================================================================
 
 
-@pulumi.runtime.test
 def test_per_instance_overrides_global_bucket(pulumi_mocks, project_cwd, clean_registries):
     """Test that per-instance customization overrides global for Bucket."""
     # Arrange - set global customize, then override per-instance
@@ -174,30 +146,27 @@ def test_per_instance_overrides_global_bucket(pulumi_mocks, project_cwd, clean_r
     )
 
     # Act
-    _ = bucket1.resources
-    _ = bucket2.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket1.resources, bucket2.resources]
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # bucket1 should have global settings
-        buckets1 = pulumi_mocks.created_s3_buckets(TP + "bucket-global")
-        assert len(buckets1) == 1
-        assert buckets1[0].inputs.get("forceDestroy") is True
-        assert buckets1[0].inputs.get("tags") == {"Source": "global"}
-
-        # bucket2 should have per-instance overrides
-        buckets2 = pulumi_mocks.created_s3_buckets(TP + "bucket-override")
-        assert len(buckets2) == 1
-        assert buckets2[0].inputs.get("forceDestroy") is False
-        assert buckets2[0].inputs.get("tags") == {"Source": "instance"}
-
-    pulumi.Output.all(
-        bucket1.resources.bucket.id,
-        bucket2.resources.bucket.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res(
+        "bucket-global",
+        R.BUCKET,
+        {"forceDestroy": True, "tags": {"Source": "global"}},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "bucket-override",
+        R.BUCKET,
+        {"forceDestroy": False, "tags": {"Source": "instance"}},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_per_instance_overrides_global_function(pulumi_mocks, project_cwd, clean_registries):
     """Test that per-instance customization overrides global for Function."""
     # Arrange
@@ -216,30 +185,21 @@ def test_per_instance_overrides_global_function(pulumi_mocks, project_cwd, clean
     )
 
     # Act
-    _ = fn1.resources
-    _ = fn2.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [fn1.resources, fn2.resources]
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # fn1 should have global settings
-        functions1 = pulumi_mocks.created_functions(TP + "fn-global")
-        assert len(functions1) == 1
-        assert functions1[0].inputs.get("reservedConcurrentExecutions") == 100
-        assert functions1[0].inputs.get("timeout") == 30
-
-        # fn2 should have per-instance override (only reservedConcurrentExecutions)
-        functions2 = pulumi_mocks.created_functions(TP + "fn-override")
-        assert len(functions2) == 1
-        # Per-instance override
-        assert functions2[0].inputs.get("reservedConcurrentExecutions") == 5
-
-    pulumi.Output.all(
-        fn1.resources.function.id,
-        fn2.resources.function.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res(
+        "fn-global", R.FUNCTION, {"reservedConcurrentExecutions": 100, "timeout": 30}, partial=True
+    )
+    pulumi_mocks.assert_res(
+        "fn-override", R.FUNCTION, {"reservedConcurrentExecutions": 5}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_per_instance_partial_override(pulumi_mocks, project_cwd, clean_registries):
     """Test that per-instance can override specific resource while inheriting global."""
     # Arrange - global sets bucket AND public_access_block
@@ -255,22 +215,24 @@ def test_per_instance_partial_override(pulumi_mocks, project_cwd, clean_registri
     bucket = Bucket("partial-override", customize={"bucket": {"force_destroy": False}})
 
     # Act
-    _ = bucket.resources
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "partial-override")
-        assert len(buckets) == 1
-        # Per-instance override should take precedence for force_destroy
-        assert buckets[0].inputs.get("forceDestroy") is False
-        # Global tags are preserved since per-instance customize didn't specify tags.
-        # Shallow merge only replaces keys that are explicitly set in per-instance.
-        assert buckets[0].inputs.get("tags") == {"GlobalTag": "yes"}
+    # Per-instance override should take precedence for force_destroy
+    # Global tags are preserved since per-instance customize didn't specify tags.
+    # Shallow merge only replaces keys that are explicitly set in per-instance.
+    pulumi_mocks.assert_res(
+        "partial-override",
+        R.BUCKET,
+        {"forceDestroy": False, "tags": {"GlobalTag": "yes"}},
+        partial=True,
+    )
 
-    bucket.resources.bucket.id.apply(check_resources)
 
-
-@pulumi.runtime.test
 def test_per_instance_tags_completely_replace_global_tags(
     pulumi_mocks, project_cwd, clean_registries
 ):
@@ -298,24 +260,16 @@ def test_per_instance_tags_completely_replace_global_tags(
     )
 
     # Act
-    _ = bucket.resources
+    @pulumi.runtime.test
+    def deploy():
+        return bucket.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        buckets = pulumi_mocks.created_s3_buckets(TP + "tags-replace-test")
-        assert len(buckets) == 1
-        tags = buckets[0].inputs.get("tags", {})
-
-        # Shallow merge: per-instance tags COMPLETELY replace global tags
-        # Only "Env" should exist - "Team", "Cost", "ManagedBy" are gone!
-        assert tags == {"Env": "dev"}
-
-        # Explicitly verify global tags are NOT present
-        assert "Team" not in tags
-        assert "Cost" not in tags
-        assert "ManagedBy" not in tags
-
-    bucket.resources.bucket.id.apply(check_resources)
+    # Shallow merge: per-instance tags COMPLETELY replace global tags
+    # Only "Env" should exist - "Team", "Cost", "ManagedBy" are gone!
+    pulumi_mocks.assert_res("tags-replace-test", R.BUCKET, {"tags": {"Env": "dev"}}, partial=True)
 
 
 # =============================================================================
@@ -407,7 +361,6 @@ def test_env_config_unknown_returns_safe_defaults():
     assert Function not in config.customize
 
 
-@pulumi.runtime.test
 def test_env_based_customize_applied_to_components(pulumi_mocks, project_cwd, clean_registries):
     """Test that environment-specific customization is applied to components."""
     # Arrange - simulate dev environment
@@ -418,28 +371,17 @@ def test_env_based_customize_applied_to_components(pulumi_mocks, project_cwd, cl
     fn = Function("dev-fn", handler="functions/simple.handler")
 
     # Act
-    _ = bucket.resources
-    _ = fn.resources
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, fn.resources]
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        # Check bucket has dev settings
-        buckets = pulumi_mocks.created_s3_buckets(TP + "dev-bucket")
-        assert len(buckets) == 1
-        assert buckets[0].inputs.get("forceDestroy") is True
-
-        # Check function has dev settings
-        functions = pulumi_mocks.created_functions(TP + "dev-fn")
-        assert len(functions) == 1
-        assert functions[0].inputs.get("memorySize") == 256
-
-    pulumi.Output.all(
-        bucket.resources.bucket.id,
-        fn.resources.function.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res("dev-bucket", R.BUCKET, {"forceDestroy": True}, partial=True)
+    pulumi_mocks.assert_res("dev-fn", R.FUNCTION, {"memorySize": 256}, partial=True)
 
 
-@pulumi.runtime.test
 def test_env_based_prod_customize_applied(pulumi_mocks, project_cwd, clean_registries):
     """Test that prod environment customization is applied correctly."""
     # Arrange - simulate prod environment
@@ -449,16 +391,19 @@ def test_env_based_prod_customize_applied(pulumi_mocks, project_cwd, clean_regis
     fn = Function("prod-fn", handler="functions/simple.handler")
 
     # Act
-    _ = fn.resources
+    @pulumi.runtime.test
+    def deploy():
+        return fn.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        functions = pulumi_mocks.created_functions(TP + "prod-fn")
-        assert len(functions) == 1
-        assert functions[0].inputs.get("memorySize") == 1024
-        assert functions[0].inputs.get("reservedConcurrentExecutions") == 100
-
-    fn.resources.function.id.apply(check_resources)
+    pulumi_mocks.assert_res(
+        "prod-fn",
+        R.FUNCTION,
+        {"memorySize": 1024, "reservedConcurrentExecutions": 100},
+        partial=True,
+    )
 
 
 # =============================================================================
@@ -466,7 +411,6 @@ def test_env_based_prod_customize_applied(pulumi_mocks, project_cwd, clean_regis
 # =============================================================================
 
 
-@pulumi.runtime.test
 def test_function_role_customization(pulumi_mocks, project_cwd, clean_registries):
     """Test that role customization is applied to Lambda IAM role."""
     # Arrange
@@ -483,19 +427,19 @@ def test_function_role_customization(pulumi_mocks, project_cwd, clean_registries
     )
 
     # Act
-    _ = fn.resources
+    @pulumi.runtime.test
+    def deploy():
+        return fn.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        roles = pulumi_mocks.created_roles()
-        matching_roles = [r for r in roles if "fn-with-role-custom" in r.name]
-        assert len(matching_roles) == 1
-        assert matching_roles[0].inputs.get("tags") == {"RoleTag": "custom"}
-
-    fn.resources.role.id.apply(check_resources)
+    assert len(pulumi_mocks.created(R.ROLE)) == 1
+    pulumi_mocks.assert_res(
+        "fn-with-role-custom-r", R.ROLE, {"tags": {"RoleTag": "custom"}}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_global_function_role_customization(pulumi_mocks, project_cwd, clean_registries):
     """Test that global role customization applies to all functions."""
     # Arrange
@@ -510,16 +454,17 @@ def test_global_function_role_customization(pulumi_mocks, project_cwd, clean_reg
     fn = Function("fn-global-role", handler="functions/simple.handler")
 
     # Act
-    _ = fn.resources
+    @pulumi.runtime.test
+    def deploy():
+        return fn.resources
+
+    deploy()
 
     # Assert
-    def check_resources(_):
-        roles = pulumi_mocks.created_roles()
-        matching_roles = [r for r in roles if "fn-global-role" in r.name]
-        assert len(matching_roles) == 1
-        assert matching_roles[0].inputs.get("tags") == {"GlobalRoleTag": "yes"}
-
-    fn.resources.role.id.apply(check_resources)
+    assert len(pulumi_mocks.created(R.ROLE)) == 1
+    pulumi_mocks.assert_res(
+        "fn-global-role-r", R.ROLE, {"tags": {"GlobalRoleTag": "yes"}}, partial=True
+    )
 
 
 # =============================================================================
