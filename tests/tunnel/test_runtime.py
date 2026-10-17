@@ -22,7 +22,7 @@ from stelvio.tunnel.runtime import NetworkRuntime
 
 pytestmark = mark.skipif(
     not os.environ.get("STLV_TEST_TRAFORO_IMAGE"),
-    reason="Opt-in real Python/Traforo interoperability; pre-download the pinned release",
+    reason="Opt-in real Python/Traforo interoperability; pre-download a release or build locally",
 )
 
 WORKER = r"""
@@ -86,12 +86,15 @@ class Worker:
         if sys.argv[3]=="failure": raise RuntimeError("fixture cleanup incomplete")
 from contextlib import contextmanager
 from pathlib import Path
-from stelvio.tunnel.assets import _ready, _architecture
+from stelvio.tunnel.assets import _ready, _architecture, select_traforo, DEVELOPMENT_BINARY_ENV
 # Explicit opt-in image: hermetic HOME must not cause downloads from a runtime test.
 @contextmanager
 def interop_image():
     image=Path(os.environ["STLV_TEST_TRAFORO_IMAGE"])
-    assert _ready(image, _architecture())
+    if os.environ.get(DEVELOPMENT_BINARY_ENV):
+        assert select_traforo().local_path == image
+    else:
+        assert _ready(image, _architecture())
     yield image
 child.packaged_forwarder=interop_image
 child.NativeHelper=Helper

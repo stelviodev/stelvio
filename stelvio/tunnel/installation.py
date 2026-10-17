@@ -10,8 +10,12 @@ import stat
 import subprocess
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from stelvio.tunnel.assets import downloaded_helper, expected_digest
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+from stelvio.tunnel.assets import TraforoSelection, downloaded_helper, select_traforo
 from stelvio.tunnel.helper_client import HelperBusyError, HelperError, NativeHelper
 from stelvio.tunnel.plugin import ensure_plugin
 
@@ -182,18 +186,19 @@ case "$acl" in *+*) exit 1;; esac
         )
 
 
-def install_helper() -> None:
+def install_helper(*, environment: Mapping[str, str] | None = None) -> TraforoSelection:
     """Install once; a compatible healthy installation needs no elevation."""
     _supported()
+    selection = select_traforo(environment)
     ensure_plugin()
-    digest = expected_digest()
+    digest = selection.digest
     installed = _installed_digest()
     if installed == digest and INSTALLED_HELPER.lstat().st_nlink == 1:
         try:
             inspection = NativeHelper().inspect()
         except HelperBusyError:
             # Exact pin plus an authenticated root BUSY reply certifies compatibility.
-            return
+            return selection
         except (OSError, HelperError):
             pass
         else:
@@ -201,10 +206,14 @@ def install_helper() -> None:
                 raise HelperError(
                     "The helper has unfinished host cleanup; run stlv tunnel cleanup"
                 )
-            return
-    with downloaded_helper() as asset:
-        _authorize(_bootstrap(asset, digest))
+            return selection
+    if selection.local_path is not None:
+        _authorize(_bootstrap(selection.local_path, digest))
+    else:
+        with downloaded_helper() as asset:
+            _authorize(_bootstrap(asset, digest))
     _wait_ready()
+    return selection
 
 
 def _wait_ready() -> None:

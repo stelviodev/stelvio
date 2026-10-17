@@ -10,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 from contextlib import contextmanager
+from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,8 +21,9 @@ import requests
 from stelvio.pulumi import get_bin_path
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
+DEVELOPMENT_BINARY_ENV = "STLV_TRAFORO_DEV_BINARY"
 TRAFORO_VERSION = "0.0.4"
 EXPECTED_VERSION = "stelvio-traforo/1 helper=1 carrier=1\n"
 EXECUTABLE_MODE = 0o755
@@ -64,12 +66,17 @@ def traforo_path() -> Path:
     return get_bin_path() / f"stelvio-traforo-{TRAFORO_VERSION}-{architecture}"
 
 
-def _binary(data: bytes, architecture: str) -> None:
+def validate_macho(data: bytes, architecture: str) -> None:
+    """Validate structure independently of release or developer image identity."""
     if not MACHO_HEADER.size <= len(data) <= MAX_BINARY_BYTES:
         raise NativeAssetError("Traforo executable exceeds its size bounds")
     magic, cpu, _, kind, *_ = MACHO_HEADER.unpack_from(data)
     if (magic, cpu, kind) != (0xFEEDFACF, MACHO_CPUS[architecture], 2):
         raise NativeAssetError("Traforo is not a matching Mach-O executable")
+
+
+def _binary(data: bytes, architecture: str) -> None:
+    validate_macho(data, architecture)
     if hashlib.sha256(data).hexdigest() != TARGETS[architecture]["sha256"]:
         raise NativeAssetError("Traforo executable digest does not match its release pin")
 
@@ -88,15 +95,93 @@ def _ready(path: Path, architecture: str) -> bool:
         raise NativeAssetError("Cached Traforo has unsafe ownership or permissions")
     with path.open("rb") as stream:
         _binary(stream.read(MAX_BINARY_BYTES + 1), architecture)
+    validate_protocol(path)
+    return True
+
+
+def validate_protocol(path: Path) -> None:
+    """Run the ordinary-user version command after validating image bytes."""
     try:
-        result = subprocess.run(  # noqa: S603 - digest-verified private executable
+        result = subprocess.run(  # noqa: S603 - validated ordinary-user executable
             [str(path), "version"], capture_output=True, timeout=10, check=False
         )
     except (OSError, subprocess.TimeoutExpired):
-        raise NativeAssetError("Cached Traforo version check failed") from None
+        raise NativeAssetError("Traforo version check failed") from None
     if result.returncode or result.stdout != EXPECTED_VERSION.encode() or result.stderr:
-        raise NativeAssetError("Cached Traforo reported an incompatible protocol version")
-    return True
+        raise NativeAssetError("Traforo reported an incompatible protocol version")
+
+
+@dataclass(frozen=True)
+class TraforoSelection:
+    digest: str
+    local_path: Path | None = None
+
+    @property
+    def notice(self) -> str | None:
+        if self.local_path is not None:
+            return f"Using developer Traforo {self.digest[:12]} from {self.local_path}"
+        return None
+
+
+def _developer_permissions(info: os.stat_result) -> None:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_nlink != 1
+        or info.st_mode & 0o7022
+        or not info.st_mode & stat.S_IXUSR
+    ):
+        raise NativeAssetError("Developer Traforo has unsafe ownership or permissions")
+
+
+def _no_developer_acl(path: Path) -> None:
+    # Darwin ACL grants are independent of POSIX mode bits. Conservatively refuse
+    # all ACLs, matching the privileged bootstrap's trusted-image boundary.
+    try:
+        output = subprocess.check_output(  # noqa: S603 - fixed system metadata inspector
+            ["/bin/ls", "-lde", str(path)], stderr=subprocess.PIPE, timeout=5
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        raise NativeAssetError("Cannot verify developer Traforo ACLs") from None
+    lines = output.splitlines()
+    if len(lines) != 1 or b"+" in lines[0].split(maxsplit=1)[0]:
+        raise NativeAssetError("Developer Traforo has unsafe extended ACLs")
+
+
+def select_traforo(environment: Mapping[str, str] | None = None) -> TraforoSelection:
+    """Explicit developer opt-in; otherwise select the immutable release pin."""
+    architecture = _architecture()
+    value = (os.environ if environment is None else environment).get(DEVELOPMENT_BINARY_ENV)
+    if not value:
+        return TraforoSelection(expected_digest())
+    path = Path(value)
+    if not path.is_absolute():
+        raise NativeAssetError(f"{DEVELOPMENT_BINARY_ENV} must be an absolute executable path")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            _developer_permissions(info)
+            _no_developer_acl(path)
+            data = stream.read(MAX_BINARY_BYTES + 1)
+            validate_macho(data, architecture)
+            digest = hashlib.sha256(data).hexdigest()
+            validate_protocol(path)
+            _no_developer_acl(path)
+            after = path.lstat()
+            _developer_permissions(after)
+            stream.seek(0)
+            if (info.st_dev, info.st_ino) != (after.st_dev, after.st_ino) or hashlib.sha256(
+                stream.read(MAX_BINARY_BYTES + 1)
+            ).hexdigest() != digest:
+                raise NativeAssetError(
+                    "Developer Traforo changed during validation; rebuild and retry"
+                )
+    except OSError:
+        raise NativeAssetError(
+            f"Cannot read {DEVELOPMENT_BINARY_ENV}; rebuild or unset it to use the pinned release"
+        ) from None
+    return TraforoSelection(digest, path)
 
 
 def _environment_auth(request: requests.PreparedRequest) -> requests.PreparedRequest:

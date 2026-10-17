@@ -97,7 +97,7 @@ def world(monkeypatch, tmp_path):
     closed = []
     monkeypatch.setattr("stelvio.tunnel.credentials.os.geteuid", lambda: 1000)
     monkeypatch.setattr("stelvio.tunnel.credentials.os.getuid", lambda: 1000)
-    monkeypatch.setattr("stelvio.tunnel.session.install_helper", lambda: None)
+    monkeypatch.setattr("stelvio.tunnel.session.install_helper", lambda **kw: None)
 
     def launch(description, contexts, **kw):
         launches.append((description, contexts, kw))
@@ -355,5 +355,28 @@ def test_standalone_wait_terminates_after_runtime_ipc_failure(world, network_sta
         wait_for(lambda: session._runtime_error is not None)
         with raises(RuntimeError, match="Network runtime unavailable: EOFError"):
             session.wait()
+    finally:
+        session.close()
+
+
+def test_developer_override_is_captured_for_install_and_runtime(world, network_state, monkeypatch):
+    monkeypatch.setenv("STLV_TRAFORO_DEV_BINARY", "/original/build")
+    session = world.make(network_state)
+    monkeypatch.setenv("STLV_TRAFORO_DEV_BINARY", "/handler/mutation")
+    captured = []
+
+    def install(*, environment):
+        captured.append(environment["STLV_TRAFORO_DEV_BINARY"])
+        return SimpleNamespace(notice="Using developer Traforo abc123")
+
+    monkeypatch.setattr("stelvio.tunnel.session.install_helper", install)
+    try:
+        session.start()
+        assert captured == ["/original/build"]
+        assert (
+            world.launches[0][1][0].process_environment()["STLV_TRAFORO_DEV_BINARY"]
+            == "/original/build"
+        )
+        assert "Using developer Traforo abc123" in world.messages
     finally:
         session.close()

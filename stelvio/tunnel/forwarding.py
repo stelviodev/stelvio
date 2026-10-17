@@ -24,13 +24,13 @@ MAX_REPLY = 32
 @contextmanager
 def packaged_forwarder() -> Iterator[Path]:
     """Both roles use the exact verified root-owned installed Traforo image."""
-    from stelvio.tunnel.assets import expected_digest  # noqa: PLC0415 - lazy platform assets
+    from stelvio.tunnel.assets import select_traforo  # noqa: PLC0415 - lazy platform assets
     from stelvio.tunnel.installation import (  # noqa: PLC0415 - lazy platform installation
         INSTALLED_HELPER,
         _installed_digest,
     )
 
-    if _installed_digest() != expected_digest():
+    if _installed_digest() != select_traforo().digest:
         raise RuntimeError("The installed Traforo differs; run stlv tunnel install")
     yield INSTALLED_HELPER
 

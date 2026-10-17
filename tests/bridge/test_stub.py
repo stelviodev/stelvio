@@ -175,9 +175,7 @@ def test_connection_ack_skips_keepalive(mock_connect, reset_global_state):
     stub = reset_global_state
     mock_ws = AsyncMock()
     mock_connect.return_value = mock_ws
-    mock_ws.recv = AsyncMock(
-        side_effect=['{"type":"ka"}', '{"type":"connection_ack"}']
-    )
+    mock_ws.recv = AsyncMock(side_effect=['{"type":"ka"}', '{"type":"connection_ack"}'])
 
     _run(stub.connect_to_appsync())
 
@@ -201,9 +199,7 @@ def test_sends_subscribe_message(reset_global_state):
     """Should send correct subscribe message to response channel."""
     stub = reset_global_state
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(
-        return_value='{"type":"subscribe_success","id":"response-sub"}'
-    )
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"response-sub"}')
 
     _run(stub.subscribe_to_channel(mock_ws))
 
@@ -221,9 +217,7 @@ def test_waits_for_subscribe_success(reset_global_state):
     """Should wait for subscribe_success response."""
     stub = reset_global_state
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(
-        return_value='{"type":"subscribe_success","id":"response-sub"}'
-    )
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"response-sub"}')
 
     _run(stub.subscribe_to_channel(mock_ws))
 
@@ -248,9 +242,7 @@ def test_subscribe_ack_skips_keepalive_and_checks_operation_id(reset_global_stat
 def test_subscribe_rejects_success_for_different_operation(reset_global_state):
     stub = reset_global_state
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(
-        return_value='{"type":"subscribe_success","id":"other-sub"}'
-    )
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"other-sub"}')
 
     with pytest.raises(ConnectionError, match="unexpected operation ID"):
         _run(stub.subscribe_to_channel(mock_ws))

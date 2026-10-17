@@ -125,7 +125,9 @@ class NetworkSession:
             self.report("Network READY (no enabled VPC dependencies).")
             return
         try:
-            install_helper()
+            selected = install_helper(environment=self.contexts[0].process_environment())
+            if selected is not None and selected.notice:
+                self.report(selected.notice)
             self.runtime = NetworkRuntime(self.description, self.contexts)
         except Exception:
             self._report_recovery()

@@ -26,7 +26,13 @@ def _run(action: Callable[[], None]) -> None:
 def install() -> None:
     """Install the trusted helper using macOS administrator authorization."""
     click.echo(SYSTEM_CHANGES)
-    _run(install_helper)
+
+    def perform() -> None:
+        selected = install_helper()
+        if selected.notice:
+            click.echo(selected.notice)
+
+    _run(perform)
     click.echo("Native VPC helper ready.")
 
 

@@ -78,9 +78,7 @@ async def wait_for_appsync_ack(
                 f"AppSync subscribe to {channel!r} failed: {message.get('errors', [])}"
             )
         if message_type != expected_type:
-            raise ConnectionError(
-                f"Expected AppSync {expected_type}, received {message_type!r}"
-            )
+            raise ConnectionError(f"Expected AppSync {expected_type}, received {message_type!r}")
         if operation_id is not None and message.get("id") != operation_id:
             raise ConnectionError(
                 f"AppSync {expected_type} acknowledgement had an unexpected operation ID"

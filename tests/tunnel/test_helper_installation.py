@@ -20,7 +20,11 @@ def setup(tmp_path, monkeypatch):
     asset = tmp_path / "asset with 'quotes' $(touch SHOULD_NOT_EXIST)"
     asset.write_bytes(b"native-test-asset")
     monkeypatch.setattr(
-        installation, "expected_digest", lambda: sha256(asset.read_bytes()).hexdigest()
+        installation,
+        "select_traforo",
+        lambda environment=None: installation.TraforoSelection(
+            sha256(asset.read_bytes()).hexdigest()
+        ),
     )
     installed = tmp_path / "installed"
     monkeypatch.setattr(installation, "INSTALLED_HELPER", installed)
@@ -183,7 +187,9 @@ def test_forwarder_validates_installed_pin_without_cache(monkeypatch):
     from stelvio.tunnel.forwarding import packaged_forwarder
 
     monkeypatch.setattr(installation, "_installed_digest", lambda: "a" * 64)
-    monkeypatch.setattr("stelvio.tunnel.assets.expected_digest", lambda: "a" * 64)
+    monkeypatch.setattr(
+        "stelvio.tunnel.assets.select_traforo", lambda: installation.TraforoSelection("a" * 64)
+    )
     with packaged_forwarder() as path:
         assert path == installation.INSTALLED_HELPER
     monkeypatch.setattr(installation, "_installed_digest", lambda: "b" * 64)

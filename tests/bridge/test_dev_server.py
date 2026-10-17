@@ -42,9 +42,7 @@ def test_connect_to_appsync(mock_json_dumps, mock_b64encode, mock_connect):
     # Mock websocket
     mock_ws = AsyncMock()
     mock_connect.return_value = mock_ws
-    mock_ws.recv = AsyncMock(
-        side_effect=['{"type":"ka"}', '{"type":"connection_ack"}']
-    )
+    mock_ws.recv = AsyncMock(side_effect=['{"type":"ka"}', '{"type":"connection_ack"}'])
 
     # Call function
     result = _run(connect_to_appsync(config))
@@ -111,9 +109,7 @@ def test_subscribe_rejects_unacknowledged_channel():
 
 def test_subscribe_rejects_success_for_different_operation():
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(
-        return_value='{"type":"subscribe_success","id":"other-sub"}'
-    )
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"other-sub"}')
 
     with pytest.raises(ConnectionError, match="unexpected operation ID"):
         _run(subscribe_to_channel(mock_ws, "test_channel", "test_key"))

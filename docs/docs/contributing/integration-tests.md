@@ -195,8 +195,11 @@ AWS absence audit and host-baseline comparison. Use `stlv tunnel uninstall` only
 after the helper state is empty and certain.
 
 Go parser, journal, packet, identity, and native syscall tests belong to the
-[Traforo repository](https://github.com/stelviodev/traforo). The copy under
-`pkg/traforo-client-go` is reference-only and is excluded from Python distributions.
+[Traforo repository](https://github.com/stelviodev/traforo). The source under
+`pkg/traforo-client-go` is authoritative for the Go client API and unit tests and is
+mirrored to that repository. The external repository owns release builds and Go
+implementation CI. Run local Go tests directly from the module. Go source is excluded
+from Python distributions.
 Pytest covers Python behavior, release download validation and genuine process
 interoperability; it never compiles Go or runs native algorithm harnesses.
 
@@ -205,7 +208,7 @@ interoperability; it never compiles Go or runs native algorithm harnesses.
 Stelvio pins Traforo v0.0.4 download URLs, architecture mappings and SHA-256 values
 in `stelvio/tunnel/assets.py`. Installation verifies and caches the host executable
 under Stelvio's private `bin` directory, alongside Pulumi and the AWS plugin.
-No Traforo executable, local build script, or Go source is shipped in wheel/sdist.
+No Traforo executable, developer build script, or Go source is shipped in wheel/sdist.
 
 For development while the release repository is private, explicitly supply a token:
 
@@ -226,6 +229,35 @@ acceptance. Set `STLV_TEST_TRAFORO_IMAGE` to the verified cached executable path
 after pre-downloading the release to include the optional real Python/Traforo process tests in `tests/tunnel/test_runtime.py`.
 These tests execute the verified cached image; ordinary unit runs do not download it.
 Native Intel networking must be tested separately from Rosetta execution.
+
+### Testing local Go changes without a release
+
+Run local Go unit/race tests from `pkg/traforo-client-go`, then from the repository root:
+
+```bash
+uv run python pkg/traforo-client-go/scripts/build.py
+# Copy the exact export command printed by the script into this shell.
+export STLV_TRAFORO_DEV_BINARY='/absolute/path/printed/by/the/script'
+uv run stlv dev
+```
+
+The script builds only this Mac's architecture with the available SDK, validates it,
+and installs through the ordinary administrator-authorized replacement transaction.
+Stop live sessions before changing builds. It never updates release pins or caches.
+The override is process environment input, captured before local handler execution.
+Both helper startup and forwarder validation select its digest; the forwarder still
+executes the installed root-owned image without root privileges.
+
+Rebuild after edits and set the variable in every shell running managed networking.
+Without the variable, the next managed startup selects the pinned release. Restore it
+explicitly with `unset STLV_TRAFORO_DEV_BINARY` followed by `uv run stlv tunnel install`.
+No persistent override is installed. Older Stelvio versions ignore the variable.
+Invalid overrides fail without fallback; inspect and ordinary uninstall still work if
+the build file is gone. Source, scripts and output remain excluded from distributions.
+
+For actual Python/local-image interoperability, set `STLV_TEST_TRAFORO_IMAGE` to the
+same executable and run `tests/tunnel/test_runtime.py` with the override enabled.
+Go compilation is a separate developer step, never performed by pytest.
 
 ## Cost and isolation
 

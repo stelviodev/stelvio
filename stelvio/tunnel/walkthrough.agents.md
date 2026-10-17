@@ -50,9 +50,10 @@ Start with CLI in stelvio/cli/tunnel.py and cli/commands.py, capture in command_
 policy/metadata in aws/vpc/vpc.py and tunnel/manifest.py, shared session in
 `tunnel/session.py`, isolated runtime in runtime.py/runtime_child.py, transport in
 transport.py/ssm_proxy.py, and host administration in installation.py.
-The canonical Go source and release CI now live in
-`https://github.com/stelviodev/traforo`. `pkg/traforo-client-go` remains a reference
-snapshot only, excluded from wheel/sdist. There is no local release builder.
+The split repository and release CI are at
+`https://github.com/stelviodev/traforo`. `pkg/traforo-client-go` is authoritative for the Go client API and unit tests and
+is mirrored by the repository split. It is excluded from wheel/sdist. Release CI
+remains external; scripts/build.py is a monorepo developer build/install tool.
 `assets.py` pins v0.0.4 URLs, GitHub asset IDs and architecture SHA-256 values.
 `ensure_traforo()` locks, validates and atomically caches a download under
 `get_bin_path()`. `GITHUB_TOKEN`, when provided by the environment, authenticates
@@ -100,10 +101,11 @@ Extra config/multi-VPC AWS cases and a separate full dev SIGKILL run
 remain unverified for v2. See
 tasks/dev-vpc.md for the final status. Earlier acceptance is historical. Native Intel networking and Linux/WSL/Windows backends
 remain out of scope. Release pins must be updated deliberately after upstream CI produces compatible
-artifacts. Do not build the reference copy or claim it exactly matches the pinned
-release. Historical native/Go results above predate this distribution change.
+artifacts. Local source builds require the explicit environment override and must
+not be presented as the pinned release. Historical native/Go results above predate this distribution change.
 
-Go tests belong upstream. Python release/download tests cover authenticated and
+Go unit tests also run directly against the authoritative monorepo module.
+Python release/download tests cover authenticated and
 anonymous requests, redirects, bounded corrupt downloads, cache concurrency and
 atomic publication. Frozen wire vectors remain independently readable by Python.
 See `testing.md` for the revised installed-wheel/native/AWS runbook. Enable actual
@@ -139,3 +141,38 @@ exact interface/resolver baseline restored, route changes only LAN ARP expiry ti
 Caches deliberately remain. Evidence: /private/tmp/traforo-release-proof and task log.
 Native Intel/other macOS and additional AWS config/multi-VPC/dev-SIGKILL cases remain
 uncertified by this run. No CI changes, commits, staging or branch switches.
+
+
+## Local Go developer escape hatch
+
+`uv run python pkg/traforo-client-go/scripts/build.py` builds only this Mac's
+architecture, validates the local image, and installs it through the existing
+privileged replacement transaction. It prints an exact export command for
+`STLV_TRAFORO_DEV_BINARY`. Run that in each shell before `stlv dev` or
+`stlv tunnel start`. There is no persistent root marker. The script cannot export
+into its parent shell. Unset the variable and run `stlv tunnel install` to restore
+the pinned release. Older Stelvio versions do not recognize this override.
+
+`assets.select_traforo` centralizes selection; pinned download verification remains
+unchanged. Developer images must be absolute user-owned regular files, with no
+symlinks, extra hard links, foreign write modes, special mode bits or extended ACLs.
+Validate Mach-O/size/protocol, digest and unchanged inode/permissions/bytes before
+installation. Invalid overrides fail closed. `NetworkSession.start` uses the captured
+context environment for installation; the isolated runtime inherits that same
+snapshot. Forwarding checks the selected digest and launches the root-owned installed
+image. Ordinary inspect/uninstall need neither the override nor its file.
+
+Go source/API/unit tests here are authoritative. The split repository owns release
+builds and Go implementation CI. Use Go directly for unit/race/fuzz tests; Python
+builder tests mock compilation. `STLV_TEST_TRAFORO_IMAGE` may select the same local
+image for explicit process interoperability tests. No source, script or executable
+is packaged into wheel/sdist, and release checksums/caches are never overwritten.
+
+Local developer acceptance (2026-10-17): Go unit/race/fuzz, 485 affected Python tests
+including actual local-image runtime/forwarder interop, native local/pinned switching,
+active refusal, interrupted recovery, two-unit DNS/TCP and missing-file offline
+uninstall passed. Source ACL and test portability findings were fixed. Original
+idle helper and owned host state restored. New Apple identityservicesd utun5/utun6
+were independently attributed and preserved; global interface inventory differs for
+that reason, not an owned cleanup failure. Evidence /private/tmp/traforo-local-proof.
+No AWS run or native Intel acceptance is claimed for this developer change.
