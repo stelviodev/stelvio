@@ -1,4 +1,4 @@
-"""Install the packaged native helper using a fixed system-only bootstrap."""
+"""Install the downloaded native helper using a fixed system-only bootstrap."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from stelvio.tunnel.assets import packaged_helper
+from stelvio.tunnel.assets import downloaded_helper, expected_digest
 from stelvio.tunnel.helper_client import HelperBusyError, HelperError, NativeHelper
 from stelvio.tunnel.plugin import ensure_plugin
 
@@ -186,24 +186,23 @@ def install_helper() -> None:
     """Install once; a compatible healthy installation needs no elevation."""
     _supported()
     ensure_plugin()
-    with packaged_helper() as asset:
-        digest = hashlib.sha256(asset.read_bytes()).hexdigest()
-        installed = _installed_digest()
-        if installed == digest and INSTALLED_HELPER.lstat().st_nlink == 1:
-            try:
-                inspection = NativeHelper().inspect()
-            except HelperBusyError:
-                # Exact artifact identity plus an authenticated root BUSY reply
-                # certifies a compatible active installation; never elevate it.
-                return
-            except (OSError, HelperError):
-                pass
-            else:
-                if inspection.uncertain:
-                    raise HelperError(
-                        "The helper has unfinished host cleanup; run stlv tunnel cleanup"
-                    )
-                return
+    digest = expected_digest()
+    installed = _installed_digest()
+    if installed == digest and INSTALLED_HELPER.lstat().st_nlink == 1:
+        try:
+            inspection = NativeHelper().inspect()
+        except HelperBusyError:
+            # Exact pin plus an authenticated root BUSY reply certifies compatibility.
+            return
+        except (OSError, HelperError):
+            pass
+        else:
+            if inspection.uncertain:
+                raise HelperError(
+                    "The helper has unfinished host cleanup; run stlv tunnel cleanup"
+                )
+            return
+    with downloaded_helper() as asset:
         _authorize(_bootstrap(asset, digest))
     _wait_ready()
 
@@ -229,18 +228,22 @@ def uninstall_helper() -> None:
     """Remove the owned installation. Native admission excludes active sessions."""
     _supported(activation=False)
     installed = _installed_digest()
-    with packaged_helper() as asset:
-        digest = hashlib.sha256(asset.read_bytes()).hexdigest()
-        pending = Path(f"/Library/PrivilegedHelperTools/.stelvio-traforo.bootstrap.{digest}")
-        retired = Path("/Library/PrivilegedHelperTools/.stelvio-traforo.retired")
-        if installed is None and not pending.exists() and not retired.exists():
-            if (
-                Path("/Library/LaunchDaemons/dev.stelvio.tunnel.plist").exists()
-                or Path("/Library/Application Support/Stelvio/tunnel").exists()
-            ):
-                raise HelperError(
-                    "The native helper is missing but recovery artifacts remain; "
-                    "run stlv tunnel install to resume the interrupted installation"
-                )
-            return
-        _authorize(_bootstrap(asset, digest, cleanup=True))
+    # Ordinary removal executes the trusted installed image and works offline.
+    # Only interrupted replacement with no installed image needs its release cache.
+    retired = Path("/Library/PrivilegedHelperTools/.stelvio-traforo.retired")
+    stages = list(INSTALLED_HELPER.parent.glob(".stelvio-traforo.bootstrap.*"))
+    if installed is not None:
+        _authorize(_bootstrap(INSTALLED_HELPER, installed, cleanup=True))
+    elif retired.exists() or stages:
+        with downloaded_helper() as asset:
+            digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+            _authorize(_bootstrap(asset, digest, cleanup=True))
+    elif (
+        Path("/Library/LaunchDaemons/dev.stelvio.tunnel.plist").exists()
+        or Path("/Library/Application Support/Stelvio/tunnel").exists()
+        or Path("/Library/PrivilegedHelperTools/dev.stelvio.tunnel").exists()
+    ):
+        raise HelperError(
+            "The native helper is missing but recovery artifacts remain; "
+            "run stlv tunnel install to resume the interrupted installation"
+        )

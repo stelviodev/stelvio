@@ -61,8 +61,8 @@ or a separate handler for dev mode.
 
 ### Setup
 
-1. Use macOS 15 or newer on Apple Silicon or Intel. The wheel includes the
-   precompiled **Stelvio Traforo** executable for both architectures. You do not
+1. Use macOS 15 or newer on Apple Silicon or Intel. Stelvio downloads a checksum-pinned
+   **Traforo** release for your architecture into its private binary cache. You do not
    need Go or Xcode. Linux, WSL, and Windows VPC networking are not implemented;
    ordinary dev mode without managed VPC access still works on those platforms.
 2. Configure your AWS profile or normal SDK credential chain. Those credentials
@@ -71,7 +71,10 @@ or a separate handler for dev mode.
    assume-role settings, endpoints, and proxies are not supported for tunnels.
    `stlv tunnel install` downloads a pinned AWS Session Manager plugin into
    Stelvio's private `bin` directory alongside Pulumi. No manual plugin install,
-   Homebrew, or PATH configuration is required.
+   Homebrew, or PATH configuration is required. First use needs network access;
+   verified downloads are reused. During private-repository development, set
+   `GITHUB_TOKEN` with repository read access. Public releases need no token, and
+   Stelvio never obtains credentials from the GitHub CLI.
 3. Install your handler's dependencies in the Python environment running `stlv`.
    For DocumentDB, install `pymongo` there as well as declaring it in the
    Function's `requirements`. Lambda packaging does not install local packages.

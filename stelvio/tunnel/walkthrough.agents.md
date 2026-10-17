@@ -39,7 +39,7 @@ revocable Unix datagram carrier → nonroot Traforo forwarder (tun2socks/gVisor)
 sshd → private service. Database TLS remains end-to-end. DNS: system resolver →
 scoped /etc/resolver entry → Python relay → SOCKS/SSH TCP → VPC resolver (+2).
 
-One wheel Go+cgo executable has separate helper and forwarder processes. Root
+One downloaded Go+cgo executable has separate helper and forwarder processes. Root
 retains raw utun descriptors and owns journaled host mutations. Peer audit token
 and birth identity authenticate the runtime. Snapshot v4 additionally persists
 its kernel-derived command parent birth identity, so an orphaned live/frozen
@@ -49,14 +49,18 @@ readable; ownership is never inferred solely from a PID or saved kernel index.
 Start with CLI in stelvio/cli/tunnel.py and cli/commands.py, capture in command_run.py,
 policy/metadata in aws/vpc/vpc.py and tunnel/manifest.py, shared session in
 `tunnel/session.py`, isolated runtime in runtime.py/runtime_child.py, transport in
-transport.py/ssm_proxy.py, and host administration in installation.py. The self-contained
-Go module lives in `pkg/traforo-client-go`: the executable entrypoint is
-`cmd/stelvio-traforo`, private implementation and tests are under `internal/`, and the
-pinned release builder is `scripts/build.py`. Inspect `internal/helper/admin.go`,
-`internal/darwin/bindings_darwin.*`, `internal/helper/service.go`,
-`internal/forwarder/forwarder.go`, `internal/helper/unit.go` and
-`internal/helper/resolver.go`. The builder publishes binary assets and the manifest to
-`stelvio/tunnel/_assets`.
+transport.py/ssm_proxy.py, and host administration in installation.py.
+The canonical Go source and release CI now live in
+`https://github.com/stelviodev/traforo`. `pkg/traforo-client-go` remains a reference
+snapshot only, excluded from wheel/sdist. There is no local release builder.
+`assets.py` pins v0.0.4 URLs, GitHub asset IDs and architecture SHA-256 values.
+`ensure_traforo()` locks, validates and atomically caches a download under
+`get_bin_path()`. `GITHUB_TOKEN`, when provided by the environment, authenticates
+only the GitHub API request; cross-origin redirects drop authorization. Otherwise
+use the pinned public download URL. Production never calls `gh`. Both helper and
+forwarder still execute the same root-owned installed image; forwarder checks its
+pin without a cache or network operation. Normal uninstall also works offline.
+
 
 ## Answering a reviewer
 
@@ -95,19 +99,16 @@ IPv4 utun routes remain. The private plugin cache is intentionally retained.
 Extra config/multi-VPC AWS cases and a separate full dev SIGKILL run
 remain unverified for v2. See
 tasks/dev-vpc.md for the final status. Earlier acceptance is historical. Native Intel networking and Linux/WSL/Windows backends
-remain out of scope. Both macOS architectures must be rebuilt after source
-changes using the pinned manual builder; stale-source checks must not be bypassed.
-No automated build pipeline changes are part of v2.
+remain out of scope. Release pins must be updated deliberately after upstream CI produces compatible
+artifacts. Do not build the reference copy or claim it exactly matches the pinned
+release. Historical native/Go results above predate this distribution change.
 
-Go unit/race/fuzz and Darwin syscall fixtures run under go test, not pytest.
-Independent frozen vectors are in
-`pkg/traforo-client-go/internal/helper/testdata/independent_vectors.json`; never regenerate
-expected snapshots using the implementation being tested. Run `go test -race ./...`
-from `pkg/traforo-client-go`. `python pkg/traforo-client-go/scripts/build.py --check` verifies
-the repository source fingerprint and both release assets without compiling Go.
-Installed wheels contain the verified binary assets and manifest, not Go source, so
-their checks validate the manifest and binary digests. Python tests cover installation,
-CLI, metadata, SDK isolation and real process interop.
+Go tests belong upstream. Python release/download tests cover authenticated and
+anonymous requests, redirects, bounded corrupt downloads, cache concurrency and
+atomic publication. Frozen wire vectors remain independently readable by Python.
+See `testing.md` for the revised installed-wheel/native/AWS runbook. Enable actual
+cached-binary interop by setting `STLV_TEST_TRAFORO_IMAGE` to the verified cached
+executable path; default unit tests stay offline. Wheel/sdist must contain neither native executables nor reference Go code.
 AWS lane must prove actual example TLS/member discovery/read-write, standalone
 access, transport recovery and persistent bastion retention; destroy fixture
 application resources and independently audit AWS absence and exact host baseline.
@@ -117,3 +118,24 @@ active upgrade/uninstall refusal and interrupted upgrade resumption.
 Keep implementation, tests, public docs and both walkthroughs synchronized. Append
 new evidence to the task log; never recast old failures or earlier builds as v2
 acceptance. No root or AWS changes should be inferred from documentation alone.
+
+
+## Downloaded-release acceptance (2026-10-17)
+
+Pinned external v0.0.4 is validated separately from the historical local builds.
+Both SHA pins and native/Rosetta version/library checks pass. Upstream CI and release
+build succeeded at 01603648943d5278f6b727eec0a49f9ba33e8df4. Final Python regressions:
+455 pass, including explicit downloaded-image process interop. Wheel/sdist contain
+neither executables nor the retained reference Go source.
+
+Native arm64 macOS 15.7.5 two-unit TCP/DNS, ownership/descriptor/generation checks,
+frozen orphan death, helper restart, failed-cleanup recovery, idle/interrupted/legacy
+upgrades, fresh install and offline uninstall pass. Default-profile/us-east-1 real
+AWS app stlv-657643/test passed dev+standalone TLS/member/read-write/reconnection and
+standalone SIGKILL in 1541.12 seconds including teardown. Normal exit retained the
+bastion. AWS teardown and independent absence audits pass (62 backend versions,
+one log group and passphrase removed). The pre-existing idle helper was restored;
+exact interface/resolver baseline restored, route changes only LAN ARP expiry timers.
+Caches deliberately remain. Evidence: /private/tmp/traforo-release-proof and task log.
+Native Intel/other macOS and additional AWS config/multi-VPC/dev-SIGKILL cases remain
+uncertified by this run. No CI changes, commits, staging or branch switches.

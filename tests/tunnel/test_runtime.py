@@ -20,6 +20,11 @@ from stelvio.tunnel.manifest import (
 from stelvio.tunnel.policy import BastionPolicy
 from stelvio.tunnel.runtime import NetworkRuntime
 
+pytestmark = mark.skipif(
+    not os.environ.get("STLV_TEST_TRAFORO_IMAGE"),
+    reason="Opt-in real Python/Traforo interoperability; pre-download the pinned release",
+)
+
 WORKER = r"""
 import os,socket,sys
 from types import SimpleNamespace
@@ -79,14 +84,24 @@ class Worker:
         if marker:
             with open(marker,"w") as output: output.write("closed")
         if sys.argv[3]=="failure": raise RuntimeError("fixture cleanup incomplete")
-from stelvio.tunnel.assets import packaged_helper
-# This test has no host installation: run the identical packaged image with a fake carrier.
-child.packaged_forwarder=packaged_helper
+from contextlib import contextmanager
+from pathlib import Path
+from stelvio.tunnel.assets import _ready, _architecture
+# Explicit opt-in image: hermetic HOME must not cause downloads from a runtime test.
+@contextmanager
+def interop_image():
+    image=Path(os.environ["STLV_TEST_TRAFORO_IMAGE"])
+    assert _ready(image, _architecture())
+    yield image
+child.packaged_forwarder=interop_image
 child.NativeHelper=Helper
 child.VpcWorker=Worker
 with socket.socket(fileno=int(sys.argv[1])) as control:
     try: child.run(control,int(sys.argv[2]))
-    except Exception: sys.exit(70)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        sys.exit(70)
 """
 
 
@@ -94,7 +109,7 @@ with socket.socket(fileno=int(sys.argv[1])) as control:
     ("cleanup_failure", "owner_death"),
     [(False, False), (True, False), (False, True)],
 )
-def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_failure(
+def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_failure(  # noqa: PLR0915 - full process lifecycle
     monkeypatch, cleanup_failure, owner_death, tmp_path
 ):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "PUBLIC_STARTUP_KEY")
@@ -128,24 +143,29 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
         os.geteuid(),
         NetworkManifest((network,), (), (EndpointNetwork("fn", "fn", ("vpc-owner",)),)),
     )
+    child_log = tmp_path / "runtime-child.log"
     real_popen = subprocess.Popen
 
     def fixture_child(arguments, **options):
         assert arguments[:4] == [sys.executable, "-I", "-m", "stelvio.tunnel.runtime_child"]
-        return real_popen(
-            [
-                sys.executable,
-                "-I",
-                "-c",
-                WORKER,
-                *arguments[4:],
-                "failure" if cleanup_failure else "success",
-            ],
-            **options,
-        )
+        with child_log.open("wb") as output:
+            return real_popen(
+                [
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    WORKER,
+                    *arguments[4:],
+                    "failure" if cleanup_failure else "success",
+                ],
+                **(options | {"stderr": output}),
+            )
 
     monkeypatch.setattr("stelvio.tunnel.runtime.subprocess.Popen", fixture_child)
-    runtime = NetworkRuntime(description, (context,))
+    try:
+        runtime = NetworkRuntime(description, (context,))
+    except RuntimeError as error:
+        raise AssertionError(child_log.read_text()) from error
     try:
         deadline = time.monotonic() + 5
         while True:

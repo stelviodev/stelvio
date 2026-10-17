@@ -16,9 +16,12 @@ from stelvio.tunnel.helper_client import HelperBusyError, HelperError, HelperIns
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
-    monkeypatch.setattr("stelvio.tunnel.plugin.ensure_plugin", lambda: None)
+    monkeypatch.setattr(installation, "ensure_plugin", lambda: None)
     asset = tmp_path / "asset with 'quotes' $(touch SHOULD_NOT_EXIST)"
     asset.write_bytes(b"native-test-asset")
+    monkeypatch.setattr(
+        installation, "expected_digest", lambda: sha256(asset.read_bytes()).hexdigest()
+    )
     installed = tmp_path / "installed"
     monkeypatch.setattr(installation, "INSTALLED_HELPER", installed)
     monkeypatch.setattr(installation, "_supported", lambda **kwargs: None)
@@ -28,7 +31,7 @@ def setup(tmp_path, monkeypatch):
     def packaged():
         yield asset
 
-    monkeypatch.setattr(installation, "packaged_helper", packaged)
+    monkeypatch.setattr(installation, "downloaded_helper", packaged)
     calls = []
     monkeypatch.setattr(installation, "_authorize", calls.append)
     monkeypatch.setattr(installation, "_wait_ready", lambda **kwargs: None)
@@ -72,6 +75,11 @@ def test_healthy_matching_install_is_idempotent_without_elevation(setup, monkeyp
         "NativeHelper",
         lambda: SimpleNamespace(inspect=lambda: HelperInspection(False, False, False)),
     )
+
+    def forbidden():
+        raise AssertionError("Matching installed helper attempted a cache/download")
+
+    monkeypatch.setattr(installation, "downloaded_helper", forbidden)
     result = CliRunner().invoke(tunnel, ["install"])
     assert result.exit_code == 0, result.output
     assert calls == []
@@ -129,7 +137,7 @@ def test_platform_refusal_precedes_asset_read_and_authorization(monkeypatch):
     def forbidden(*args):
         raise AssertionError("Attempted unsupported platform setup")
 
-    monkeypatch.setattr(installation, "packaged_helper", forbidden)
+    monkeypatch.setattr(installation, "downloaded_helper", forbidden)
     monkeypatch.setattr(installation, "_authorize", forbidden)
     result = CliRunner().invoke(tunnel, ["install"])
     assert result.exit_code == 1
@@ -147,6 +155,37 @@ def test_matching_active_install_is_idempotent_without_elevation(setup, monkeypa
         raise HelperBusyError("Native helper request failed: busy")
 
     monkeypatch.setattr(installation, "NativeHelper", lambda: SimpleNamespace(inspect=busy))
+
+    def forbidden():
+        raise AssertionError("Matching installed helper attempted a cache/download")
+
+    monkeypatch.setattr(installation, "downloaded_helper", forbidden)
     result = CliRunner().invoke(tunnel, ["install"])
     assert result.exit_code == 0, result.output
     assert calls == []
+
+
+def test_uninstall_uses_installed_image_without_cache_or_download(setup, monkeypatch):
+    _, installed, calls = setup
+    monkeypatch.setattr(installation, "_installed_digest", lambda: "a" * 64)
+
+    def forbidden():
+        raise AssertionError("Uninstall attempted download")
+
+    monkeypatch.setattr(installation, "downloaded_helper", forbidden)
+    result = CliRunner().invoke(tunnel, ["uninstall"])
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert f"{installed} helper uninstall" in calls[0]
+
+
+def test_forwarder_validates_installed_pin_without_cache(monkeypatch):
+    from stelvio.tunnel.forwarding import packaged_forwarder
+
+    monkeypatch.setattr(installation, "_installed_digest", lambda: "a" * 64)
+    monkeypatch.setattr("stelvio.tunnel.assets.expected_digest", lambda: "a" * 64)
+    with packaged_forwarder() as path:
+        assert path == installation.INSTALLED_HELPER
+    monkeypatch.setattr(installation, "_installed_digest", lambda: "b" * 64)
+    with pytest.raises(RuntimeError, match="differs"), packaged_forwarder():
+        raise AssertionError("Wrong forwarder yielded")

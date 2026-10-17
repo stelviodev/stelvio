@@ -1,8 +1,7 @@
-"""Own the packaged nonroot carrier process and acknowledge stack changes."""
+"""Own the installed nonroot carrier process and acknowledge stack changes."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import select
@@ -25,17 +24,15 @@ MAX_REPLY = 32
 @contextmanager
 def packaged_forwarder() -> Iterator[Path]:
     """Both roles use the exact verified root-owned installed Traforo image."""
-    from stelvio.tunnel.assets import packaged_helper  # noqa: PLC0415 - lazy platform assets
+    from stelvio.tunnel.assets import expected_digest  # noqa: PLC0415 - lazy platform assets
     from stelvio.tunnel.installation import (  # noqa: PLC0415 - lazy platform installation
         INSTALLED_HELPER,
         _installed_digest,
     )
 
-    with packaged_helper() as asset:
-        expected = hashlib.sha256(asset.read_bytes()).hexdigest()
-        if _installed_digest() != expected:
-            raise RuntimeError("The installed Traforo differs; run stlv tunnel install")
-        yield INSTALLED_HELPER
+    if _installed_digest() != expected_digest():
+        raise RuntimeError("The installed Traforo differs; run stlv tunnel install")
+    yield INSTALLED_HELPER
 
 
 class Forwarding:

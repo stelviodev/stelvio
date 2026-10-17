@@ -109,7 +109,7 @@ and removal request macOS administrator authorization. See [setup and upgrades](
 
 | Command | Purpose |
 | --- | --- |
-| `stlv tunnel install` | Installs or updates Traforo and downloads Stelvio's pinned private AWS plugin |
+| `stlv tunnel install` | Downloads pinned Traforo and AWS plugin releases, then installs or updates the helper |
 | `stlv tunnel start [ENV]` | Connects deployed handler VPC dependencies in the foreground without deploying or starting dev mode |
 | `stlv tunnel inspect` | Reports ownership, uncertainty, mutation status, and VPC units |
 | `stlv tunnel cleanup` | Cleans stale owned host networking while retaining the helper; refuses live sessions |

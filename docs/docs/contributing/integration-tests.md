@@ -162,7 +162,8 @@ remain pending. Rosetta package tests do not replace native Intel networking
 acceptance. Keep dated results in `tasks/dev-vpc.md` separate from earlier builds.
 
 Prepare a clean Python environment containing the wheel under test **and
-PyMongo**, then install that wheel's helper with `stlv tunnel install`. The install command downloads the pinned private Session Manager plugin. Run as a nonroot user and obtain permission
+PyMongo**, then run `stlv tunnel install` from that wheel's environment. The command
+downloads pinned Traforo and Session Manager plugin releases. Run as a nonroot user and obtain permission
 for billable AWS provisioning and administrator-authorized host changes before
 starting. `stlv tunnel inspect` must show an empty, certain helper baseline.
 
@@ -193,28 +194,38 @@ is no temporary access stack or AWS recover command. Finish with an independent
 AWS absence audit and host-baseline comparison. Use `stlv tunnel uninstall` only
 after the helper state is empty and certain.
 
-Go parser, journal, packet, identity, and native syscall tests run with
-`go test -race ./...` from `pkg/traforo-client-go`. Frozen independent vectors
-live in `pkg/traforo-client-go/internal/helper/testdata`. Pytest covers Python
-behavior, packaged assets, and genuine process interoperability, and must not
-compile Go or run native algorithm harnesses.
+Go parser, journal, packet, identity, and native syscall tests belong to the
+[Traforo repository](https://github.com/stelviodev/traforo). The copy under
+`pkg/traforo-client-go` is reference-only and is excluded from Python distributions.
+Pytest covers Python behavior, release download validation and genuine process
+interoperability; it never compiles Go or runs native algorithm harnesses.
 
-### Native asset preparation
+### Native release validation
 
-End users install precompiled Traforo from the wheel. Contributor release
-preparation uses the manual `pkg/traforo-client-go/scripts/build.py` builder with
-its pinned Go and macOS SDK inputs; Python builds and installation never compile Go.
-The builder produces both Mach-O architectures under `stelvio/tunnel/_assets` and
-updates the source fingerprint, digests, library inventory, and sizes in the
-manifest. Run `python pkg/traforo-client-go/scripts/build.py --check` to verify the
-checked-in source and release assets without compiling Go. Run Go race tests from
-`pkg/traforo-client-go` and the Python native asset/installation tests before wheel
-validation. The wheel contains the binaries and manifest, not Go source; installed
-asset checks verify manifest and binary integrity. Preserve the 16 MiB per-asset
-bound and source/artifact coherence during release preparation.
-The source tree has Darwin bindings and shared Go packages; no Linux, WSL, or
-Windows backend is implemented. Automated native builds and CI/CD changes are
-outside this work.
+Stelvio pins Traforo v0.0.4 download URLs, architecture mappings and SHA-256 values
+in `stelvio/tunnel/assets.py`. Installation verifies and caches the host executable
+under Stelvio's private `bin` directory, alongside Pulumi and the AWS plugin.
+No Traforo executable, local build script, or Go source is shipped in wheel/sdist.
+
+For development while the release repository is private, explicitly supply a token:
+
+```bash
+export GITHUB_TOKEN="$(gh auth token)"
+stlv tunnel install
+```
+
+This is a testing-shell setup step only. Production reads `GITHUB_TOKEN` from the
+environment and never invokes `gh`. Without a token, it requests the public release
+URL. Private releases require a token with repository contents read access.
+Authenticated downloads use the GitHub release-asset API, with credentials removed
+before following cross-origin redirects. All paths enforce the pinned binary digest.
+
+Follow [the end-to-end runbook](https://github.com/stelviodev/stelvio/blob/feature/vpc-traforo-v2/stelvio/tunnel/testing.md)
+for clean-wheel, cache corruption/concurrency, native upgrade/crash/cleanup, and AWS
+acceptance. Set `STLV_TEST_TRAFORO_IMAGE` to the verified cached executable path
+after pre-downloading the release to include the optional real Python/Traforo process tests in `tests/tunnel/test_runtime.py`.
+These tests execute the verified cached image; ordinary unit runs do not download it.
+Native Intel networking must be tested separately from Rosetta execution.
 
 ## Cost and isolation
 

@@ -166,6 +166,7 @@ See the [full setup and recovery guide](../concepts/dev-mode.md#accessing-a-vpc-
 | --- | --- |
 | Unsupported platform | Managed VPC access needs macOS 15+ on arm64 or x86_64; Linux, WSL, and Windows backends are not implemented |
 | Helper missing or version mismatch | Install from the active Stelvio environment; close active sessions and run `stlv tunnel install` to replace an older image |
+| Traforo download returns 401, 403 or 404 | During private-repository development, provide `GITHUB_TOKEN` with repository read access; public releases need no token. Retry `stlv tunnel install` |
 | Session Manager plugin missing | Run `stlv tunnel install` to download/verify the pinned private plugin |
 | Network still starting | Wait for EC2 and SSM startup; check the selected AWS credentials, region, and permissions |
 | Network unavailable after a disconnect | Watch for reconnection; new dependent handlers are gated, but an in-flight database request may fail |

@@ -1,8 +1,8 @@
 # Traforo end-to-end testing guide
 
-This is the testing-team runbook for changes to `pkg/traforo-client-go` and the
+This is the testing-team runbook for Stelvio’s pinned Traforo release and the
 Python VPC tunnel integration. Run the gates in order. A Go test pass alone does
-not certify the precompiled wheel asset, installed root helper, or AWS path.
+not certify the downloaded release asset, installed root helper, or AWS path.
 
 Run commands from the repository root unless a step says otherwise. Commands use
 zsh/bash, Python 3.12+, and `uv`. Keep one terminal for the foreground command and
@@ -16,8 +16,8 @@ explicit fault injection should request administrator authorization.
 2. Use a dedicated macOS 15+ machine with an administrator available. Do not run
    concurrent Stelvio managed sessions, VPN reconfiguration, or other tunnel tests.
    Do not remove someone else's routes or resolver files to make a test pass.
-3. Record `sw_vers`, `uname -m`, `go version`, `xcrun --show-sdk-version`, and
-   `xcrun clang --version`. Native Intel networking requires an Intel machine;
+3. Record `sw_vers`, `uname -m`, the pinned Traforo release version and
+   the Python/Stelvio versions. Native Intel networking requires an Intel machine;
    Rosetta execution is a separate, narrower check.
 4. Keep the lid open and prevent idle sleep during long AWS tests. DocumentDB and
    NAT gateway teardown can take tens of minutes after assertions finish.
@@ -44,78 +44,69 @@ aws sts get-caller-identity > "$TRAFORO_RUN/aws-identity.json"
 Do not save passwords, decrypted secrets, AWS credentials, SSM tokens, or session
 URLs in the evidence bundle. Preserve resource IDs and ownership receipts.
 
-## 2. Run Go tests against the changed source
+## 2. Verify the upstream release and testing boundary
 
-The canonical module is `pkg/traforo-client-go`; implementation packages are under
-`internal/`. Go behavior and Darwin C boundary tests run through Go, not pytest.
-The module currently pins Go 1.27.2. Use the pinned compiler rather than silently
-upgrading dependencies or changing `go.mod` to fit the machine.
+Traforo source and CI builds live in https://github.com/stelviodev/traforo.
+`pkg/traforo-client-go` is a reference snapshot only: do not build it, use it to
+certify release bytes, or include it in Python distributions. Go unit/race/fuzz
+and Darwin boundary testing belong to the upstream release workflow. Record that
+release's CI evidence; Stelvio acceptance validates the downloaded executable and
+its Python/host/AWS interoperability. Neither Go nor Xcode is needed to install.
 
-```bash
-cd "$TRAFORO_REPO/pkg/traforo-client-go"
-go version
-go test -mod=readonly -count=1 -timeout=90s ./...
-go test -mod=readonly -race -count=1 -timeout=90s ./...
-go vet -mod=readonly ./...
-go test -mod=readonly ./internal/protocol -run='^$' \
-  -fuzz='^FuzzRequest$' -fuzztime=5s -parallel=2
-go test -mod=readonly ./internal/helper -run='^$' \
-  -fuzz='^FuzzSnapshot$' -fuzztime=5s -parallel=2
-cd "$TRAFORO_REPO"
-```
+The current release pin is **v0.0.4**:
 
-Save command output and exit codes. Increase fuzz duration for release testing.
-A discovered corpus failure is a failure to investigate, not a reason to remove
-the corpus. Preserve independent wire/journal vectors in
-`internal/helper/testdata/independent_vectors.json`; do not regenerate expected
-bytes from the implementation under test.
+| Architecture | Download | SHA-256 |
+| --- | --- | --- |
+| arm64 | `https://github.com/stelviodev/traforo/releases/download/v0.0.4/traforo-darwin-arm64` | `96bebda932a84d2ec277ad60ada6f61db2c1525fc65247b3d17239f4ef696fcb` |
+| x86_64 (Go amd64) | `https://github.com/stelviodev/traforo/releases/download/v0.0.4/traforo-darwin-amd64` | `dd0c8f07bfceb2dd5267cd7abfbd0762dbc6d5a905fb76b7e4d89fdd227895d2` |
 
-These tests cover parsers, capabilities/generations, journal versions/corruption,
-identity, descriptor abuse, serialized cleanup/retry/restart, and shutdown. Darwin
-syscall scenarios compile their test-only C adapters inside `go test`. They do not
-replace a test of actual host routes and DNS.
+## 3. Download and verify both release architectures
 
-On an arm64 machine with Rosetta installed, also run:
+During private-repository development, explicitly set the testing-shell token:
 
 ```bash
-cd "$TRAFORO_REPO/pkg/traforo-client-go"
-GOARCH=amd64 CGO_ENABLED=1 CC='/usr/bin/clang -arch x86_64' \
-  go test -mod=readonly -count=1 -timeout=90s \
-  -exec='/usr/bin/arch -x86_64' ./...
-cd "$TRAFORO_REPO"
+export GITHUB_TOKEN="$(gh auth token)"
 ```
 
-Pass: all commands exit zero, without race reports or skipped required scenarios.
-Record a Rosetta prerequisite failure as untested, not as native Intel acceptance.
+Do not print it or enable shell tracing. Production code uses only the token
+already in the environment; it never executes `gh`. Without a token the downloader
+uses the public release URL. With one it uses the pinned GitHub release-asset API,
+removing authorization before cross-origin redirects. A private unauthenticated
+request should fail with an actionable error; the same path should work after the
+repository is public. Test those HTTP branches with mocked download tests now.
 
-## 3. Rebuild both assets before testing installation
-
-Source changes do not compile automatically during wheel building or installation.
-Rebuild the bundled assets explicitly, even for Go test-source changes included in
-the fingerprint. The release builder currently requires Go 1.27.2, macOS SDK 15.5,
-and `Apple clang version 17.0.0 (clang-1700.0.13.5)`. Select the matching installed
-Xcode/SDK environment. If unavailable, use an approved release host; do not bypass
-its checks or edit the manifest by hand.
+On arm64 with Rosetta available, run:
 
 ```bash
-"$TRAFORO_SOURCE_PYTHON" pkg/traforo-client-go/scripts/build.py
-"$TRAFORO_SOURCE_PYTHON" pkg/traforo-client-go/scripts/build.py --check
-file stelvio/tunnel/_assets/stelvio-traforo-macos-*
-otool -L stelvio/tunnel/_assets/stelvio-traforo-macos-arm64
-otool -L stelvio/tunnel/_assets/stelvio-traforo-macos-x86_64
-stelvio/tunnel/_assets/stelvio-traforo-macos-arm64 version
-/usr/bin/arch -x86_64 stelvio/tunnel/_assets/stelvio-traforo-macos-x86_64 version
-cp stelvio/tunnel/_assets/traforo.json "$TRAFORO_RUN/traforo.json"
+"$TRAFORO_SOURCE_PYTHON" - <<'PYCODE'
+import hashlib, json, os, subprocess
+from pathlib import Path
+from unittest.mock import patch
+from stelvio.tunnel import assets
+results = []
+for architecture in ('arm64', 'x86_64'):
+    with patch.object(assets, '_architecture', return_value=architecture):
+        image = assets.ensure_traforo()
+        digest = hashlib.sha256(image.read_bytes()).hexdigest()
+        assert digest == assets.expected_digest()
+        assert subprocess.check_output(
+            ['/usr/bin/arch', '-' + architecture, str(image), 'version'], text=True
+        ) == assets.EXPECTED_VERSION
+        print(subprocess.check_output(['/usr/bin/otool', '-L', str(image)], text=True))
+        results.append(dict(architecture=architecture, path=str(image),
+                            sha256=digest, bytes=image.stat().st_size))
+Path(os.environ['TRAFORO_RUN'], 'release-images.json').write_text(json.dumps(results, indent=2))
+PYCODE
+export STLV_TEST_TRAFORO_IMAGE="$("$TRAFORO_SOURCE_PYTHON" -c \
+  'from stelvio.tunnel.assets import ensure_traforo; print(ensure_traforo())')"
 ```
 
-The arm64 version command above assumes an arm64 release host. On Intel, execute
-its native asset and record arm64 execution separately. Expected output:
-`stelvio-traforo/1 helper=1 carrier=1`.
-
-Pass: both Mach-O architectures, hashes, source inventory/fingerprint, approved
-system libraries, minimum macOS 15, and the 16 MiB per-asset bound validate. Record
-stripped byte sizes from the manifest. Never test a stale installed helper as if
-it were the new Go code.
+On Intel, record arm64 execution as pending. Both images must match their pins,
+Mach-O architecture and protocol output, stay within 16 MiB, and link only approved
+system libraries. Cached images must be owned regular executable files, not symlinks.
+Re-running should use the verified cache without a download. A missing/corrupt cache
+is repaired before atomic publication. Ordinary unit tests stay offline; enabling
+`STLV_TEST_TRAFORO_IMAGE` executes real process tests using the pre-downloaded image.
 
 ## 4. Run Python regressions and build an isolated wheel
 
@@ -139,53 +130,34 @@ source checkout instead of the installed distribution.
 ```bash
 cd "$TRAFORO_RUN"
 "$STLV_TEST_TUNNEL_PYTHON" - <<'PY'
-import hashlib
-import json
-import subprocess
-import zipfile
-import tarfile
+import json, zipfile, tarfile
 from pathlib import Path
+from unittest.mock import patch
 import stelvio
 from stelvio.tunnel import assets
-from unittest.mock import patch
-
+from stelvio.tunnel.session import NetworkSession
 print('Imported package:', stelvio.__file__)
-root = Path(stelvio.__file__).parent / 'tunnel' / '_assets'
-manifest = json.loads((root / 'traforo.json').read_text())
-for arch, entry in manifest['targets'].items():
-    data = (root / entry['asset']).read_bytes()
-    assert hashlib.sha256(data).hexdigest() == entry['sha256']
-    assert len(data) == entry['bytes'] < 16 * 1024 * 1024
-    # Execute both on an arm64 Mac with Rosetta. Record prerequisite failures.
-    output = subprocess.check_output(
-        ['/usr/bin/arch', '-' + arch, str(root / entry['asset']), 'version'], text=True)
-    assert output == 'stelvio-traforo/1 helper=1 carrier=1\n'
-    print(arch, len(data), output.strip())
+assert '/venv/' in str(stelvio.__file__)
 for artifact in Path('dist').iterdir():
     if artifact.suffix == '.whl':
         with zipfile.ZipFile(artifact) as archive:
             names = archive.namelist()
-            for item in archive.infolist():
-                if 'stelvio-traforo-macos-' in item.filename:
-                    print('wheel compressed bytes:', item.filename, item.compress_size)
     elif artifact.name.endswith('.tar.gz'):
         with tarfile.open(artifact) as archive:
             names = archive.getnames()
     else:
         continue
-    for name in ('stelvio-traforo-macos-arm64', 'stelvio-traforo-macos-x86_64', 'traforo.json'):
-        assert any(path.endswith('/' + name) for path in names)
-    assert not any(path.endswith('/session-manager-plugin') or '/cmd/check/' in path
-                   for path in names)
+    assert not any('traforo-client-go/' in path or '/_assets/' in path
+                   or path.endswith('/session-manager-plugin') for path in names)
+    assert not any('stelvio-traforo-macos-' in path or 'traforo-darwin-' in path for path in names)
 for system in ('Linux', 'Windows'):
     with patch('platform.system', return_value=system):
-        from stelvio.tunnel.session import NetworkSession
         session = NetworkSession(state=None, app='plain', env='test', report=print)
         session.start()
         session.close()
         try:
-            with assets.packaged_helper():
-                raise AssertionError('Unsupported asset selected')
+            assets.ensure_traforo()
+            raise AssertionError('Unsupported asset selected')
         except assets.NativeAssetError:
             pass
 print('Installed distribution checks PASS')
@@ -195,8 +167,8 @@ PY
 cd "$TRAFORO_REPO"
 ```
 
-Pass: installed package path points into the wheel venv; both assets are present
-in wheel/sdist; the AWS plugin is absent; CLI offers install/start/inspect/cleanup/
+Pass: installed package path points into the wheel venv; no native executable or
+reference Go source is present in wheel/sdist; the AWS plugin is absent; CLI offers install/start/inspect/cleanup/
 reconcile/uninstall, with no recover or network-mode option. Import simulation
 checks unsupported-platform guards; it is not Linux or Windows acceptance.
 
@@ -237,7 +209,7 @@ shasum -a 256 /Library/PrivilegedHelperTools/stelvio-traforo
 ```
 
 Approve the macOS authorization request. Expect an empty, certain helper and an
-installed digest matching the selected wheel asset. A second install is idempotent.
+installed digest matching the selected release pin. A second install is idempotent.
 The pinned private Session Manager plugin is downloaded/verified by installation.
 Do not install it manually or add a PATH plugin to compensate for a failure.
 Python plugin tests cover corruption, concurrent/interrupted publication, version
@@ -248,7 +220,7 @@ than deleting another user's cache.
 
 Use a dedicated host. These tests modify real routing/resolver state. Run the
 ordinary-user fixture below from the wheel venv, with the file placed in the evidence
-directory. It creates two owned routes and resolver scopes but no AWS infrastructure.
+directory. It creates two owned VPC units with routes and resolver scopes but no AWS infrastructure.
 The selected CIDRs must not conflict with existing host/VPN routes; a conflict refusal
 is expected protection, not permission to delete the existing route.
 
@@ -321,7 +293,7 @@ as equivalent to that packet/DNS proof.
 ## 7. Installation, upgrade and migration acceptance
 
 Run before AWS so a broken installer cannot strand an expensive deployment.
-Retain a verified older release image/wheel and its manifest for upgrade tests.
+Retain a verified older release image/wheel and its release digest for upgrade tests.
 Use the new package's installer for upgrades; never require the old Python package.
 
 1. **Fresh install:** perform section 5 from an absent-helper baseline.
@@ -386,7 +358,7 @@ One helper owns host networking globally. Collection should include `True`, `{}`
 ## 9. Run the primary real AWS workflow
 
 This is the automated lane executed before compaction, updated for the current Go
-source location and a freshly built candidate wheel:
+downloaded release and a freshly built candidate wheel:
 
 ```bash
 cd "$TRAFORO_REPO"
@@ -571,13 +543,17 @@ Verify the following absent after fresh-install/uninstall acceptance:
 - `/Library/Application Support/Stelvio/tunnel`
 - replacement `.stelvio-traforo.*` staging/retired artifacts in the helper directory
 
-The private Session Manager plugin cache remains intentionally. If the machine had
+The private Traforo and Session Manager plugin caches remain intentionally.
+Test ordinary uninstall with network access unavailable: the trusted installed
+image is sufficient. Forwarder startup also uses the installed pin without a cache
+or download. Interrupted replacement with no installed image may need the cached
+release or network access to resume. If the machine had
 an existing helper baseline, keep the approved installation and certify empty host
 state instead; arrange restoration of its approved version with the machine owner.
 
 ## 14. Report results without overstating acceptance
 
-Attach candidate commit/diff, manifest, architecture/OS/toolchain, all command exit
+Attach candidate commit/diff, release pins, architecture/OS/toolchain, all command exit
 codes, wheel identity, installed digest, native case results, project ownership,
 AWS evidence/audits and before/after host snapshots. Mark each case pass/fail/not
 run. Append new evidence to `tasks/dev-vpc.md`; update walkthrough provenance when
@@ -600,5 +576,27 @@ Historical reference, 2026-10-16, before subsequent Go edits/layout changes:
 Historical evidence was stored under `/private/tmp/stlv-v2-proof` and project
 `spikes/dev-vpc-v1/build/p6/7f123f`. Temporary files can disappear and are not durable
 team dependencies. Linux/WSL/Windows backends and CI/CD remain outside this test
-scope. A new Go change requires new source-coherent assets and relevant fresh
+scope. A new Go change requires new pinned release artifacts and relevant fresh
 acceptance, regardless of those earlier passes.
+
+
+### External release acceptance, 2026-10-17
+
+The v0.0.4 distribution migration was tested using this revised runbook: both real
+release hashes, native/Rosetta version and library inspection, 455 Python regressions
+with explicit image interop, clean-wheel inventories/platform guards, native two-unit
+routing/DNS/TCP, owner death/restart/failed-cleanup recovery, idle/interrupted/legacy
+upgrade, fresh install, cross-venv access and offline uninstall passed.
+
+Default-profile/us-east-1 app `stlv-657643/test` passed the primary `[True]` AWS lane
+in 1541.12 seconds including teardown. Dev and standalone verified TLS, member
+discovery, read/write and reconnection; standalone SIGKILL cleaned automatically.
+Normal exit retained the application bastion; teardown removed it. Fixture and
+independent audits confirmed AWS absence, removing 62 backend versions, one log
+group and passphrase. The original installed helper and exact interface/resolver
+baseline were restored. Route differences were LAN ARP expiry timers only.
+Evidence is under `/private/tmp/traforo-release-proof` and the generated project.
+
+The `{}` and multi-VPC AWS lanes, separate full dev SIGKILL, real Intel networking
+and other macOS releases were not certified by this run. These results apply to the
+pinned release, not future releases or changes to the reference snapshot.
