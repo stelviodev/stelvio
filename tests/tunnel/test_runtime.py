@@ -75,6 +75,9 @@ class Worker:
         self.transport=SimpleNamespace(stop_local=lambda:None)
     def start(self): pass
     def close(self):
+        marker=os.environ.get("STLV_TEST_WORKER_CLOSE_MARKER")
+        if marker:
+            with open(marker,"w") as output: output.write("closed")
         if sys.argv[3]=="failure": raise RuntimeError("fixture cleanup incomplete")
 from stelvio.tunnel.assets import packaged_helper
 # This test has no host installation: run the identical packaged image with a fake carrier.
@@ -87,12 +90,17 @@ with socket.socket(fileno=int(sys.argv[1])) as control:
 """
 
 
-@mark.parametrize("cleanup_failure", [False, True])
+@mark.parametrize(
+    ("cleanup_failure", "owner_death"),
+    [(False, False), (True, False), (False, True)],
+)
 def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_failure(
-    monkeypatch, cleanup_failure
+    monkeypatch, cleanup_failure, owner_death, tmp_path
 ):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "PUBLIC_STARTUP_KEY")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "public-fixture-secret")
+    close_marker = tmp_path / "worker-closed"
+    monkeypatch.setenv("STLV_TEST_WORKER_CLOSE_MARKER", str(close_marker))
     monkeypatch.delenv("AWS_PROFILE", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
     context = AwsExecutionContext.capture(
@@ -156,7 +164,18 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
                 "phase": "pending",
             }
         ]
-        if cleanup_failure:
+        if owner_death:
+            # Closing the parent's owner lease simulates abrupt owner loss while
+            # leaving the control socket open. The orphan watchdog must wake the
+            # runtime finalizer instead of exiting before Worker.close().
+            os.close(runtime._lease)
+            runtime._lease = -1
+            runtime.process.wait(timeout=10)
+            assert runtime.process.returncode == 0
+            assert close_marker.read_text() == "closed"
+            runtime._control.close()
+            runtime._closed = True
+        elif cleanup_failure:
             with raises(RuntimeError, match="cleanup incomplete; run stlv tunnel cleanup"):
                 runtime.close()
             assert runtime.process.returncode == 70

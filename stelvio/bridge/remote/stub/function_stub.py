@@ -29,6 +29,7 @@ APP_SEGMENT = channel_segment(APP_NAME)
 STAGE_SEGMENT = channel_segment(STAGE)
 
 WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
+APPSYNC_ACK_TIMEOUT = 10
 
 # Global state for connection reuse (survives across warm container invocations)
 _event_loop = None
@@ -71,9 +72,39 @@ async def connect_to_appsync() -> websockets.WebSocketClientProtocol:
     await ws.send(json.dumps({"type": "connection_init"}))
 
     # Wait for connection_ack
-    await ws.recv()
+    await wait_for_appsync_ack(ws, "connection_ack")
 
     return ws
+
+
+async def wait_for_appsync_ack(
+    ws: websockets.WebSocketClientProtocol,
+    expected_type: str,
+    *,
+    operation_id: str | None = None,
+) -> dict:
+    """Wait for the matching AppSync acknowledgement, ignoring keepalives."""
+    deadline = asyncio.get_running_loop().time() + APPSYNC_ACK_TIMEOUT
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}")
+        raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        message = json.loads(raw_message)
+        message_type = message.get("type")
+        if message_type == "ka":
+            continue
+        if message_type == "subscribe_error":
+            raise ConnectionError(f"AppSync subscribe failed: {message.get('errors', [])}")
+        if message_type != expected_type:
+            raise ConnectionError(
+                f"Expected AppSync {expected_type}, received {message_type!r}"
+            )
+        if operation_id is not None and message.get("id") != operation_id:
+            raise ConnectionError(
+                f"AppSync {expected_type} acknowledgement had an unexpected operation ID"
+            )
+        return message
 
 
 async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
@@ -90,10 +121,7 @@ async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
         )
     )
 
-    ack = json.loads(await ws.recv())
-    if ack.get("type") == "subscribe_error":
-        errors = ack.get("errors", [])
-        raise ConnectionError(f"AppSync subscribe to {response_channel!r} failed: {errors}")
+    await wait_for_appsync_ack(ws, "subscribe_success", operation_id="response-sub")
 
 
 async def get_or_create_connection() -> tuple[websockets.WebSocketClientProtocol, bool]:

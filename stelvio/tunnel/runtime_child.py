@@ -6,7 +6,7 @@ import os
 import socket
 import sys
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from dataclasses import asdict, replace
 from threading import Event, Lock, Thread
 from types import MappingProxyType
@@ -135,7 +135,12 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             # Kernel authority is revoked immediately, before AWS cleanup waits.
             lease.revoke()
             fence()
-            os._exit(70)
+            # Wake the runtime's primary loop so it can join workers and run
+            # their normal close paths. In particular, SshTransport.close()
+            # explicitly terminates the owned SSM session; exiting here would
+            # leave that AWS-side session active after its local SSH process died.
+            with suppress(OSError):
+                control.shutdown(socket.SHUT_RDWR)
 
         Thread(target=orphaned, daemon=True, name="stelvio-network-owner").start()
         preparer = Thread(target=prepare, name="stelvio-network-inventory")
@@ -156,7 +161,7 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                     break
                 else:
                     raise ValueError("Invalid network runtime operation")
-        except EOFError:
+        except (EOFError, OSError):
             pass
         finally:
             stop.set()

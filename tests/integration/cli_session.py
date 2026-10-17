@@ -19,7 +19,11 @@ from stelvio.tunnel.credentials import AWS_IO
 from stelvio.tunnel.helper_client import HelperError, NativeHelper
 
 from .assert_helpers import _boto3_session
-from .assert_tunnel import assert_access_absent, assert_application_absent
+from .assert_tunnel import (
+    assert_access_absent,
+    assert_application_absent,
+    wait_owned_transports_absent,
+)
 from .tunnel_cleanup import purge_test_metadata
 
 REPO = Path(__file__).resolve().parents[2]
@@ -483,6 +487,15 @@ def run():
         os.kill(self.process.pid, signal.SIGKILL)
         self.process.wait(timeout=10)
         self.recover_access()
+        saved = json.loads((self.project / "resolved-ownership.json").read_text())
+        for transport in saved["transports"]:
+            wait_owned_transports_absent(
+                transport["instance"], transport["owner_hash"], sdk=self.sdk
+            )
+        self.evidence(
+            "crash-transports-closed",
+            {"instances": [item["instance"] for item in saved["transports"]]},
+        )
         self.evidence("crash-recovered", {"complete": True})
 
     def recover_access(self) -> None:

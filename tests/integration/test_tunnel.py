@@ -220,6 +220,13 @@ def _exercise_startup_outage(session, urls, manifest, baseline):
     finally:
         ec2.start_instances(InstanceIds=[instance])
     session.wait_ready()
+    receipts = json.loads((session.project / "resolved-ownership.json").read_text())["transports"]
+    assert {item["instance"] for item in receipts} == {
+        vpc.access.instance_id for vpc in manifest.enabled_vpcs
+    }
+    assert len(receipts) == len(manifest.enabled_vpcs)
+    assert len({item["session_id"] for item in receipts}) == len(receipts)
+    session.evidence("startup-recovery-one-transport-per-bastion", {"transports": receipts})
     restored = assert_example_response(
         urls["api2"], marker=session.marker, pid=session.process.pid
     )

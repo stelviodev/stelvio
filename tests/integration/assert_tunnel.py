@@ -44,14 +44,15 @@ def assert_example_response(url: str, *, marker: str, pid: int) -> dict:
     return payload
 
 
-def owned_transport(instance: str, owner: str) -> dict:
+def owned_transports(instance: str, owner: str, *, sdk=None) -> list[dict]:
     assert re.fullmatch(r"[0-9a-f]{16}", owner)
-    ssm = _boto3_session().client("ssm", config=AWS_IO)
+    sdk = sdk or _boto3_session()
+    ssm = sdk.client("ssm", config=AWS_IO)
     pages = ssm.get_paginator("describe_sessions").paginate(
         State="Active",
         Filters=[{"key": "Target", "value": instance}],
     )
-    owned = [
+    return [
         s
         for p in pages
         for s in p.get("Sessions", [])
@@ -60,8 +61,21 @@ def owned_transport(instance: str, owner: str) -> dict:
             s.get("Reason", ""),
         )
     ]
+
+
+def owned_transport(instance: str, owner: str) -> dict:
+    owned = owned_transports(instance, owner)
     assert len(owned) == 1
     return owned[0]
+
+
+def wait_owned_transports_absent(instance: str, owner: str, *, sdk=None, timeout: int = 180):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not owned_transports(instance, owner, sdk=sdk):
+            return
+        time.sleep(1)
+    raise TimeoutError(f"Owned SSM transport remained active on {instance} after {timeout}s")
 
 
 def interrupt_transport(instance: str, owner: str) -> str:
