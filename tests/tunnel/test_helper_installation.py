@@ -184,6 +184,12 @@ def test_uninstall_uses_installed_image_without_cache_or_download(setup, monkeyp
 
 
 def test_forwarder_validates_installed_pin_without_cache(monkeypatch):
+    checked = []
+    monkeypatch.setattr("stelvio.tunnel.assets.validate_network_capabilities", checked.append)
+    monkeypatch.setattr(
+        "stelvio.tunnel.assets.ensure_traforo",
+        lambda: (_ for _ in ()).throw(AssertionError("runtime downloaded an asset")),
+    )
     from stelvio.tunnel.forwarding import packaged_forwarder
 
     monkeypatch.setattr(installation, "_installed_digest", lambda: "a" * 64)
@@ -192,6 +198,7 @@ def test_forwarder_validates_installed_pin_without_cache(monkeypatch):
     )
     with packaged_forwarder() as path:
         assert path == installation.INSTALLED_HELPER
+    assert checked == [installation.INSTALLED_HELPER]
     monkeypatch.setattr(installation, "_installed_digest", lambda: "b" * 64)
     with pytest.raises(RuntimeError, match="differs"), packaged_forwarder():
         raise AssertionError("Wrong forwarder yielded")

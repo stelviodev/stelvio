@@ -44,7 +44,7 @@ Now call your API like you normally would (e.g. `https://...execute-api.../v1/`)
 To stop the local server: `Ctrl+C`. 
 
 !!! warning
-    Stopping the dev server leaves your application infrastructure in AWS, including the replacement stub Lambda. Temporary VPC access is cleaned up separately; persistent access stays deployed. See [VPC access policies](../components/aws/vpc.md#dev-access-policy).
+    Stopping the dev server leaves your application infrastructure in AWS, including the replacement stub Lambda. Owned local routes, interfaces, and resolver files are cleaned up; the explicitly deployed bastion stays deployed. See [VPC access policies](../components/aws/vpc.md#dev-access-policy).
 
     You need to re-deploy without dev mode using `stlv deploy` again to switch back to your real Lambda code being deployed to AWS.
 
@@ -60,6 +60,12 @@ and driver TLS settings you use in production. You do not need a localhost URI
 or a separate handler for dev mode.
 
 ### Setup
+
+Stelvio pins Traforo v0.0.5, which supports private DNS and packet forwarding.
+Managed startup verifies `forwarder=2` and `dns=1` before helper installation or
+host changes. Local builds are optional; contributors can select one with
+`STLV_TRAFORO_DEV_BINARY` as described in the
+[testing guide](../contributing/integration-tests.md).
 
 1. Use macOS 15 or newer on Apple Silicon or Intel. Stelvio downloads a checksum-pinned
    **Traforo** release for your architecture into its private binary cache. You do not
@@ -145,7 +151,7 @@ The root-owned Traforo helper creates a virtual `utun` interface, scoped routes
 for the selected VPC CIDRs, and scoped macOS resolver files. A separate Traforo
 forwarder runs as your ordinary user and carries TCP traffic through OpenSSH's
 SOCKS proxy. SSH travels over a Systems Manager WebSocket session to the VPC
-access instance; no inbound SSH port is opened. A local Python DNS relay sends
+access instance; no inbound SSH port is opened. The nonroot Traforo DNS relay sends
 the selected private queries through that connection to the VPC DNS resolver.
 Unrelated DNS keeps using your normal resolvers.
 
@@ -226,3 +232,12 @@ and redeploy before managed access works. Existing compatible persistent and
 disabled deployment metadata can still be read. Any old temporary AWS resources
 must be disposed of through their original ownership workflow before upgrading;
 v2 does not adopt or delete that infrastructure.
+
+### Private DNS implementation
+
+The nonroot Traforo forwarder accepts scoped local UDP/TCP DNS queries and sends
+DNS over TCP through the owning VPC's SSH/SOCKS transport to its VPC resolver.
+The privileged helper only manages owned macOS resolver configuration. Each VPC
+retains its local DNS listener during reconnects; owned queries fail until the
+transport is ready again. Other names keep using your normal DNS. Python performs
+AWS discovery and session coordination; it does not serve or parse DNS messages.

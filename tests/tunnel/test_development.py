@@ -314,3 +314,35 @@ def test_builder_help_has_no_build_or_install_side_effect(builder, monkeypatch):
     assert result.value.code == 0
     build.assert_not_called()
     install.assert_not_called()
+
+
+@mark.parametrize("fault", [None, "old", "json", "version", "stderr", "exit", "changed"])
+def test_local_network_capability_check_is_explicit_and_fences_changes(local_image, fault):
+    def execute(arguments, **options):
+        if arguments[-1] == "version":
+            return SimpleNamespace(
+                returncode=0, stdout=assets.EXPECTED_VERSION.encode(), stderr=b""
+            )
+        assert arguments == [str(local_image), "capabilities"]
+        body = b'{"forwarder":2,"dns":1}'
+        if fault == "old":
+            body = b"{}"
+        elif fault == "json":
+            body = b"not-json"
+        elif fault == "version":
+            body = b'{"forwarder":1,"dns":1}'
+        elif fault == "changed":
+            local_image.write_bytes(local_image.read_bytes() + b"changed")
+        return SimpleNamespace(
+            returncode=1 if fault == "exit" else 0,
+            stdout=body,
+            stderr=b"failure" if fault == "stderr" else b"",
+        )
+
+    assets.subprocess.run.side_effect = execute
+    environment = {assets.DEVELOPMENT_BINARY_ENV: str(local_image)}
+    if fault:
+        with raises(assets.NativeAssetError):
+            assets.require_network_capabilities(environment)
+    else:
+        assets.require_network_capabilities(environment)

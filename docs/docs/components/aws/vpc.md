@@ -266,6 +266,11 @@ provides the local network path.
 
 ### Private DNS
 
+The nonroot Traforo forwarder serves scoped loopback DNS and forwards queries over
+TCP through the owning VPC transport. The privileged helper manages macOS resolver
+entries. The pinned Traforo v0.0.5 release includes this DNS relay; no local Go
+build is needed. See [dev setup](../../concepts/dev-mode.md#setup).
+
 Stelvio discovers DocumentDB cluster, reader, and member hostnames and routes
 their DNS through the VPC resolver. Keep the original names and ports so TLS
 hostname verification and replica discovery continue to work.

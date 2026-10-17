@@ -13,6 +13,9 @@ func main() {
 	args := os.Args[1:]
 	var err error
 	switch {
+	case len(args) == 1 && args[0] == "capabilities":
+		fmt.Println(`{"forwarder":2,"dns":1}`)
+		return
 	case len(args) == 1 && args[0] == "version":
 		fmt.Println("stelvio-traforo/1 helper=1 carrier=1")
 		return

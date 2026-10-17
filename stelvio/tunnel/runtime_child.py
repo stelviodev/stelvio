@@ -53,9 +53,9 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
     }
     discovery = ResourceDiscovery(description.manifest)
     with ExitStack() as scope:
+        binary = scope.enter_context(packaged_forwarder())
         lease = NativeHelper().acquire(description.session_id)
         scope.callback(lease.close)
-        binary = scope.enter_context(packaged_forwarder())
         forwarding = Forwarding(binary, lease.carrier)
         scope.callback(forwarding.close)
 

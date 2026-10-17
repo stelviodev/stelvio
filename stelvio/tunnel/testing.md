@@ -9,6 +9,15 @@ zsh/bash, Python 3.12+, and `uv`. Keep one terminal for the foreground command a
 another for observation. Run as an ordinary user; only helper administration and
 explicit fault injection should request administrator authorization.
 
+## Current release and capability gate
+
+Managed networking requires `forwarder=2` and `dns=1`, supplied by pinned Traforo
+v0.0.5. Leave `STLV_TRAFORO_DEV_BINARY` unset for release acceptance. The optional
+**Developer-image route** tests local Go changes. Both routes validate capabilities
+before helper installation or host changes; no Python DNS fallback exists.
+Unsetting the override restores normal pinned-release networking when installation
+can safely replace the developer image.
+
 ## 1. Select the candidate and reserve a test machine
 
 1. Record `git rev-parse HEAD`, `git branch --show-current`, and `git status --short`.
@@ -57,6 +66,8 @@ cd "$TRAFORO_REPO/pkg/traforo-client-go"
 go test -mod=readonly -count=1 -timeout=90s ./...
 go test -mod=readonly -race -count=1 -timeout=90s ./...
 go test -mod=readonly ./internal/protocol -run='^$' -fuzz='^FuzzRequest$' -fuzztime=5s -parallel=2
+go test -mod=readonly ./internal/dnsrelay -run='^$' -fuzz='^FuzzAnswer$' -fuzztime=5s -parallel=2
+go test -mod=readonly ./internal/forwarder -run='^$' -fuzz='^FuzzControl$' -fuzztime=5s -parallel=2
 go test -mod=readonly ./internal/helper -run='^$' -fuzz='^FuzzSnapshot$' -fuzztime=5s -parallel=2
 cd "$TRAFORO_REPO"
 ```
@@ -65,12 +76,12 @@ Go and the macOS SDK are required for local source tests/builds; neither is need
 for ordinary release installation. Record upstream CI evidence when certifying a
 release. Local source tests alone do not certify downloaded bytes.
 
-The current release pin is **v0.0.4**:
+The current release pin is **v0.0.5**:
 
 | Architecture | Download | SHA-256 |
 | --- | --- | --- |
-| arm64 | `https://github.com/stelviodev/traforo/releases/download/v0.0.4/traforo-darwin-arm64` | `96bebda932a84d2ec277ad60ada6f61db2c1525fc65247b3d17239f4ef696fcb` |
-| x86_64 (Go amd64) | `https://github.com/stelviodev/traforo/releases/download/v0.0.4/traforo-darwin-amd64` | `dd0c8f07bfceb2dd5267cd7abfbd0762dbc6d5a905fb76b7e4d89fdd227895d2` |
+| arm64 | `https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-arm64` | `b408afcaca01f760f4999c674a21271302c98eedad61678067ab80f844a4ba0f` |
+| x86_64 (Go amd64) | `https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-amd64` | `4008c435efb5bb3913784a10da61df8fdbaadcbc324e42f2bfd470dbbc86faba` |
 
 ## 3. Download and verify both release architectures
 
@@ -138,11 +149,12 @@ under the ignored module `build/`, and uses normal macOS authorization to replac
 the helper. Existing sessions must stop before changing images. No release pins,
 download caches or persistent root markers are changed. The export is mandatory:
 the script's environment affects only its own installation, not its parent shell.
+Verify `"$STLV_TRAFORO_DEV_BINARY" capabilities` reports `forwarder=2` and `dns=1`.
 
 Run the Python tests below with both variables to include real local-image process
 interop; pytest never compiles Go. Use this checkout's editable Stelvio environment
-for developer-mode acceptance. Clean release-wheel acceptance remains a separate
-path with `STLV_TRAFORO_DEV_BINARY` unset. The same local binary must be selected for
+for developer-mode acceptance. Wheel packaging/administration acceptance remains a separate path; managed
+networking from the wheel must receive the same developer override until release pins change. The same local binary must be selected for
 helper installation and the isolated forwarder, which executes the root-owned image.
 
 Native acceptance must cover local install/reuse, two-unit routing/DNS/TCP, actual
@@ -159,7 +171,8 @@ unset STLV_TRAFORO_DEV_BINARY
 uv run stlv tunnel install
 ```
 
-Without the variable, managed startup restores the pinned release when safe. Inspect
+Without the variable, managed startup uses the compatible v0.0.5 pin.
+`tunnel install` restores that pinned image when safe. Inspect
 and ordinary uninstall work even with an invalid override or deleted build file.
 Older Stelvio versions do not support this escape hatch. Rebuild after source edits;
 the selector deliberately does not compile or enforce live source fingerprints.
@@ -674,3 +687,103 @@ intact. Record that global interface difference, rather than removing foreign de
 or claiming exact equality. IPv4 route differences were ordinary ARP expiry timers.
 Evidence: `/private/tmp/traforo-local-proof`. No new AWS run, Intel or other macOS
 acceptance is claimed by these developer-mode tests.
+
+## DNS migration acceptance sequence
+
+1. Run Go unit/race tests and DNS/control fuzzing above. They cover DNS semantics,
+   stale generations, direct-host payload verification, and socket/worker bounds.
+2. For release acceptance, unset `STLV_TRAFORO_DEV_BINARY` and set
+   `STLV_TEST_TRAFORO_IMAGE` to the verified cached v0.0.5 executable. Alternatively,
+   build/install local source, export the printed override and set
+   `STLV_TEST_TRAFORO_IMAGE="$STLV_TRAFORO_DEV_BINARY"`. Run `tests/tunnel` to include
+   independent fixed-wire UDP/TCP and actual isolated-runtime interoperability.
+3. Run actual macOS tests, without AWS deployments:
+
+   ```bash
+   "$TRAFORO_SOURCE_PYTHON" -m pytest tests/integration/test_tunnel_dns.py \
+     --integration-tunnel -n 0 -v --tb=short
+   ```
+
+   Require public-fallback rejection with an observed scoped outage query,
+   two-VPC DNS/host-TCP payloads, direct and SOCKS readiness, CNAMEs, independent
+   failure and port retention across reconnect. Inspect must be empty/certain.
+4. Run crash/restart and interrupted-install gates, then the primary AWS workflow
+   in section 9 using a candidate wheel and the same image selection in its CLI process.
+   Keep the local image unchanged while sessions are active. Verify standalone
+   access, real TLS/member discovery/read-write, transport recovery, and teardown.
+5. If testing a developer build, unset the override and restore v0.0.5 through
+   `stlv tunnel install` when idle. Managed startup must use the release afterward.
+   Inspect/cleanup/uninstall work even when the developer build is absent.
+6. Audit owned host state and AWS absence. Record new results below separately
+   from the historical Python-relay and pinned-release evidence.
+
+Stelvio itself no longer requires `dnspython`. Application drivers such as PyMongo
+may independently install it for their own DNS/SRV support; that is separate from
+Traforo and the tunnel. A clean Stelvio-only wheel environment should have no
+`dns` module.
+
+## 2026-10-17 Go DNS migration acceptance
+
+These results apply to the Go DNS migration, separately from historical Python
+relay/pinned-release evidence above. Source and test reviews completed; reported
+boundedness, retirement fencing, direct-path coverage, and deadline assertion gaps
+were fixed and rechecked.
+
+| Gate | Observed result |
+| --- | --- |
+| Python regressions | 485 passed, including actual DNS/control/runtime interop; final boundary subset 73 passed |
+| Go | Full unit/race suite passed; DNS fuzz 276,509 and control fuzz 86,885 executions with 5-second budgets |
+| Native arm64 | Two macOS DNS tests passed: scoped CNAME resolution, observed outage/public-fallback rejection, two-VPC real utun/carrier TCP payloads, independent failure and listener-port retention |
+| Crash/recovery | Parent death with frozen child, runtime death, helper restart, retained foreign-cleanup refusal and recovery passed |
+| Administration | Active changed-image refusal, idle replacement, interrupted replacement recovery, missing-override inspect and offline uninstall passed |
+| Packaging | Wheel/sdist contain no Go module, developer scripts or executables; fresh Stelvio-only wheel imports without dnspython; non-VPC startup and unsupported-platform guards passed |
+| x86_64 | Build, version/capabilities and DNS/control Go tests through Rosetta passed; native Intel networking pending |
+| AWS default/us-east-1 | `stlv-b37960/test`: public Function URL → local handler → verified DocumentDB TLS/member discovery/read-write; reload/idle and transport recovery passed; standalone read-write/recovery and SIGKILL cleanup passed |
+| AWS final result | 1 passed in 1389.96s, including teardown; 49 resources deleted; independent absence audit passed; 59 metadata versions and 1 log group removed, passphrase absent |
+| Host final | Original helper image restored, exact starting interfaces/resolver files restored, empty/certain inspection, no replacement artifacts |
+
+AWS-tested arm64 image SHA-256: `456899ac5e980fd40e35243f17498b02ee9bfcbf93052f10167f12277920eba0` (7,690,098 bytes).
+Final Go source fingerprint: `152d5de5b4a049885f2ee77ecdfb79d794a14536adac07d7f74e9b2316b85b47`. Go 1.27.2, macOS SDK 15.5,
+Clang 17, minimum macOS 15; only approved Apple system libraries. The DNS dependency
+adds Security.framework through Go TLS/X.509 linkage. x86_64 is 8,159,336 bytes;
+both remain below 16 MiB. No executable ships in a Python distribution.
+
+The AWS run used an installed candidate wheel whose production Python files were
+checked byte-for-byte against the current source. Acceptance evidence is retained
+locally under `/private/tmp/traforo-dns-proof`; testing teams should create their
+own evidence directory and follow the steps above rather than depend on that path.
+
+At the time of this historical local-build acceptance, pins remained v0.0.4,
+which lacked DNS capabilities. Managed networking required the local build/export
+until a compatible external release was published and pinned. Release pinning,
+native Intel acceptance and other platforms were follow-ups at that point;
+v0.0.5 pin validation is recorded separately below. No commits, branch changes,
+or CI/CD changes were made during that migration.
+
+## 2026-10-17 v0.0.5 release-pin validation
+
+This pin update makes the developer override optional again. Both actual release
+assets were downloaded through the production downloader, with authentication
+supplied only through the test process environment. Their hashes match the table
+above. Mach-O architecture, approved system-library dependencies, base protocol
+output, `forwarder=2` / `dns=1` capabilities and verified cache reuse passed.
+
+| Release image | Bytes | Execution |
+| --- | ---: | --- |
+| arm64 | 7,772,690 | Native macOS arm64 |
+| x86_64 | 8,237,176 | Rosetta on arm64 |
+
+334 affected Python tests passed, including actual DNS and isolated-runtime
+interoperability with the downloaded arm64 release, with no developer override.
+The documentation build, walkthrough JavaScript and embedded-source checks passed.
+Source and test reviews reported no material findings.
+
+No privileged helper installation, live host networking proof or AWS deployment
+was performed for this update. The installed helper digest remained
+`fd65dee8e07f72f0303a51140a7b1158dcfa11f5cc6856ebbb675a21c1516625`.
+Previous local-build AWS acceptance remains historical and does not establish
+release-image AWS acceptance. Real Intel networking remains pending.
+Local evidence: `/private/tmp/traforo-v005-proof`.
+
+Wheel and sdist exclusion checks passed: neither contains Go source, developer
+build scripts or executable assets; wheel metadata has no dnspython requirement.

@@ -3,13 +3,9 @@
 package forwarder
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -29,15 +25,6 @@ import (
 
 const frameHeader = 16 // unit32 + generation64 + AF_INET32, all network order
 const mtu = 1500
-
-type command struct {
-	Operation  string   `json:"operation"`
-	Unit       uint32   `json:"unit"`
-	Generation uint64   `json:"generation"`
-	Attempt    uint64   `json:"attempt"`
-	Proxy      string   `json:"proxy"`
-	CIDRs      []string `json:"cidrs"`
-}
 
 type unit struct {
 	id          uint32
@@ -239,6 +226,7 @@ type manager struct {
 	units       map[uint32]*unit
 	generations map[uint32]uint64
 	carrier     *net.UnixConn
+	dns         map[uint32]*dnsUnit
 }
 
 func prefixes(values []string) ([]netip.Prefix, error) {
@@ -387,28 +375,6 @@ func Run(arguments []string) error {
 		}
 	}()
 	go m.dispatch()
-	fmt.Println("READY")
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 4096), 16384)
-	for scanner.Scan() {
-		var c command
-		decoder := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
-		decoder.DisallowUnknownFields()
-		err = decoder.Decode(&c)
-		if err == nil {
-			var rest any
-			if decoder.Decode(&rest) != io.EOF {
-				err = errors.New("trailing command")
-			}
-		}
-		if err == nil {
-			err = m.apply(c)
-		}
-		if err != nil {
-			fmt.Println("REJECTED")
-		} else {
-			fmt.Println("OK")
-		}
-	}
-	return scanner.Err()
+	defer m.closeDNS()
+	return m.serveControl(os.Stdin, os.Stdout)
 }

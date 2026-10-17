@@ -33,11 +33,11 @@ Invocation: Function URL → Lambda stub → AppSync Events WSS → local bridge
 → correlated result back. Database bytes never travel on this WebSocket.
 
 Networking: isolated nonroot Python runtime owns captured AWS context, per-VPC
-supervisors, discovery and DNS relay. Local socket → route/utun → root helper →
+supervisors and discovery. The nonroot Go forwarder owns DNS serving/probes. Local socket → route/utun → root helper →
 revocable Unix datagram carrier → nonroot Traforo forwarder (tun2socks/gVisor)
 → OpenSSH SOCKS → private plugin SSM WSS → SSM agent → loopback forwarding-only
 sshd → private service. Database TLS remains end-to-end. DNS: system resolver →
-scoped /etc/resolver entry → Python relay → SOCKS/SSH TCP → VPC resolver (+2).
+scoped /etc/resolver entry → Traforo DNS relay → SOCKS/SSH TCP → VPC resolver (+2).
 
 One downloaded Go+cgo executable has separate helper and forwarder processes. Root
 retains raw utun descriptors and owns journaled host mutations. Peer audit token
@@ -54,23 +54,26 @@ The split repository and release CI are at
 `https://github.com/stelviodev/traforo`. `pkg/traforo-client-go` is authoritative for the Go client API and unit tests and
 is mirrored by the repository split. It is excluded from wheel/sdist. Release CI
 remains external; scripts/build.py is a monorepo developer build/install tool.
-`assets.py` pins v0.0.4 URLs, GitHub asset IDs and architecture SHA-256 values.
+`assets.py` pins v0.0.5 URLs, GitHub asset IDs and architecture SHA-256 values.
 `ensure_traforo()` locks, validates and atomically caches a download under
 `get_bin_path()`. `GITHUB_TOKEN`, when provided by the environment, authenticates
 only the GitHub API request; cross-origin redirects drop authorization. Otherwise
 use the pinned public download URL. Production never calls `gh`. Both helper and
 forwarder still execute the same root-owned installed image; forwarder checks its
-pin without a cache or network operation. Normal uninstall also works offline.
+selected digest without a cache or network operation. Managed startup additionally
+requires forwarder=2/dns=1 before installation; the old pin is administration-only
+until a compatible release is pinned. Normal uninstall also works offline.
 
 
 ## Answering a reviewer
 
-The HTML has eight chapters: Architecture, Trace, Components, Principles,
-Comparison, Code, Alternatives, Evidence. Admission selectors demonstrate
+The HTML has nine chapters: Architecture, Trace, Components, Principles,
+Comparison, Code, Alternatives, Go DNS, Evidence. Admission selectors demonstrate
 readiness versus disabled bypass. The trace stepper distinguishes deploy/dev/start.
 Component columns explain necessity, removal loss, and SST equivalent. Requirement
 cards defend each adapter; alternatives toggles show when fixed forwarding is
-simpler. Source excerpts have full-file hashes; refresh them after edits.
+simpler. Source excerpts have SHA-256 hashes of their displayed source lines; refresh
+excerpts and hashes after edits.
 
 SST comparison is pinned to a0bd20f762883e72a35caccb4896c42ce5b3f707 in the local
 checkout `/Users/sebst/Code/anomalyco/sst`. Its tunnel uses direct public Go SSH,
@@ -176,3 +179,61 @@ idle helper and owned host state restored. New Apple identityservicesd utun5/utu
 were independently attributed and preserved; global interface inventory differs for
 that reason, not an owned cleanup failure. Evidence /private/tmp/traforo-local-proof.
 No AWS run or native Intel acceptance is claimed for this developer change.
+
+## Go DNS migration (2026-10-17)
+
+`internal/dnsrelay` now owns DNS wire handling (miekg/dns v1.1.72), scoped UDP/TCP
+listeners, SOCKS upstream exchanges, direct-host payload probes, and observations.
+`internal/forwarder/control.go` is a bounded JSON control-v2 interface with request
+IDs. DNS configure/reject/retire and probes/observations carry unit, host generation,
+attempt and revision. DNS views survive packet removal, retain their port through
+reconnect, reject queries during outages, and are capped at eight including retained
+views. Hostnames are exact matches; only configured domains authorize descendants.
+
+Python supervisor retains discovery, monotonic helper resolver claims and retries.
+It receives the Go listener port before configuring the helper, asks Go to prove
+SOCKS and ordinary host paths, and uses an isolated OS getaddrinfo subprocess with
+Go arm/check/release observations. Never replace these checks with SOCKS-only
+readiness. No production Python DNS parser or dnspython dependency remains.
+
+`capabilities` reports forwarder=2/dns=1; base version/helper/carrier stay at 1.
+Managed startup validates the captured selection before installer/host changes and
+checks capabilities directly on the installed forwarder, without downloading
+again. Pinned v0.0.5 supplies these capabilities; STLV_TRAFORO_DEV_BINARY is optional
+for local development. During the historical migration, v0.0.4 lacked them and
+required a local build. No release publication or CI changes were made here.
+Existing historical acceptance predates Go DNS unless stated.
+
+## Go DNS acceptance and next step
+
+Historical local-build migration: Python 485 passed; Go unit/race + bounded DNS/control fuzz passed;
+native two-VPC scoped DNS/carrier/reconnect, observed fail-closed DNS, crash/restart,
+active refusal/interrupted replacement and offline uninstall passed. Both architecture
+build checks and Rosetta DNS/control tests passed; real Intel networking is pending.
+AWS stlv-b37960/test on default/us-east-1 passed in 1389.96s including teardown:
+public URL/local TLS/member discovery/read-write, standalone/reconnect and SIGKILL.
+49 resources deleted; independent absence audit passed; 59 metadata versions,
+one log group and passphrase removed. Original helper, exact interface/resolver
+baseline and empty/certain host state restored. See testing.md for exact hashes
+and repeatable testing-team steps. Historical tables above remain historical.
+
+The release pin is now v0.0.5; local builds are optional. Future native/AWS
+acceptance must record the selected release digest separately from local-build evidence.
+Do not silently restore the Python DNS relay or let v0.0.4 activate networking.
+
+
+## v0.0.5 release pin acceptance (2026-10-17)
+
+Both actual release assets were downloaded through the production downloader with
+a test-process environment token. SHA-256, Mach-O architecture, approved system
+libraries, version, capabilities and cache reuse passed. Arm64 is 7,772,690 bytes;
+x86_64 is 8,237,176 bytes and ran under Rosetta. Both report forwarder=2/dns=1.
+334 affected Python tests passed, including real release DNS/runtime interop.
+Startup now validates the selected release or developer image before installation;
+the forwarder validates capabilities on the root-owned installed image without a
+download. The developer override is optional. No helper install, host networking
+acceptance or AWS deployment was performed for this pin update. Prior local-build
+AWS evidence stays historical; native Intel networking remains pending.
+
+Wheel and sdist exclusion checks passed: neither contains Go source, developer
+build scripts or executable assets; wheel metadata has no dnspython requirement.

@@ -1,37 +1,12 @@
 """Readiness needs a matching payload reply, not an optimistic local TCP handshake."""
 
-from ipaddress import IPv4Address
 from types import SimpleNamespace
 
-import dns.flags
-import dns.message
 from pytest import mark, raises
 
 from stelvio.tunnel.helper_client import HelperError, HelperStatus, HelperUnitStatus
 from stelvio.tunnel.helper_protocol import ResolverEndpoint
 from stelvio.tunnel.supervisor import VpcWorker
-from stelvio.tunnel.transport import TransportRetryError
-
-
-@mark.parametrize("fault", [None, "missing-payload", "wrong-question", "truncated"])
-def test_host_path_readiness_requires_complete_matching_dns_reply(monkeypatch, fault):
-    def reached(arguments, **options):
-        query = dns.message.from_wire(bytes.fromhex(arguments[-1]))
-        answer = dns.message.make_response(query)
-        if fault == "wrong-question":
-            answer.question = dns.message.make_query("other.invalid", "SOA").question
-        if fault == "truncated":
-            answer.flags |= dns.flags.TC
-        return SimpleNamespace(
-            returncode=0, stdout="" if fault == "missing-payload" else answer.to_wire().hex()
-        )
-
-    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", reached)
-    if fault:
-        with raises(TransportRetryError, match="payload did not traverse"):
-            VpcWorker._host_dns(IPv4Address("10.254.0.2"))
-    else:
-        VpcWorker._host_dns(IPv4Address("10.254.0.2"))
 
 
 @mark.parametrize(
@@ -48,7 +23,7 @@ def test_host_path_readiness_requires_complete_matching_dns_reply(monkeypatch, f
 def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, PLR0915 - explicit lifecycle boundary fixture
     monkeypatch, terminal
 ):
-    """Exercise the real worker loop and relay across transport/host boundary fakes."""
+    """Exercise the worker across Go DNS, transport and host boundary fakes."""
     from ipaddress import IPv4Network
     from threading import Event
 
@@ -57,6 +32,7 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
     events = []
     published = []
     configurations = []
+    dns_state = {"rejected": False, "observed": False}
     network = SimpleNamespace(
         identity="network-a",
         cidrs=(IPv4Network("10.254.0.0/16"),),
@@ -73,11 +49,7 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
             self.probes = 0
             events.append(("start", self.attempt))
             if self.attempt == 2:
-                query = dns.message.make_query("private.example.com", "A")
-                assert (
-                    dns.message.from_wire(worker.relay.answer(query.to_wire(), udp=False)).rcode()
-                    == 2
-                )
+                assert dns_state["rejected"]
             return SimpleNamespace(cidrs=network.cidrs, proxy_port=32123)
 
         def healthy(self):
@@ -97,22 +69,13 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
     transport = Transport()
     monkeypatch.setattr("stelvio.tunnel.supervisor.SshTransport", lambda *a, **kw: transport)
     monkeypatch.setattr("stelvio.tunnel.supervisor.resolve_vpc_network", lambda *a: network)
-    monkeypatch.setattr("stelvio.tunnel.supervisor.verify_dns", lambda view: None)
-    monkeypatch.setattr(VpcWorker, "_host_dns", staticmethod(lambda address: None))
     monkeypatch.setattr("stelvio.tunnel.supervisor.HEALTH_SECONDS", 0.001)
-    monkeypatch.setattr(
-        "stelvio.tunnel.supervisor.DnsListener",
-        lambda relay: SimpleNamespace(port=32124, start=lambda: None, close=lambda: None),
-    )
 
     def configure(**kw):
         configurations.append(kw.copy())
         events.append(("configure", kw["generation"]))
         if terminal == "configure-uncertain" and len(configurations) == 2:
-            query = dns.message.make_query("private.example.com", "A")
-            assert (
-                dns.message.from_wire(worker.relay.answer(query.to_wire(), udp=False)).rcode() == 2
-            )
+            assert dns_state["rejected"]
             assert events.index(("remove", 1)) < events.index(("close", 1)) < len(events) - 1
         if (
             terminal in ("configure-uncertain", "configure-unfenced", "foreign-generation")
@@ -126,9 +89,23 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
         configure=configure,
         remove=lambda **kw: events.append(("retain", kw)),
     )
+
+    def configure_dns(unit, attempt, revision, network, claims):
+        dns_state["rejected"] = False
+        events.append(("dns-configure", attempt))
+        return 32124
+
+    def dns(operation, *identity, **options):
+        events.append(("dns-" + operation, identity[1]))
+        if operation == "reject":
+            dns_state["rejected"] = True
+        return {"observed": dns_state["observed"]}
+
     forwarding = SimpleNamespace(
         add=lambda unit, generation, attempt, *a: events.append(("add", attempt)),
         remove=lambda unit, generation, attempt: events.append(("remove", attempt)),
+        configure_dns=configure_dns,
+        dns=dns,
         healthy=lambda: True,
     )
     discovery = SimpleNamespace(
@@ -170,17 +147,10 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
 
     lease.inspect = inspect
 
-    def upstream(view, query, wire):
-        answer = dns.message.make_response(query)
-        answer.set_rcode(3)
-        return answer
-
     def os_query(arguments, **options):
-        query = dns.message.make_query(arguments[-1], "A")
-        worker.relay.answer(query.to_wire(), udp=False)
+        dns_state["observed"] = True
         return SimpleNamespace(returncode=1)
 
-    monkeypatch.setattr("stelvio.tunnel.dns._exchange", upstream)
     monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", os_query)
     publish = worker._publish
 
@@ -223,8 +193,7 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
         )
         assert ("remove", 2) in events
     assert not any(event[0] == "aws-cleanup" for event in events)
-    query = dns.message.make_query("private.example.com", "A")
-    assert dns.message.from_wire(worker.relay.answer(query.to_wire(), udp=False)).rcode() == 2
+    assert dns_state["rejected"]
     if terminal in ("configure-unfenced", "foreign-generation"):
         assert worker.status.cause == "cleanup-incomplete"
         assert not worker.status.dns_retained
@@ -242,3 +211,23 @@ def test_worker_retries_then_disposes_only_its_owned_connection(  # noqa: C901, 
     else:
         assert worker.status.state == "stopped"
         assert not any(event[0] == "retain" for event in events)
+
+
+def test_successful_socks_probe_cannot_mask_failed_host_path():
+    from unittest.mock import Mock
+
+    worker = object.__new__(VpcWorker)
+    worker._dns_generation = 1
+    calls = []
+
+    def dns(operation, **options):
+        calls.append((operation, options))
+        if options.get("direct"):
+            raise ConnectionError("host path unavailable")
+        return {}
+
+    worker._dns = dns
+    worker.lease = SimpleNamespace(inspect=Mock(side_effect=AssertionError("not ready")))
+    with raises(ConnectionError, match="host path unavailable"):
+        worker._probe(1)
+    assert calls == [("probe", {}), ("probe", {"direct": True})]

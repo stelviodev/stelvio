@@ -225,3 +225,63 @@ def test_requests_does_not_consult_netrc(world, monkeypatch):
         )
     )
     assert prepared.headers["Authorization"] == "Bearer env-token"
+
+
+@mark.parametrize("override", [None, ""])
+def test_release_network_capabilities_use_verified_cache(world, monkeypatch, override):
+    if override is None:
+        monkeypatch.delenv(assets.DEVELOPMENT_BINARY_ENV, raising=False)
+    else:
+        monkeypatch.setenv(assets.DEVELOPMENT_BINARY_ENV, override)
+
+    def execute(arguments, **kwargs):
+        stdout = (
+            b'{"forwarder":2,"dns":1}'
+            if arguments[-1] == "capabilities"
+            else assets.EXPECTED_VERSION.encode()
+        )
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr=b"")
+
+    world.execute.side_effect = execute
+    assets.require_network_capabilities()
+    assets.require_network_capabilities()
+    world.download.assert_called_once()
+    assert assets.traforo_path().name == "stelvio-traforo-0.0.5-arm64"
+    assert [str(assets.traforo_path()), "capabilities"] in [
+        call.args[0] for call in world.execute.call_args_list
+    ]
+
+
+@mark.parametrize(
+    "output",
+    [b"invalid", b"{}", b'{"forwarder":1,"dns":1}', b'{"forwarder":2,"dns":true}', b"null"],
+)
+def test_release_missing_capabilities_fails_before_networking(world, output):
+    path = assets.ensure_traforo()
+    world.execute.side_effect = lambda arguments, **kwargs: SimpleNamespace(
+        returncode=0,
+        stdout=output if arguments[-1] == "capabilities" else assets.EXPECTED_VERSION.encode(),
+        stderr=b"",
+    )
+    with raises(assets.NativeAssetError, match="forwarder=2 and dns=1"):
+        assets.require_network_capabilities({})
+    assert path.read_bytes() == world.binary
+    world.download.assert_called_once()
+
+
+@mark.parametrize("change", ["removed", "modified"])
+def test_release_changed_during_capability_check_is_rejected(world, change):
+    path = assets.ensure_traforo()
+
+    def execute(arguments, **kwargs):
+        if arguments[-1] == "capabilities":
+            if change == "removed":
+                path.unlink()
+            else:
+                path.write_bytes(world.binary + b"changed")
+            return SimpleNamespace(returncode=0, stdout=b'{"forwarder":2,"dns":1}', stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=assets.EXPECTED_VERSION.encode(), stderr=b"")
+
+    world.execute.side_effect = execute
+    with raises(assets.NativeAssetError):
+        assets.require_network_capabilities({})

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from stelvio.exceptions import StelvioValidationError
 from stelvio.stack_outputs import read_network_manifest
+from stelvio.tunnel.assets import require_network_capabilities
 from stelvio.tunnel.credentials import AwsExecutionContext
 from stelvio.tunnel.installation import install_helper
 from stelvio.tunnel.manifest import SessionDescription
@@ -125,7 +126,9 @@ class NetworkSession:
             self.report("Network READY (no enabled VPC dependencies).")
             return
         try:
-            selected = install_helper(environment=self.contexts[0].process_environment())
+            environment = self.contexts[0].process_environment()
+            require_network_capabilities(environment)
+            selected = install_helper(environment=environment)
             if selected is not None and selected.notice:
                 self.report(selected.notice)
             self.runtime = NetworkRuntime(self.description, self.contexts)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import platform
 import stat
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
 DEVELOPMENT_BINARY_ENV = "STLV_TRAFORO_DEV_BINARY"
-TRAFORO_VERSION = "0.0.4"
+TRAFORO_VERSION = "0.0.5"
 EXPECTED_VERSION = "stelvio-traforo/1 helper=1 carrier=1\n"
 EXECUTABLE_MODE = 0o755
 MAX_BINARY_BYTES = 16 * 1024 * 1024
@@ -33,14 +34,14 @@ MACHO_CPUS = {"arm64": 0x0100000C, "x86_64": 0x01000007}
 # Release URLs and asset IDs describe the same immutable, digest-pinned artifacts.
 TARGETS = {
     "arm64": {
-        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.4/traforo-darwin-arm64",
-        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/648296580",
-        "sha256": "96bebda932a84d2ec277ad60ada6f61db2c1525fc65247b3d17239f4ef696fcb",
+        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-arm64",
+        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/651628204",
+        "sha256": "b408afcaca01f760f4999c674a21271302c98eedad61678067ab80f844a4ba0f",
     },
     "x86_64": {
-        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.4/traforo-darwin-amd64",
-        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/648296588",
-        "sha256": "dd0c8f07bfceb2dd5267cd7abfbd0762dbc6d5a905fb76b7e4d89fdd227895d2",
+        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-amd64",
+        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/651628205",
+        "sha256": "4008c435efb5bb3913784a10da61df8fdbaadcbc324e42f2bfd470dbbc86faba",
     },
 }
 
@@ -287,3 +288,38 @@ def ensure_traforo() -> Path:
 def downloaded_helper() -> Iterator[Path]:
     """Yield the verified private release image for helper installation."""
     yield ensure_traforo()
+
+
+def validate_network_capabilities(path: Path) -> None:
+    """Check a previously verified release, developer, or root-owned image."""
+    instruction = (
+        "Managed networking requires Traforo forwarder=2 and dns=1. "
+        "Run stlv tunnel install to restore the pinned release; "
+        "if STLV_TRAFORO_DEV_BINARY is set, rebuild that image or unset the override."
+    )
+    try:
+        result = subprocess.run(  # noqa: S603 - previously validated executable
+            [str(path), "capabilities"], capture_output=True, timeout=5, check=False
+        )
+        capabilities = json.loads(result.stdout)
+        if (
+            result.returncode
+            or result.stderr
+            or capabilities != {"forwarder": 2, "dns": 1}
+            or any(type(value) is not int for value in capabilities.values())
+        ):
+            raise ValueError("capabilities")  # noqa: TRY301 - unify capability errors
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        raise NativeAssetError(instruction) from None
+
+
+def require_network_capabilities(environment: Mapping[str, str] | None = None) -> None:
+    """Gate managed startup before installation or any host mutation."""
+    selected = select_traforo(environment)
+    path = selected.local_path if selected.local_path is not None else ensure_traforo()
+    validate_network_capabilities(path)
+    if selected.local_path is not None:
+        if select_traforo(environment).digest != selected.digest:
+            raise NativeAssetError("Developer Traforo changed during capability validation")
+    elif not _ready(path, _architecture()):
+        raise NativeAssetError("Pinned Traforo disappeared during capability validation")

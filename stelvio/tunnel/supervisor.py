@@ -7,22 +7,15 @@ import sys
 import time
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
-from ipaddress import IPv4Address
 from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-import dns.exception
-import dns.flags
-import dns.message
-import dns.rcode
-import dns.rdatatype
 from botocore.exceptions import ClientError, HTTPClientError
 
 from stelvio.tunnel.aws_inventory import resolve_vpc_network
 from stelvio.tunnel.credentials import AWS_IO
 from stelvio.tunnel.discovery import DiscoveryError, DiscoveryPendingError, ResourceDiscovery
-from stelvio.tunnel.dns import DnsListener, DnsRelay, DnsView, verify_dns
 from stelvio.tunnel.helper_client import HelperBusyError, HelperError, HelperUnitStatus
 from stelvio.tunnel.helper_protocol import MAX_DOMAINS, ResolverEndpoint
 from stelvio.tunnel.transport import (
@@ -38,7 +31,6 @@ if TYPE_CHECKING:
     from stelvio.tunnel.forwarding import Forwarding
     from stelvio.tunnel.helper_client import NativeLease
     from stelvio.tunnel.manifest import SessionDescription, VpcNetwork
-    from stelvio.tunnel.socks import SocksConnector
 
 HEALTH_SECONDS = 5
 DISCOVERY_SECONDS = 30
@@ -46,20 +38,6 @@ MAX_BACKOFF = 30
 HOST_GENERATION = 1
 DNS_EPOCH = 1000000
 STARTUP_SECONDS = 600
-HOST_DNS_PROBE = """import socket,struct,sys
-with socket.create_connection((sys.argv[1],53),timeout=3) as stream:
-    def exact(size):
-        data=bytearray()
-        while len(data)<size:
-            part=stream.recv(size-len(data))
-            if not part: raise ConnectionError('Incomplete DNS frame')
-            data.extend(part)
-        return bytes(data)
-    query=bytes.fromhex(sys.argv[2])
-    stream.sendall(struct.pack('!H',len(query))+query)
-    size=struct.unpack('!H',exact(2))[0]
-    print(exact(size).hex())
-"""
 
 
 @dataclass(frozen=True)
@@ -104,8 +82,7 @@ class VpcWorker:
             },
             owner_id=description.session_id,
         )
-        self.relay: DnsRelay | None = None
-        self.listener: DnsListener | None = None
+        self._dns_port: int | None = None
         self._claims: tuple[str, ...] = ()
         self._host_configured = False
         self._host_request: dict | None = None
@@ -115,6 +92,7 @@ class VpcWorker:
         self._stack_attempt = 0
         self._dns_revision = 0
         self._dns_generation = 0
+        self._dns_attempt = 0
         self._attempt = 0
         self._ever_ready = False
         self._phase = "pending"
@@ -148,7 +126,7 @@ class VpcWorker:
             if resource.vpc == self.network.identity
         )
 
-    def _view(self, connector: SocksConnector) -> DnsView:
+    def _view(self) -> int:
         self._dns_revision += 1
         names = tuple(
             dict.fromkeys(
@@ -164,22 +142,14 @@ class VpcWorker:
                 "VPC DNS ownership exceeds the helper's domain bound"
             )
         self._claims = names
-        return DnsView(
-            self._attempt * DNS_EPOCH + self._dns_revision,
-            self.network.dns_domains,
-            names,
-            IPv4Address(int(self.network.cidrs[0].network_address) + 2),
-            connector,
-        )
+        return self._attempt * DNS_EPOCH + self._dns_revision
 
-    def _configure(self, view: DnsView) -> None:
-        if self.relay is None:
-            self.relay = DnsRelay(view)
-            self.listener = DnsListener(self.relay)
-            self.listener.start()
-        else:
-            self.relay.activate(view)
-        self._dns_generation = view.generation
+    def _configure(self, revision: int) -> None:
+        self._dns_port = self.forwarding.configure_dns(
+            self.unit, self._attempt, revision, self.network, self._claims
+        )
+        self._dns_generation = revision
+        self._dns_attempt = self._attempt
         # Monotonic claims: old resolver files remain valid during membership
         # refresh/reconnection. Native append-only updates preserve their inodes.
         self._host_request = {
@@ -187,9 +157,7 @@ class VpcWorker:
             "generation": HOST_GENERATION,
             "vpc_id": self.network.vpc_id,
             "cidrs": tuple(str(cidr) for cidr in self.network.cidrs),
-            "resolvers": tuple(
-                ResolverEndpoint(name, self.listener.port) for name in self._claims
-            ),
+            "resolvers": tuple(ResolverEndpoint(name, self._dns_port) for name in self._claims),
         }
         self._host_request_confirmed = False
         self.lease.configure(**self._host_request)
@@ -220,9 +188,16 @@ class VpcWorker:
         self.lease.remove(unit=self.unit, generation=HOST_GENERATION + 1, keep_dns=keep_dns)
         self._dns_retained = keep_dns
 
-    def _probe(self, view: DnsView) -> None:
-        verify_dns(view)
-        self._host_dns(view.resolver)
+    def _dns(self, operation: str, **options: object) -> dict:
+        return self.forwarding.dns(
+            operation, self.unit, self._dns_attempt, self._dns_generation, **options
+        )
+
+    def _probe(self, revision: int) -> None:
+        if revision != self._dns_generation:
+            raise ValueError("Stale DNS readiness revision")
+        self._dns("probe")
+        self._dns("probe", direct=True)
         inspection = self.lease.inspect()
         if inspection.uncertain or not any(
             unit.unit == self.unit
@@ -233,29 +208,13 @@ class VpcWorker:
             raise TransportRetryError("VPC host configuration is not active")
         for resource in self._resources():
             for hostname in resource.hostnames:
-                query = dns.message.make_query(hostname, "A")
-                answer = dns.message.from_wire(self.relay.answer(query.to_wire(), udp=False))
-                addresses = [
-                    IPv4Address(record.address)
-                    for records in answer.answer
-                    if records.rdtype == dns.rdatatype.A
-                    for record in records
-                ]
-                if answer.rcode() != dns.rcode.NOERROR or not addresses:
-                    raise TransportRetryError("VPC resource private DNS is unavailable")
-                for address in addresses:
-                    if not any(address in cidr for cidr in self.network.cidrs):
-                        raise TransportAuthorizationError(
-                            "Private DNS returned a resource outside its VPC"
-                        )
-                with view.connector.connect(addresses[0], resource.ports[0], timeout=3):
-                    pass
-                self._host_tcp(addresses[0], resource.ports[0])
+                self._dns("probe", name=hostname, port=resource.ports[0])
+                self._dns("probe", name=hostname, port=resource.ports[0], direct=True)
         if self._claims:
             # Unique negative hostname bypasses OS caches. A generation-bound
             # relay observation, not a cached address, proves actual OS routing.
             name = f"stlv-{uuid4().hex}.{self._claims[0]}"
-            observed = self.relay.expect_query(name, view.generation)
+            self._dns("arm", name=name)
             try:
                 subprocess.run(  # noqa: S603 - fixed isolated system-resolver probe
                     [
@@ -271,71 +230,21 @@ class VpcWorker:
                     timeout=5,
                     check=False,
                 )
-                if not observed.is_set():
+                if not self._dns("check", name=name).get("observed"):
                     raise TransportRetryError("OS private DNS did not reach this VPC generation")
             finally:
-                self.relay.forget_query(name)
+                self._dns("release", name=name)
         if not self.transport.healthy() or not self.forwarding.healthy():
             raise TransportRetryError("VPC transport exited during readiness")
 
-    @staticmethod
-    def _host_dns(address: IPv4Address) -> None:
-        query = dns.message.make_query(".", "SOA")
-        reached = subprocess.run(  # noqa: S603 - fixed isolated host TCP DNS payload probe
-            [
-                sys.executable,
-                "-I",
-                "-S",
-                "-c",
-                HOST_DNS_PROBE,
-                str(address),
-                query.to_wire().hex(),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        try:
-            answer = dns.message.from_wire(bytes.fromhex(reached.stdout.strip()))
-        except (ValueError, dns.exception.DNSException):
-            raise TransportRetryError(
-                "Ordinary host DNS payload did not traverse VPC forwarding"
-            ) from None
-        if (
-            reached.returncode
-            or not query.is_response(answer)
-            or answer.flags & dns.flags.TC
-            or answer.rcode() not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN)
-        ):
-            raise TransportRetryError("Ordinary host DNS payload did not traverse VPC forwarding")
-
-    @staticmethod
-    def _host_tcp(address: IPv4Address, port: int) -> None:
-        reached = subprocess.run(  # noqa: S603 - fixed isolated host TCP probe
-            [
-                sys.executable,
-                "-I",
-                "-S",
-                "-c",
-                "import socket,sys; "
-                "socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=3).close()",
-                str(address),
-                str(port),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-            check=False,
-        )
-        if reached.returncode:
-            raise TransportRetryError("Ordinary host TCP did not traverse the VPC forwarding path")
-
     def _reject(self) -> None:
         self._transport_fenced = False
-        if self.relay is not None:
-            self.relay.reject(self._dns_generation)
         failures = []
+        if self._dns_generation:
+            try:
+                self._dns("reject")
+            except Exception as error:
+                failures.append(error)
         try:
             if self._stack_attempt:
                 self.forwarding.remove(self.unit, HOST_GENERATION, self._stack_attempt)
@@ -367,7 +276,7 @@ class VpcWorker:
             self.unit, HOST_GENERATION, self._attempt, self.network, connector.proxy_port
         )
         self._stack_attempt = self._attempt
-        view = self._view(connector)
+        view = self._view()
         self._phase = "host-configuration"
         self._configure(view)
         self._phase = "readiness"
@@ -392,7 +301,7 @@ class VpcWorker:
                     self._attempt,
                     self.session.client("docdb", config=AWS_IO),
                 )
-                view = self._view(connector)
+                view = self._view()
                 self._configure(view)
                 self._probe(view)
                 refreshed = time.monotonic()
@@ -460,8 +369,7 @@ class VpcWorker:
         self._thread.join(timeout=600)
         if self._thread.is_alive():
             raise TimeoutError("VPC worker has not stopped; keep recovery ownership")
-        if self.listener:
-            self.listener.close()
+
         if self.status.cause == "cleanup-incomplete":
             raise RuntimeError("VPC cleanup incomplete; run stlv tunnel cleanup")
 

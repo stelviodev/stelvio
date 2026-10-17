@@ -4,42 +4,21 @@ import json
 import platform
 import subprocess
 import sys
+from contextlib import ExitStack
+from ipaddress import IPv4Network
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
-import dns.message
-import dns.rcode
-import dns.rrset
 from pytest import mark
 
-from stelvio.tunnel.dns import DnsListener
+from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
 from stelvio.tunnel.helper_client import NativeHelper
 from stelvio.tunnel.helper_protocol import ResolverEndpoint
 
+from .tunnel_dns_fixture import SocksDnsFixture
+
 pytestmark = mark.integration_tunnel
-
-
-class _Resolver:
-    def __init__(self, private_domain: str) -> None:
-        self.available = True
-        self.queries: list[str] = []
-        self.private_domain = private_domain
-
-    def answer(self, wire: bytes, *, udp: bool) -> bytes:
-        query = dns.message.from_wire(wire)
-        self.queries.append(query.question[0].name.to_text())
-        response = dns.message.make_response(query)
-        if self.available:
-            if query.question[0].rdtype == 1:
-                name = query.question[0].name
-                if name.to_text() == "alias." + self.private_domain + ".":
-                    target = "member." + self.private_domain + "."
-                    response.answer.append(dns.rrset.from_text(name, 1, "IN", "CNAME", target))
-                    name = target
-                response.answer.append(dns.rrset.from_text(name, 1, "IN", "A", "10.254.9.19"))
-        else:
-            response.set_rcode(dns.rcode.SERVFAIL)
-        return response.to_wire()
 
 
 def _os_lookup(name: str) -> set[str]:
@@ -62,7 +41,7 @@ def _os_lookup(name: str) -> set[str]:
     return set(json.loads(result.stdout))
 
 
-def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline():
+def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline():  # noqa: PLR0915 - complete host DNS acceptance
     assert platform.system() == "Darwin"
     assert platform.mac_ver()[0] == "15.7.5"
     helper = NativeHelper()
@@ -72,33 +51,46 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline():
     domain = "1.1.1.1.nip.io"
     assert _os_lookup(uuid4().hex + "." + domain) == {"1.1.1.1"}
     private_domain = f"p6-native-{uuid4().hex}.internal"
-    resolver = _Resolver(private_domain)
-    listener = DnsListener(resolver)
-    listener.start()
+    scope = ExitStack()
+    proxy = SocksDnsFixture()
+    scope.callback(proxy.close)
     owner = str(uuid4())
     lease = None
     evidence = {"session": owner, "domain": domain}
     try:
         lease = helper.acquire(owner)
+        binary = scope.enter_context(packaged_forwarder())
+        forwarding = Forwarding(binary, lease.carrier)
+        scope.callback(forwarding.close)
+        network = SimpleNamespace(
+            cidrs=(IPv4Network("10.254.0.0/16"),), dns_domains=(domain, private_domain)
+        )
+        forwarding.add("00000019", 1, 1, network, proxy.port)
+        port = forwarding.configure_dns("00000019", 1, 1, network, ())
         lease.configure(
             unit="00000019",
             generation=1,
             vpc_id="vpc-12345678",
             cidrs=("10.254.0.0/16",),
             resolvers=(
-                ResolverEndpoint(domain, listener.port),
-                ResolverEndpoint(private_domain, listener.port),
+                ResolverEndpoint(domain, port),
+                ResolverEndpoint(private_domain, port),
             ),
         )
         assert _os_lookup(uuid4().hex + "." + domain) == {"10.254.9.19"}
         assert _os_lookup("alias." + private_domain) == {"10.254.9.19"}
         evidence["private_cname_resolved"] = True
-        resolver.available = False
+        forwarding.dns("reject", "00000019", 1, 1)
         failed = uuid4().hex + "." + domain
-        assert _os_lookup(failed) == set()
-        assert failed + "." in resolver.queries
+        forwarding.dns("arm", "00000019", 1, 1, name=failed)
+        try:
+            assert _os_lookup(failed) == set()
+            assert forwarding.dns("check", "00000019", 1, 1, name=failed)["observed"]
+        finally:
+            forwarding.dns("release", "00000019", 1, 1, name=failed)
+        assert failed not in proxy.server.queries
         evidence["outage_query_received"] = True
-        resolver.available = True
+        assert forwarding.configure_dns("00000019", 1, 2, network, ()) == port
         assert _os_lookup(uuid4().hex + "." + domain) == {"10.254.9.19"}
         assert _os_lookup("aws.amazon.com")
     finally:
@@ -106,7 +98,7 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline():
             if lease is not None:
                 lease.close()
         finally:
-            listener.close()
+            scope.close()
     assert _os_lookup(uuid4().hex + "." + domain) == {"1.1.1.1"}
     final = helper.inspect()
     assert not final.owned
@@ -116,3 +108,62 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline():
     path = Path(__file__).resolve().parents[2] / "spikes/dev-vpc-v1/build/p6/os-dns.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(evidence, indent=2))
+
+
+def test_two_vpc_go_dns_and_packet_forwarding_reconnect():
+    import socket
+
+    assert platform.system() == "Darwin"
+    helper = NativeHelper()
+    initial = helper.inspect()
+    assert not initial.owned
+    assert not initial.uncertain
+    assert not initial.units
+    owner = str(uuid4())
+    with ExitStack() as scope:
+        lease = helper.acquire(owner)
+        scope.callback(lease.close)
+        binary = scope.enter_context(packaged_forwarder())
+        forwarding = Forwarding(binary, lease.carrier)
+        scope.callback(forwarding.close)
+        networks = []
+        ports = []
+        for index, octet in enumerate((254, 253), start=1):
+            address = f"10.{octet}.9.19"
+            proxy = SocksDnsFixture(address)
+            scope.callback(proxy.close)
+            domain = f"dns-{owner.replace('-', '')}-{index}.internal"
+            network = SimpleNamespace(
+                cidrs=(IPv4Network(f"10.{octet}.0.0/16"),), dns_domains=(domain,)
+            )
+            unit = f"{index:08x}"
+            forwarding.add(unit, 1, 1, network, proxy.port)
+            port = forwarding.configure_dns(unit, 1, 1, network, ())
+            lease.configure(
+                unit=unit,
+                generation=1,
+                vpc_id=f"vpc-1234567{index}",
+                cidrs=(str(network.cidrs[0]),),
+                resolvers=(ResolverEndpoint(domain, port),),
+            )
+            for direct in (False, True):
+                forwarding.dns("probe", unit, 1, 1, direct=direct)
+                forwarding.dns("probe", unit, 1, 1, name="db." + domain, port=27017, direct=direct)
+            assert _os_lookup("alias." + domain) == {address}
+            with socket.create_connection((address, 27017), timeout=3) as connection:
+                connection.sendall(b"actual host carrier payload")
+                assert connection.recv(256) == b"actual host carrier payload"
+            networks.append((unit, network, proxy, address))
+            ports.append(port)
+        unit, network, proxy, address = networks[0]
+        forwarding.dns("reject", unit, 1, 1)
+        forwarding.remove(unit, 1, 1)
+        assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == set()
+        assert _os_lookup(uuid4().hex + "." + networks[1][1].dns_domains[0]) == {networks[1][3]}
+        forwarding.add(unit, 1, 2, network, proxy.port)
+        assert forwarding.configure_dns(unit, 2, 2, network, ()) == ports[0]
+        assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == {address}
+    final = helper.inspect()
+    assert not final.owned
+    assert not final.uncertain
+    assert not final.units

@@ -30,6 +30,8 @@ LIBRARIES = frozenset(
         "/usr/lib/libresolv.9.dylib",
         "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
         "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        # miekg/dns links Go crypto/x509, whose Darwin backend uses Security.
+        "/System/Library/Frameworks/Security.framework/Versions/A/Security",
     }
 )
 
