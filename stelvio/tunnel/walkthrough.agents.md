@@ -54,7 +54,7 @@ The split repository and release CI are at
 `https://github.com/stelviodev/traforo`. `pkg/traforo-client-go` is authoritative for the Go client API and unit tests and
 is mirrored by the repository split. It is excluded from wheel/sdist. Release CI
 remains external; scripts/build.py is a monorepo developer build/install tool.
-`assets.py` pins v0.0.5 URLs, GitHub asset IDs and architecture SHA-256 values.
+`assets.py` pins v0.0.7 URLs, GitHub asset IDs and architecture SHA-256 values.
 `ensure_traforo()` locks, validates and atomically caches a download under
 `get_bin_path()`. `GITHUB_TOKEN`, when provided by the environment, authenticates
 only the GitHub API request; cross-origin redirects drop authorization. Otherwise
@@ -62,7 +62,8 @@ use the pinned public download URL. Production never calls `gh`. Both helper and
 forwarder still execute the same root-owned installed image; forwarder checks its
 selected digest without a cache or network operation. Managed startup additionally
 validates the binary version before installation. New images use one semantic
-version; the old v0.0.5 output is accepted only for its pinned architecture digest. Normal uninstall also works offline.
+version. Older output does not satisfy the activation gate; trusted older helpers
+remain eligible for safe retirement. Normal uninstall also works offline.
 
 
 ## Answering a reviewer
@@ -217,7 +218,7 @@ one log group and passphrase removed. Original helper, exact interface/resolver
 baseline and empty/certain host state restored. See testing.md for exact hashes
 and repeatable testing-team steps. Historical tables above remain historical.
 
-The release pin is now v0.0.5; local builds are optional. Future native/AWS
+That acceptance used v0.0.5. The current pin is v0.0.7; local builds remain optional. Future native/AWS
 acceptance must record the selected release digest separately from local-build evidence.
 Do not silently restore the Python DNS relay or let v0.0.4 activate networking.
 
@@ -258,8 +259,9 @@ capabilities command or DNS handshake field exists. Internal helper/carrier,
 control framing and journal schema identifiers remain intact.
 
 Stelvio accepts the exact pinned base, plus its snapshots only with the developer
-override. The published v0.0.5 assets retain their legacy output: only their known
-architecture hashes enable that compatibility path. No old arbitrary developer
+override. Historically, while v0.0.5 was pinned, its published legacy output
+was accepted only for its known architecture hashes. The current v0.0.7 pin
+rejects that output for activation; the frozen upgrade fixture remains separate. No old arbitrary developer
 image receives legacy acceptance. The root-owned installed forwarder is checked
 directly using the captured selection, without downloading. Inspect/cleanup/
 uninstall remain usable offline. Bootstrap retirement accepts owned semantic-version
@@ -383,7 +385,7 @@ failure, authentication and redirect coverage. Only an existing environment
 The native cross-venv test now verifies installed-package provenance using
 isolated Python outside the checkout. Its wheel prerequisite remains explicit.
 The real release-to-candidate test requires `STLV_TRAFORO_DEV_BINARY` selecting a
-locally built image with different bytes from the pinned v0.0.5 release. It installs
+locally built image with different bytes from the independently frozen v0.0.5 upgrade baseline. It installs
 the verified release, proves two-VPC DNS/TCP still work across an active upgrade
 refusal, upgrades while idle, then repeats routing/DNS/carrier checks on the
 candidate. Missing or identical candidates leave this acceptance pending.
@@ -406,3 +408,95 @@ candidate override in every test process, supply the candidate wheel, preserve
 the original installation, and require independent host/AWS restoration. Never
 claim skipped legacy fixtures, Rosetta execution or historical results as native
 Intel acceptance.
+
+
+### 2026-10-18 acceptance-gap checks: non-AWS results
+
+These results apply to the local pre-v0.0.7-pin candidate, not a newly certified
+external release. Go source, release pins and CI/CD were unchanged by the test
+additions. The AWS run is recorded separately after teardown.
+
+- Affected Python tunnel/CLI tests, including archive inspection, isolated wheel
+  imports, and actual local-image DNS/runtime interop: **376 passed**, with the two
+  explicitly disabled live-download cases skipped.
+- VPC/DocumentDB/Function-VPC unit regressions: **158 passed**.
+- Real v0.0.5 release downloads and cache checks: both architectures passed. The
+  final release/DNS-evidence check passed **12 tests** (2 assets, 10 comparisons).
+- Go lint (zero issues), vet, fresh readonly unit and native arm64 race suites:
+  all passed. Bounded fuzzing passed: request 844,425, DNS 100,310, control 184,186,
+  snapshot 387,702 executions. Dependency file hashes remained unchanged.
+- Both local GoReleaser artifacts built and validated: arm64 7,789,378 bytes;
+  amd64 8,270,120 bytes, executed through Rosetta. Version
+  `v0.0.5-dev+g401781924d4f`; source fingerprint
+  `9bc4149909df9269de1ab1ba45d4b25c23cf3fe6cb733fed5fe632f1b97beffe`.
+- Native macOS 15.7.5 arm64: **14 passed, 1 legacy-artifact skip** in 271.62s.
+  Refinement rerun: **4 passed** in 34.31s, covering all three interruption receipts
+  and real C-helper migration. The supplied legacy digest matched the independently
+  recorded historical task-log digest. All 15 distinct native scenarios passed.
+- Both native runs restored the original helper and matching interfaces, routes,
+  resolver files, normalized effective DNS and launchd service baseline. Evidence:
+  `/private/tmp/traforo-gap-native-20261018` and
+  `/private/tmp/traforo-gap-native-refined-20261018`.
+- Wheel/sdist and build records: `/private/tmp/traforo-gap-distributions` and
+  `pkg/traforo-client-go/build/traforo-ctu1lkl7/build.json`. Test review found and
+  corrected graceful-exit false positives, unsupported-ISA structural checks,
+  active-upgrade traffic assertions, DNS convergence and fault-receipt checks.
+
+Native Intel networking remains pending. These local-image results do not imply
+that the external v0.0.5 binaries contain the newest local dependency fixes.
+
+
+## 2026-10-19: completed pre-pin AWS acceptance
+
+The already-running default-profile / us-east-1 suite completed **4 passed** in
+6146.40s: single-VPC `True`, single-VPC `{}`, multi-VPC partial failure/crash
+recovery, and actual non-VPC CLI invocation without an installed helper. These
+results use the earlier local `v0.0.5-dev+g401781924d4f` candidate; they do not
+certify v0.0.7 host networking or AWS behavior.
+
+Normal standalone SIGINT and abrupt SIGKILL were exercised separately. Normal
+session exit retained deployment-owned bastions. Proof application teardown then
+removed all four applications: `stlv-59b458`, `stlv-42c7ce`, `stlv-b91958`, and
+`stlv-231546`. Independent AWS absence and transport audits passed for each.
+The final teardown waited for AWS-managed Lambda ENIs; none were deleted manually.
+Independent host inspection confirmed the original helper digest
+`fd65dee8e07f72f0303a51140a7b1158dcfa11f5cc6856ebbb675a21c1516625`,
+empty/certain helper state, and restored routes, interfaces, resolver files,
+normalized effective DNS, launchd service and networking-process baseline.
+Evidence: `/private/tmp/traforo-gap-aws.log`,
+`/private/tmp/traforo-gap-aws-20261018/independent-audit.json`, and
+`/private/tmp/traforo-gap-aws-20261018/macos-host0/independent-final.json`.
+
+## 2026-10-19: v0.0.7 pin validation
+
+Only after the preceding suite and independent teardown audit completed, Stelvio's
+release pin, URLs, API asset IDs, SHA-256 digests and derived cache paths changed
+to v0.0.7. Networking requires exactly `v0.0.7`; development snapshots
+`v0.0.7-dev+g<commit>` require `STLV_TRAFORO_DEV_BINARY`. Old semantic versions and
+old legacy output cannot activate networking. Safe retirement still accepts owned
+older installations. The genuine upgrade fixture downloads its independently
+frozen v0.0.5 baseline from
+`tests/integration/fixtures/traforo-upgrade-baseline.json`, regardless of the pin.
+Its verified download/version smoke passed; the privileged upgrade acceptance
+above predates this fixture extraction.
+
+- Affected tunnel/CLI Python suite: **380 passed, 5 skipped** in 21.94s, including
+  actual v0.0.7 process DNS/runtime interoperability. Skips were the separately
+  enabled distribution/release tests, all run successfully below.
+- Real release downloads: **2 passed** in 4.93s. Both pinned digests, Mach-O
+  architectures, size bounds, approved system libraries, semantic versions and
+  verified cache reuse passed on macOS 15.7.5 arm64. amd64 executed through Rosetta.
+  arm64: 7,822,402 bytes; amd64: 8,311,080 bytes.
+- Wheel/sdist and isolated installed-wheel tests: **3 passed** in 10.42s. The wheel
+  loaded outside the checkout with the exact current version and architecture
+  manifest; neither archive contains Go source, developer build scripts, native
+  executables or the Session Manager plugin. No former dnspython requirement.
+- Evidence: `/private/tmp/traforo007-final-python.log`,
+  `/private/tmp/traforo007-final-release.log`,
+  `/private/tmp/traforo007-final-packaging.log`,
+  `/private/tmp/traforo007-final-assets`, and `/private/tmp/traforo007-final-dist`.
+
+Go implementation and release pins other than Traforo remain unchanged. No new
+AWS deployment, privileged helper installation, Go build, branch change or commit
+was performed for the pin update. Earlier native/Go/AWS results remain separate;
+real Intel networking acceptance is pending.

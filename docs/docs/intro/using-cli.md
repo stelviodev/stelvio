@@ -104,7 +104,7 @@ Lambda deployed; use `stlv deploy` to restore production handlers.
 
 ### tunnel
 
-Managed networking uses the checksum-pinned Traforo v0.0.5 release, including
+Managed networking uses the checksum-pinned Traforo v0.0.7 release, including
 private DNS. See [VPC dev setup](../concepts/dev-mode.md#setup). A local developer
 build is optional; incompatible images fail version checks before host changes.
 

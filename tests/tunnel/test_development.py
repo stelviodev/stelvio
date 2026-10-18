@@ -156,7 +156,7 @@ def builder(tmp_path, monkeypatch):
         if args[:3] == ("git", "rev-parse", "HEAD"):
             return "a" * 40
         if args[-1] == "version" and "traforo-darwin" in str(args):
-            return "v0.0.5-dev+g" + "a" * 12
+            return "v0.0.7-dev+g" + "a" * 12
         return "fixture-toolchain"
 
     monkeypatch.setattr(module, "tool", tool)
@@ -169,7 +169,7 @@ def builder(tmp_path, monkeypatch):
         (output / "metadata.json").write_text(
             json.dumps(
                 {
-                    "version": "0.0.5-dev+g" + "a" * 12,
+                    "version": "0.0.7-dev+g" + "a" * 12,
                     "commit": "a" * 40,
                 }
             )
@@ -205,7 +205,7 @@ def test_developer_build_uses_shared_release_config_and_publishes_both_images(bu
         builder.source, builder.module.inventory(builder.source)
     )
     assert record["commit"] == "a" * 40
-    assert record["version"] == "v0.0.5-dev+g" + "a" * 12
+    assert record["version"] == "v0.0.7-dev+g" + "a" * 12
     assert len(record["artifacts"]) == 2
     for artifact in record["artifacts"]:
         assert (
@@ -220,8 +220,8 @@ def test_developer_build_uses_shared_release_config_and_publishes_both_images(bu
         "--skip=publish,announce",
     ]
     environment = builder.compile.call_args.kwargs["env"]
-    assert environment["GORELEASER_CURRENT_TAG"] == "v0.0.5"
-    assert environment["TRAFORO_SNAPSHOT_VERSION"] == "0.0.5-dev+g" + "a" * 12
+    assert environment["GORELEASER_CURRENT_TAG"] == "v0.0.7"
+    assert environment["TRAFORO_SNAPSHOT_VERSION"] == "0.0.7-dev+g" + "a" * 12
     assert "GITHUB_TOKEN" not in environment
     assert not list(path.parent.parent.glob(".traforo-*"))
 
@@ -406,18 +406,20 @@ def test_builder_help_has_no_build_or_install_side_effect(builder, monkeypatch):
 @mark.parametrize(
     "output",
     [
+        b"v0.0.7\n",
+        b"v0.0.7-dev+gabcdef123456\n",
+        b"v0.0.6\n",
         b"v0.0.5\n",
         b"v0.0.5-dev+gabcdef123456\n",
-        b"v0.0.6\n",
-        b"v0.0.5-dev\n",
-        b"v0.0.5-dev+gNOTHEX\n",
+        b"v0.0.7-dev\n",
+        b"v0.0.7-dev+gNOTHEX\n",
         assets.LEGACY_VERSION,
     ],
 )
 def test_developer_semantic_version_acceptance(local_image, output):
     assets.subprocess.run.return_value.stdout = output
     environment = {assets.DEVELOPMENT_BINARY_ENV: str(local_image)}
-    if output in {b"v0.0.5\n", b"v0.0.5-dev+gabcdef123456\n"}:
+    if output in {b"v0.0.7\n", b"v0.0.7-dev+gabcdef123456\n"}:
         assets.require_network_version(environment)
     else:
         with raises(assets.NativeAssetError, match="must report"):
@@ -439,7 +441,7 @@ def test_builder_records_cross_architecture_validation(builder, monkeypatch, hos
     monkeypatch.setattr(module.platform, "machine", lambda: host)
     # Linker-injected snapshot string enables static arm64 verification on Intel.
     if host == "x86_64":
-        builder.images["arm64"] += b"v0.0.5-dev+g" + b"a" * 12
+        builder.images["arm64"] += b"v0.0.7-dev+g" + b"a" * 12
     path = module.build(builder.source)
     record = json.loads((path.parent / "build.json").read_text())
     executions = {a["architecture"]: a["execution"] for a in record["artifacts"]}

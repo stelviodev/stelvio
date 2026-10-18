@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-from pytest import mark, raises, skip
+from pytest import fixture, mark, raises, skip
 
 from stelvio.tunnel import installation
 from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
@@ -334,36 +334,55 @@ def test_changed_image_refusal_idle_upgrade_and_interrupted_replacement(macos_ho
         macos_host.install(original)
 
 
-def test_pinned_release_to_local_candidate_upgrade(macos_host, monkeypatch):
-    from stelvio.tunnel.assets import downloaded_helper
+@fixture
+def older_traforo_release(macos_host, tmp_path, monkeypatch):
+    """A frozen historical artifact, independent of Stelvio's current release pin."""
+    from stelvio.tunnel import assets
 
+    if macos_host.selection.local_path is None:
+        skip("Real release upgrade pending: select a local STLV_TRAFORO_DEV_BINARY candidate")
+    manifest = json.loads(
+        (Path(__file__).parent / "fixtures/traforo-upgrade-baseline.json").read_text()
+    )
+    architecture = assets._architecture()
+    with monkeypatch.context() as historical:
+        historical.setattr(assets, "TARGETS", manifest["targets"])
+        data = assets._download(architecture)
+    assets.validate_macho(data, architecture)
+    assert hashlib.sha256(data).hexdigest() == manifest["targets"][architecture]["sha256"]
+    image = tmp_path / "older-traforo"
+    image.write_bytes(data)
+    image.chmod(0o700)
+    assert run(str(image), "version").stdout == manifest["version_output"]
+    return image
+
+
+def test_pinned_release_to_local_candidate_upgrade(macos_host, older_traforo_release):
     from .test_tunnel_dns import assert_two_vpc_dns_and_packet_forwarding
 
     selection = macos_host.selection
-    if selection.local_path is None:
-        skip("Real release upgrade pending: select a local STLV_TRAFORO_DEV_BINARY candidate")
-    with downloaded_helper() as release:
-        if hashlib.sha256(release.read_bytes()).hexdigest() == selection.digest:
-            skip("Real release upgrade pending: candidate and pinned release are identical")
-        macos_host.install(release)
-        release_digest = installation._installed_digest()
+    release = older_traforo_release
+    if hashlib.sha256(release.read_bytes()).hexdigest() == selection.digest:
+        skip("Real release upgrade pending: candidate and older release are identical")
+    macos_host.install(release)
+    release_digest = installation._installed_digest()
 
-        def refuse_candidate():
-            with raises(HelperError):
-                installation.install_helper(
-                    environment={
-                        "STLV_TRAFORO_DEV_BINARY": str(selection.local_path),
-                    }
-                )
-            assert installation._installed_digest() == release_digest
-            assert len(NativeHelper().inspect().units) == 2
+    def refuse_candidate():
+        with raises(HelperError):
+            installation.install_helper(
+                environment={
+                    "STLV_TRAFORO_DEV_BINARY": str(selection.local_path),
+                }
+            )
+        assert installation._installed_digest() == release_digest
+        assert len(NativeHelper().inspect().units) == 2
 
-        with monkeypatch.context() as previous:
-            previous.delenv("STLV_TRAFORO_DEV_BINARY", raising=False)
-            assert_two_vpc_dns_and_packet_forwarding(during_session=refuse_candidate)
-        wait_empty()
-        installation.install_helper()
-        assert installation._installed_digest() == selection.digest
+    assert_two_vpc_dns_and_packet_forwarding(
+        during_session=refuse_candidate, historical_digest=release_digest
+    )
+    wait_empty()
+    installation.install_helper()
+    assert installation._installed_digest() == selection.digest
     # Prove both scopes and host TCP through the new image, not only installation.
     assert_two_vpc_dns_and_packet_forwarding()
 

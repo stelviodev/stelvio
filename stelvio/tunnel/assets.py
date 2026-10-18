@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
 DEVELOPMENT_BINARY_ENV = "STLV_TRAFORO_DEV_BINARY"
-TRAFORO_VERSION = "0.0.5"
+TRAFORO_VERSION = "0.0.7"
 EXPECTED_VERSION = f"v{TRAFORO_VERSION}\n"
 LEGACY_VERSION = b"stelvio-traforo/1 helper=1 carrier=1\n"
 # Only these released images may use the pre-semver version command.
@@ -40,14 +40,14 @@ MACHO_CPUS = {"arm64": 0x0100000C, "x86_64": 0x01000007}
 # Release URLs and asset IDs describe the same immutable, digest-pinned artifacts.
 TARGETS = {
     "arm64": {
-        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-arm64",
-        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/651628204",
-        "sha256": "b408afcaca01f760f4999c674a21271302c98eedad61678067ab80f844a4ba0f",
+        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.7/traforo-darwin-arm64",
+        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/654424977",
+        "sha256": "14327d6881b2c6d01356fd390ff1c0fd7d57e42fafc2874b5af82a7aafcb2da7",
     },
     "x86_64": {
-        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-amd64",
-        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/651628205",
-        "sha256": "4008c435efb5bb3913784a10da61df8fdbaadcbc324e42f2bfd470dbbc86faba",
+        "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.7/traforo-darwin-amd64",
+        "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/654424978",
+        "sha256": "a1adc747fc328e36e69ebc2e0e74fbb8a48e6d2eacc9403ae4a22b81bd6757bd",
     },
 }
 

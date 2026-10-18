@@ -199,7 +199,7 @@ interoperability; it never compiles Go or runs native algorithm harnesses.
 
 ### Native release validation
 
-Stelvio pins Traforo v0.0.5 download URLs, architecture mappings and SHA-256 values
+Stelvio pins Traforo v0.0.7 download URLs, architecture mappings and SHA-256 values
 in `stelvio/tunnel/assets.py`. Installation verifies and caches the host executable
 under Stelvio's private `bin` directory, alongside Pulumi and the AWS plugin.
 No Traforo executable, developer build script, or Go source is shipped in wheel/sdist.
@@ -248,7 +248,7 @@ Both helper startup and forwarder validation select its digest; the forwarder st
 executes the installed root-owned image without root privileges.
 
 Rebuild after edits and set the variable in every shell running managed networking.
-Without the variable, managed startup uses the DNS-capable v0.0.5 release.
+Without the variable, managed startup uses the DNS-capable v0.0.7 release.
 Restore that pinned release with `unset STLV_TRAFORO_DEV_BINARY` followed by
 `uv run stlv tunnel install`.
 No persistent override is installed. Older Stelvio versions ignore the variable.
@@ -285,10 +285,10 @@ compiling Go. Native `test_tunnel_dns.py` proves macOS resolver delivery, retain
 failure ownership, two-VPC routing/carrier payloads, and stable ports on reconnect.
 
 For release acceptance, leave `STLV_TRAFORO_DEV_BINARY` unset and use the pinned
-v0.0.5 image. For Go changes, optionally build locally and export its exact path
+v0.0.7 image. For Go changes, optionally build locally and export its exact path
 in every networking shell. New binaries report one semantic version. Stelvio
-requires the pinned base version, allowing `v0.0.5-dev+g<commit>` snapshots only
-with the override. Existing v0.0.5 release images use the old output and are accepted
-by their pinned digests. Version validation happens before installation or host changes. The external repository owns release
+requires the pinned base version, allowing `v0.0.7-dev+g<commit>` snapshots only
+with the override. Older installed helpers can be retired safely; their old output does not satisfy
+the current activation gate. Version validation happens before installation or host changes. The external repository owns release
 builds/implementation CI. Follow
 `stelvio/tunnel/testing.md` for the ordered native and AWS acceptance runbook.

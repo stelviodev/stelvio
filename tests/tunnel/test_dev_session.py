@@ -392,7 +392,7 @@ def test_incompatible_binary_version_never_installs_or_starts_runtime(
 
     def missing(environment):
         seen.append(environment)
-        raise NativeAssetError("Traforo must report v0.0.5; rebuild local image")
+        raise NativeAssetError("Traforo must report v0.0.7; rebuild local image")
 
     def forbidden(**options):
         raise AssertionError("installation must not run")

@@ -40,11 +40,11 @@ are under the ignored `build/` directory. Re-run the script after Go edits.
 
 `traforo version` reports one semantic version for the whole binary. GoReleaser
 injects the release tag and commit through linker flags. Local builds report
-`v0.0.5-dev+g<short-commit>`, using the pinned base version rather than Stelvio's
+`v0.0.7-dev+g<short-commit>`, using the pinned base version rather than Stelvio's
 tags. Provenance also records the source fingerprint, including uncommitted edits.
 Stelvio requires the exact pinned base version; snapshots require the override.
-The existing v0.0.5 release uses the older output and is accepted only by its
-pinned digest. There is no separate capabilities command in new builds.
+Older installed helpers can be retired safely, but cannot activate current managed
+networking. There is no separate capabilities command in new builds.
 Selected images are version-checked before installation or host changes.
 
 To build and validate without installing, run `make build` in this directory, or

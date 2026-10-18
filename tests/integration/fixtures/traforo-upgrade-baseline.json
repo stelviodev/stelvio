@@ -1,0 +1,16 @@
+{
+  "version": "0.0.5",
+  "version_output": "stelvio-traforo/1 helper=1 carrier=1\n",
+  "targets": {
+    "arm64": {
+      "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-arm64",
+      "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/651628204",
+      "sha256": "b408afcaca01f760f4999c674a21271302c98eedad61678067ab80f844a4ba0f"
+    },
+    "x86_64": {
+      "url": "https://github.com/stelviodev/traforo/releases/download/v0.0.5/traforo-darwin-amd64",
+      "api_url": "https://api.github.com/repos/stelviodev/traforo/releases/assets/651628205",
+      "sha256": "4008c435efb5bb3913784a10da61df8fdbaadcbc324e42f2bfd470dbbc86faba"
+    }
+  }
+}

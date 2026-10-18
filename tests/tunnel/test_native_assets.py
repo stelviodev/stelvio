@@ -176,8 +176,8 @@ def test_concurrent_installers_publish_once(world):
 
 def test_release_change_uses_separate_cache(world, monkeypatch):
     first = assets.ensure_traforo()
-    monkeypatch.setattr(assets, "TRAFORO_VERSION", "0.0.6")
-    world.execute.return_value.stdout = b"v0.0.6\n"
+    monkeypatch.setattr(assets, "TRAFORO_VERSION", "0.0.8")
+    world.execute.return_value.stdout = b"v0.0.8\n"
     second = assets.ensure_traforo()
     assert first != second
     assert first.read_bytes() == second.read_bytes() == world.binary
@@ -236,17 +236,17 @@ def test_release_version_uses_verified_cache_without_capability_command(
     assets.require_network_version()
     assets.require_network_version()
     world.download.assert_called_once()
-    assert assets.traforo_path().name == "stelvio-traforo-0.0.5-arm64"
+    assert assets.traforo_path().name == "stelvio-traforo-0.0.7-arm64"
     assert all(call.args[0][-1] == "version" for call in world.execute.call_args_list)
 
 
 @mark.parametrize(
-    "output", [b"invalid", b"{}", b"v0.0.4\n", b"v0.0.6\n", b"v0.0.5-dev+g1234567\n"]
+    "output", [b"invalid", b"{}", b"v0.0.4\n", b"v0.0.6\n", b"v0.0.5\n", b"v0.0.7-dev+g1234567\n"]
 )
 def test_release_wrong_version_fails_before_networking(world, output):
     path = assets.ensure_traforo()
     world.execute.return_value.stdout = output
-    with raises(assets.NativeAssetError, match=r"must report v0\.0\.5"):
+    with raises(assets.NativeAssetError, match=r"must report v0\.0\.7"):
         assets.require_network_version({})
     assert path.read_bytes() == world.binary
 
@@ -268,13 +268,42 @@ def test_release_changed_during_version_check_is_rejected(world, change):
         assets.require_network_version({})
 
 
+@mark.parametrize("pin", ["0.0.5", "0.0.7"])
 @mark.parametrize("verified", [False, True])
-def test_legacy_version_requires_exact_legacy_release_digest(world, monkeypatch, verified):
+def test_legacy_version_requires_exact_legacy_release_digest(world, monkeypatch, verified, pin):
     path = assets.ensure_traforo()
     world.execute.return_value.stdout = assets.LEGACY_VERSION
+    monkeypatch.setattr(assets, "TRAFORO_VERSION", pin)
     if verified:
         monkeypatch.setitem(assets.LEGACY_RELEASE_DIGESTS, "arm64", world.target["sha256"])
+    if verified and pin == "0.0.5":
         assert assets.validate_version(path) == "v0.0.5"
     else:
         with raises(assets.NativeAssetError, match="must report"):
             assets.validate_version(path)
+
+
+@mark.parametrize(
+    ("architecture", "suffix", "asset_id", "digest"),
+    [
+        (
+            "arm64",
+            "arm64",
+            "654424977",
+            "14327d6881b2c6d01356fd390ff1c0fd7d57e42fafc2874b5af82a7aafcb2da7",
+        ),
+        (
+            "x86_64",
+            "amd64",
+            "654424978",
+            "a1adc747fc328e36e69ebc2e0e74fbb8a48e6d2eacc9403ae4a22b81bd6757bd",
+        ),
+    ],
+)
+def test_v007_release_manifest(architecture, suffix, asset_id, digest):
+    assert assets.TRAFORO_VERSION == "0.0.7"
+    assert assets.TARGETS[architecture] == {
+        "url": f"https://github.com/stelviodev/traforo/releases/download/v0.0.7/traforo-darwin-{suffix}",
+        "api_url": f"https://api.github.com/repos/stelviodev/traforo/releases/assets/{asset_id}",
+        "sha256": digest,
+    }

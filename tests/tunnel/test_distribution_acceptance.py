@@ -1,5 +1,6 @@
 """Prebuilt distribution acceptance. Pytest never builds Go or Python artifacts."""
 
+import json
 import os
 import subprocess
 import sys
@@ -8,6 +9,8 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from pytest import fixture, mark, skip
+
+from stelvio.tunnel.assets import TARGETS, TRAFORO_VERSION
 
 
 @fixture
@@ -76,13 +79,15 @@ def test_isolated_installed_wheel_cli_imports_and_non_vpc(candidate_wheel, tmp_p
         python,
         "-I",
         "-c",
-        """import importlib.util,sys
+        """import importlib.util,json,sys
 from pathlib import Path
 from unittest.mock import patch
 import stelvio
 from stelvio.tunnel import assets
 from stelvio.tunnel.session import NetworkSession
 assert Path(stelvio.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+assert assets.TRAFORO_VERSION == sys.argv[1]
+assert assets.TARGETS == json.loads(sys.argv[2])
 assert importlib.util.find_spec('dns') is None
 for system in ('Linux', 'Windows'):
     with patch('platform.system', return_value=system):
@@ -97,6 +102,8 @@ for system in ('Linux', 'Windows'):
         else:
             raise AssertionError('unsupported asset selected')
 """,
+        TRAFORO_VERSION,
+        json.dumps(TARGETS, sort_keys=True),
     )
     for command in ("tunnel", "dev"):
         result = run(python, "-I", "-c", "from stelvio.cli import main; main()", command, "--help")

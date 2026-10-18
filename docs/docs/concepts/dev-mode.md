@@ -61,7 +61,7 @@ or a separate handler for dev mode.
 
 ### Setup
 
-Stelvio pins Traforo v0.0.5, which supports private DNS and packet forwarding.
+Stelvio pins Traforo v0.0.7, which supports private DNS and packet forwarding.
 Managed startup verifies the selected binary version before helper installation or
 host changes. Local builds are optional; contributors can select one with
 `STLV_TRAFORO_DEV_BINARY` as described in the
