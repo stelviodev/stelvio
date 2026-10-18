@@ -19,7 +19,7 @@ func TestVersionOutput(t *testing.T) {
 	defer func() { _ = writer.Close() }()
 	os.Stdout = writer
 	os.Args = []string{"traforo", "version"}
-	for _, expected := range []string{"v0.0.5", "v0.0.5-dev+gabcdef123456"} {
+	for _, expected := range []string{"v1.2.3", "v1.2.3-dev+gabcdef123456"} {
 		version = expected
 		main()
 		got := make([]byte, len(expected)+1)

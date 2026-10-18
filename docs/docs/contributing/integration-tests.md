@@ -161,14 +161,11 @@ STLV_TEST_AWS_PROFILE=default STLV_TEST_AWS_REGION=us-east-1 \
 ```
 
 These are the only integration flags that may be combined. Other tiers and xdist
-workers are rejected. `run_all.sh` never executes privileged tests; the former
-`STLV_TEST_TUNNEL=1` opt-in has been removed.
+workers are rejected. `run_all.sh` never executes privileged tests.
 
 Set `STLV_TEST_TUNNEL_PYTHON` to a candidate wheel environment's Python containing
 PyMongo. Otherwise the current Python and its sibling `stlv` are used. Set
 `STLV_TEST_STELVIO_WHEEL` to the absolute candidate wheel for cross-venv acceptance.
-Legacy migration requires an approved `STLV_TEST_LEGACY_HELPER` and its independent
-`STLV_TEST_LEGACY_SHA256`. Missing artifacts produce named skips, not acceptance.
 `STLV_TEST_TUNNEL_AZS` can select comma-separated zones in the test region.
 
 The canonical app is in `tests/integration/fixtures/tunnel_app`. Applications,
@@ -185,7 +182,7 @@ exit retains deployment-owned bastions; application teardown removes them.
 
 Test existence and dated acceptance are separate. The supported floor is macOS 15;
 native Intel and untested OS releases remain pending. See the coverage map and
-recorded results in `stelvio/tunnel/spike-coverage.md` and
+test procedures in `stelvio/tunnel/spike-coverage.md` and
 `stelvio/tunnel/testing.md` in the repository.
 
 Go parser, journal, packet, identity, and native syscall tests belong to the
@@ -217,7 +214,7 @@ URL. Private releases require a token with repository contents read access.
 Authenticated downloads use the GitHub release-asset API, with credentials removed
 before following cross-origin redirects. All paths enforce the pinned binary digest.
 
-Follow [the end-to-end runbook](https://github.com/stelviodev/stelvio/blob/feature/vpc-traforo-v2/stelvio/tunnel/testing.md)
+Follow [the end-to-end runbook](https://github.com/stelviodev/stelvio/blob/main/stelvio/tunnel/testing.md)
 for clean-wheel, cache corruption/concurrency, native upgrade/crash/cleanup, and AWS
 acceptance. Set `STLV_TEST_TRAFORO_IMAGE` to the verified cached executable path
 after pre-downloading the release to include the optional real Python/Traforo process tests in `tests/tunnel/test_runtime.py`.
@@ -276,9 +273,9 @@ SNS stay near free tier, CloudFront and NAT gateways don't.
   fails on a non-empty bucket.
 - Sleeps are named module constants with a comment explaining the number.
 
-### Traforo DNS migration acceptance
+### Traforo DNS acceptance
 
-Private DNS serving and wire/probe behavior now belong to the nonroot Go forwarder.
+Private DNS serving and wire/probe behavior belong to the nonroot Go forwarder.
 Run Go unit/race tests and DNS/control fuzzing in `pkg/traforo-client-go`. Pytest
 covers orchestration and fixed-wire Python/Traforo interoperability without
 compiling Go. Native `test_tunnel_dns.py` proves macOS resolver delivery, retained
@@ -286,9 +283,8 @@ failure ownership, two-VPC routing/carrier payloads, and stable ports on reconne
 
 For release acceptance, leave `STLV_TRAFORO_DEV_BINARY` unset and use the pinned
 v0.0.7 image. For Go changes, optionally build locally and export its exact path
-in every networking shell. New binaries report one semantic version. Stelvio
+in every networking shell. Traforo reports one semantic version. Stelvio
 requires the pinned base version, allowing `v0.0.7-dev+g<commit>` snapshots only
-with the override. Older installed helpers can be retired safely; their old output does not satisfy
-the current activation gate. Version validation happens before installation or host changes. The external repository owns release
-builds/implementation CI. Follow
+with the override. Version validation happens before installation or host changes.
+The external repository owns release builds and implementation CI. Follow
 `stelvio/tunnel/testing.md` for the ordered native and AWS acceptance runbook.

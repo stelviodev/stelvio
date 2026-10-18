@@ -75,7 +75,7 @@ def read_network_manifest(state: dict | None) -> NetworkManifest:
     """Read private component metadata without exposing it in CLI output.
 
     A VPC deployment with incomplete metadata must be redeployed before local
-    access. Legacy applications without VPC components need no networking data.
+    access. Applications without VPC components need no networking data.
     """
     resources = _state_resources(state)
     network_types = {"stelvio:aws:Vpc", "stelvio:aws:DocumentDb"}

@@ -154,9 +154,6 @@ class MacOSHost:
         assert info.st_uid == 0
         assert not info.st_mode & 0o022
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert not Path("/Library/PrivilegedHelperTools/dev.stelvio.tunnel").exists(), (
-            "Migrate legacy installations before this lane"
-        )
         assert not list(Path("/Library/PrivilegedHelperTools").glob(".stelvio-traforo.*")), (
             "Retain and recover interrupted administration before testing"
         )

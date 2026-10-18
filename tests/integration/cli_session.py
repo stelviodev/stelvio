@@ -62,14 +62,15 @@ class CliSession:
             handler.read_text().replace(
                 '"ok": bool(ping_ok and read_back and host_matches),',
                 '"ok": bool(ping_ok and read_back and host_matches),\n'
-                '        "local_marker": __import__("os").environ.get("STLV_P6_MARKER"),\n'
+                '        "local_marker": __import__("os").environ.get('
+                '"STLV_TEST_TUNNEL_MARKER"),\n'
                 '        "pid": __import__("os").getpid(),\n'
                 '        "uid": __import__("os").geteuid(),\n'
                 '        "replica_set": client.topology_description.replica_set_name,',
             )
         )
         marker_source = (
-            '    proof_path = __import__("os").environ["STLV_P6_INVOCATIONS"]\n'
+            '    proof_path = __import__("os").environ["STLV_TEST_TUNNEL_INVOCATIONS"]\n'
             '    with __import__("pathlib").Path(proof_path).open("a") as proof:\n'
             '        proof.write(json.dumps({"id": getattr(_context, "aws_request_id", None), '
             '"pid": __import__("os").getpid()}) + "\\n")\n'
@@ -90,8 +91,8 @@ class CliSession:
             AWS_PROFILE=os.environ["STLV_TEST_AWS_PROFILE"],
             AWS_DEFAULT_REGION=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
             AWS_REGION=os.environ.get("STLV_TEST_AWS_REGION", "us-east-1"),
-            STLV_P6_MARKER=self.marker,
-            STLV_P6_INVOCATIONS=str(self.project / "invocations.jsonl"),
+            STLV_TEST_TUNNEL_MARKER=self.marker,
+            STLV_TEST_TUNNEL_INVOCATIONS=str(self.project / "invocations.jsonl"),
             PYTHONUNBUFFERED="1",
             COLUMNS="240",
         )
@@ -391,7 +392,7 @@ def run():
             "import os, json\n"
             "def handler(event, context):\n"
             "    return {'statusCode':200, 'body': json.dumps({'plain':True, "
-            "'local_marker':os.environ['STLV_P6_MARKER'], 'pid':os.getpid()})}\n"
+            "'local_marker':os.environ['STLV_TEST_TUNNEL_MARKER'], 'pid':os.getpid()})}\n"
         )
 
     def private_zone(self, vpc_id: str, hostname: str) -> str:

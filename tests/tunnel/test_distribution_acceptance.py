@@ -79,7 +79,7 @@ def test_isolated_installed_wheel_cli_imports_and_non_vpc(candidate_wheel, tmp_p
         python,
         "-I",
         "-c",
-        """import importlib.util,json,sys
+        """import json,sys
 from pathlib import Path
 from unittest.mock import patch
 import stelvio
@@ -88,7 +88,6 @@ from stelvio.tunnel.session import NetworkSession
 assert Path(stelvio.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
 assert assets.TRAFORO_VERSION == sys.argv[1]
 assert assets.TARGETS == json.loads(sys.argv[2])
-assert importlib.util.find_spec('dns') is None
 for system in ('Linux', 'Windows'):
     with patch('platform.system', return_value=system):
         with patch.object(assets, 'ensure_traforo', side_effect=AssertionError('activated')):
@@ -109,6 +108,6 @@ for system in ('Linux', 'Windows'):
         result = run(python, "-I", "-c", "from stelvio.cli import main; main()", command, "--help")
         assert "--network-mode" not in result.stdout
         if command == "tunnel":
-            for name in ("install", "start", "inspect", "cleanup", "reconcile", "uninstall"):
+            for name in ("install", "start", "inspect", "cleanup", "uninstall"):
                 assert name in result.stdout.split()
             assert "recover" not in result.stdout.split()

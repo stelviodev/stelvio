@@ -32,7 +32,7 @@ func snapshotFixture(t testing.TB) []byte {
 	put(byte(0))
 	return b.Bytes()
 }
-func TestSnapshotHistoricalFixture(t *testing.T) {
+func TestSnapshotIndependentFixture(t *testing.T) {
 	data := snapshotFixture(t)
 	s, e := DecodeSnapshot(data)
 	if e != nil || s.Peer.UID != 502 || s.Peer.PID != 1234 {

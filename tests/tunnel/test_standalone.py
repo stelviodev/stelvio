@@ -59,7 +59,7 @@ def test_start_without_deployment_or_enabled_dependencies_never_waits(monkeypatc
         network.close.assert_not_called()
 
 
-def test_start_reports_legacy_metadata_validation_without_traceback(monkeypatch):
+def test_start_reports_metadata_validation_without_traceback(monkeypatch):
     from stelvio.cli.tunnel import tunnel
     from stelvio.exceptions import StelvioValidationError
 
@@ -67,10 +67,10 @@ def test_start_reports_legacy_metadata_validation_without_traceback(monkeypatch)
     run.__enter__.return_value = SimpleNamespace(
         has_deployed=True,
         capture_network_session=Mock(
-            side_effect=StelvioValidationError("set bastion=True and redeploy")
+            side_effect=StelvioValidationError("Unsupported network metadata")
         ),
     )
     monkeypatch.setattr("stelvio.command_run.CommandRun", Mock(return_value=run))
     result = CliRunner().invoke(tunnel, ["start", "staging"])
     assert result.exit_code == 1
-    assert result.output == "Error: set bastion=True and redeploy\n"
+    assert result.output == "Error: Unsupported network metadata\n"

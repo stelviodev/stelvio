@@ -102,7 +102,7 @@ Keep native facts and native receipts in the appropriate backend.
 
 Use build-tagged Darwin and Linux implementations. Avoid a single broad platform
 interface or storing Unix descriptor assumptions in future Windows-neutral
-protocol types. Both current backends may use descriptors internally; shared
+protocol types. Both proposed backends may use descriptors internally; shared
 session logic should depend on owned resources and revocable packet access.
 
 Preserve control framing and carrier identifiers where their meaning is unchanged.
@@ -209,7 +209,7 @@ that hide `/dev/net/tun`. Verify file contexts and executable placement under
 SELinux. If policy changes are necessary, package/document a narrow policy rather
 than disabling enforcement.
 
-Retain the existing command contract: install/update, inspect, cleanup/reconcile,
+Retain the existing command contract: install/update, inspect, cleanup,
 uninstall, dev, and standalone start. Cleanup retains installation; uninstall
 refuses live or unresolved sessions; upgrades use a durable replacement
 transaction. Ordinary inspect/uninstall remain usable without the developer
@@ -231,7 +231,7 @@ interface that acquired the same index or name.
   dynamic libc/interpreter. Cross-compilation is not native acceptance.
 - Extend Python selection/cache keys to `(OS, architecture)`, including explicit
   aliases such as x86_64/amd64 and aarch64/arm64. Keep existing Darwin cache and
-  digest-bound legacy behavior intact.
+  exact pinned-version validation intact.
 - Extend private Session Manager Plugin downloads and executable/version checks
   for Linux with verified immutable URLs and checksums. Audit OpenSSH and all
   platform-dependent transport process flags.
@@ -324,7 +324,7 @@ interoperability. Pytest must not compile Go or become a Go harness runner.
 Update README, user VPC/dev/CLI documentation, contributor instructions,
 `testing.md`, both walkthroughs, and the task log together. Publish exact runtime
 requirements, distro-specific setup guidance, supported/tested matrix, cleanup
-instructions, and explicit unsupported configurations. Preserve historical macOS
+instructions, and explicit unsupported configurations. Preserve macOS
 and AWS evidence separately from new Linux results.
 
 ## Later resolver backends

@@ -38,13 +38,11 @@ def transaction(tmp_path, monkeypatch):
     stat.chmod(0o755)
     xattr.chmod(0o755)
 
-    def image(path, *, legacy=False, version="v0.0.5"):
-        # Administrative retirement also supports previously installed images.
-        version = "stelvio-tunnel-helper/1" if legacy else version
+    def image(path, *, version="v0.0.7"):
         path.write_text(
             '#!/bin/sh\ncase "$*" in\n'
-            f'"version"|"--version") echo {shlex.quote(version)};;\n'
-            f'"helper uninstall"|"--uninstall") [ ! -e {shlex.quote(str(active))} ] || exit 19; '
+            f'"version") echo {shlex.quote(version)};;\n'
+            f'"helper uninstall") [ ! -e {shlex.quote(str(active))} ] || exit 19; '
             '/bin/rm "$0";;\n'
             f'"helper install") /usr/bin/touch {shlex.quote(str(result))};;\n'
             "*) exit 2;;\nesac\n"
@@ -117,33 +115,21 @@ def test_refused_retirement_preserves_installed_image(transaction, refusal):
     assert not world["result"].exists()
 
 
-def test_legacy_retirement_does_not_require_old_python_package(transaction):
-    world = transaction
-    world["installed"].unlink()
-    legacy = world["tools"] / "dev.stelvio.tunnel"
-    world["image"](legacy, legacy=True)
-    result = world["execute"](world["script"]())
-    assert result.returncode == 0, result.stderr
-    assert not legacy.exists()
-    assert world["installed"].read_bytes() == world["asset"].read_bytes()
-    assert world["result"].exists()
-
-
 @mark.parametrize(
     "version",
     [
-        "v0.0.5",
-        "v0.0.5-dev+gabcdef123456",
+        "v0.0.7",
+        "v0.0.7-dev+gabcdef123456",
         "stelvio-traforo/1 helper=1 carrier=1",
         "foreign-image",
     ],
 )
-def test_retirement_accepts_owned_semver_and_legacy_but_refuses_unknown(transaction, version):
+def test_retirement_accepts_owned_semver_but_refuses_unknown(transaction, version):
     world = transaction
     world["image"](world["installed"], version=version)
     before = world["installed"].read_bytes()
     result = world["execute"](world["script"]())
-    if version == "foreign-image":
+    if not version.startswith("v"):
         assert result.returncode != 0
         assert world["installed"].read_bytes() == before
         assert not world["result"].exists()

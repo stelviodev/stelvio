@@ -117,13 +117,11 @@ and removal request macOS administrator authorization. See [setup and upgrades](
 | `stlv tunnel start [ENV]` | Connects deployed handler VPC dependencies in the foreground without deploying or starting dev mode |
 | `stlv tunnel inspect` | Reports ownership, uncertainty, mutation status, and VPC units |
 | `stlv tunnel cleanup` | Cleans stale owned host networking while retaining the helper; refuses live sessions |
-| `stlv tunnel reconcile` | Compatibility alias for host cleanup |
 | `stlv tunnel uninstall` | Removes the helper after safe cleanup; retains the private AWS plugin cache |
 
 `tunnel start` defaults to your personal environment. In CI, provide an explicit
 ENV. It requires an existing deployment. Bastions must be explicitly enabled;
 VPC dependencies without a bastion warn and bypass managed networking.
-The former `tunnel recover` command and `dev --network-mode` option are removed.
 
 ### refresh
 

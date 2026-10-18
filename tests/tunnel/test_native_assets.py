@@ -268,19 +268,11 @@ def test_release_changed_during_version_check_is_rejected(world, change):
         assets.require_network_version({})
 
 
-@mark.parametrize("pin", ["0.0.5", "0.0.7"])
-@mark.parametrize("verified", [False, True])
-def test_legacy_version_requires_exact_legacy_release_digest(world, monkeypatch, verified, pin):
+def test_non_semantic_version_output_is_rejected(world):
     path = assets.ensure_traforo()
-    world.execute.return_value.stdout = assets.LEGACY_VERSION
-    monkeypatch.setattr(assets, "TRAFORO_VERSION", pin)
-    if verified:
-        monkeypatch.setitem(assets.LEGACY_RELEASE_DIGESTS, "arm64", world.target["sha256"])
-    if verified and pin == "0.0.5":
-        assert assets.validate_version(path) == "v0.0.5"
-    else:
-        with raises(assets.NativeAssetError, match="must report"):
-            assets.validate_version(path)
+    world.execute.return_value.stdout = b"stelvio-traforo/1 helper=1 carrier=1\n"
+    with raises(assets.NativeAssetError, match="must report"):
+        assets.validate_version(path)
 
 
 @mark.parametrize(

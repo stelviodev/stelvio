@@ -478,7 +478,7 @@ def run():
     (session.project / "functions/plain.py").write_text(
         "import json,os\ndef handler(event,context):\n"
         '    return {"statusCode":200,"body":json.dumps({"plain":True,'
-        '"marker":os.environ["STLV_P6_MARKER"],"pid":os.getpid()})}\n'
+        '"marker":os.environ["STLV_TEST_TUNNEL_MARKER"],"pid":os.getpid()})}\n'
     )
     installation.uninstall_helper()
     try:

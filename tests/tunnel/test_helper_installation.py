@@ -209,3 +209,16 @@ def test_forwarder_validates_installed_pin_without_cache(monkeypatch, developer)
     monkeypatch.setattr(installation, "_installed_digest", lambda: "b" * 64)
     with pytest.raises(RuntimeError, match="differs"), packaged_forwarder():
         raise AssertionError("Wrong forwarder yielded")
+
+
+def test_tunnel_help_lists_current_commands():
+    result = CliRunner().invoke(tunnel, ["--help"])
+    assert result.exit_code == 0
+    commands = result.output.split("Commands:\n", 1)[1]
+    assert {line.split()[0] for line in commands.splitlines() if line.strip()} == {
+        "install",
+        "start",
+        "inspect",
+        "cleanup",
+        "uninstall",
+    }

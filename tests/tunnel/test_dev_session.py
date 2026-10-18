@@ -29,7 +29,7 @@ def network_state():
                 "type": "stelvio:aws:Vpc",
                 "outputs": {
                     "_stelvio_network": {
-                        "version": 1,
+                        "version": 2,
                         "kind": "vpc",
                         "identity": identity,
                         "account": "123456789012",
@@ -64,7 +64,7 @@ def network_state():
                 "type": "stelvio:aws:Function",
                 "outputs": {
                     "_stelvio_network": {
-                        "version": 1,
+                        "version": 2,
                         "kind": "endpoint",
                         "identity": name,
                         "endpoint_id": name,

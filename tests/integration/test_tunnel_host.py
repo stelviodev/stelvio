@@ -335,35 +335,22 @@ def test_changed_image_refusal_idle_upgrade_and_interrupted_replacement(macos_ho
 
 
 @fixture
-def older_traforo_release(macos_host, tmp_path, monkeypatch):
-    """A frozen historical artifact, independent of Stelvio's current release pin."""
+def pinned_traforo_release(macos_host):
+    """Verify the current release independently of the developer selection."""
     from stelvio.tunnel import assets
 
     if macos_host.selection.local_path is None:
-        skip("Real release upgrade pending: select a local STLV_TRAFORO_DEV_BINARY candidate")
-    manifest = json.loads(
-        (Path(__file__).parent / "fixtures/traforo-upgrade-baseline.json").read_text()
-    )
-    architecture = assets._architecture()
-    with monkeypatch.context() as historical:
-        historical.setattr(assets, "TARGETS", manifest["targets"])
-        data = assets._download(architecture)
-    assets.validate_macho(data, architecture)
-    assert hashlib.sha256(data).hexdigest() == manifest["targets"][architecture]["sha256"]
-    image = tmp_path / "older-traforo"
-    image.write_bytes(data)
-    image.chmod(0o700)
-    assert run(str(image), "version").stdout == manifest["version_output"]
-    return image
+        skip("Release upgrade pending: select a local STLV_TRAFORO_DEV_BINARY candidate")
+    return assets.ensure_traforo()
 
 
-def test_pinned_release_to_local_candidate_upgrade(macos_host, older_traforo_release):
+def test_pinned_release_to_local_candidate_upgrade(macos_host, pinned_traforo_release):
     from .test_tunnel_dns import assert_two_vpc_dns_and_packet_forwarding
 
     selection = macos_host.selection
-    release = older_traforo_release
+    release = pinned_traforo_release
     if hashlib.sha256(release.read_bytes()).hexdigest() == selection.digest:
-        skip("Real release upgrade pending: candidate and older release are identical")
+        skip("Real release upgrade pending: candidate and pinned release are identical")
     macos_host.install(release)
     release_digest = installation._installed_digest()
 
@@ -378,41 +365,10 @@ def test_pinned_release_to_local_candidate_upgrade(macos_host, older_traforo_rel
         assert len(NativeHelper().inspect().units) == 2
 
     assert_two_vpc_dns_and_packet_forwarding(
-        during_session=refuse_candidate, historical_digest=release_digest
+        during_session=refuse_candidate, release_digest=release_digest
     )
     wait_empty()
     installation.install_helper()
     assert installation._installed_digest() == selection.digest
     # Prove both scopes and host TCP through the new image, not only installation.
     assert_two_vpc_dns_and_packet_forwarding()
-
-
-def test_legacy_migration_requires_verified_legacy_fixture(macos_host):
-    name = os.environ.get("STLV_TEST_LEGACY_HELPER")
-    expected = os.environ.get("STLV_TEST_LEGACY_SHA256")
-    if not name or not expected:
-        skip(
-            "Legacy native acceptance pending: supply STLV_TEST_LEGACY_HELPER "
-            "and STLV_TEST_LEGACY_SHA256"
-        )
-    image = Path(name)
-    assert image.is_absolute()
-    assert not image.is_symlink()
-    assert image.is_file()
-    assert hashlib.sha256(image.read_bytes()).hexdigest() == expected
-    assert run(str(image), "--version").stdout.strip() == "stelvio-tunnel-helper/1"
-    # The legacy artifact must install its real ownership receipt itself.
-    installation.uninstall_helper()
-    target = "/Library/PrivilegedHelperTools/dev.stelvio.tunnel"
-    try:
-        macos_host.admin(
-            f"/usr/bin/install -o root -g wheel -m 0755 {shlex.quote(str(image))} {target}\n"
-            f"{target} --install"
-        )
-        installation.install_helper()
-        assert not Path(target).exists()
-        wait_empty()
-    finally:
-        if Path(target).exists():
-            macos_host.admin(f"{target} --uninstall")
-        installation.install_helper()

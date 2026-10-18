@@ -207,10 +207,6 @@ def _vpc(data: dict) -> VpcNetwork:
         raise ValueError("Duplicate network metadata subnets")
     if any(not any(subnet.cidr.subnet_of(cidr) for cidr in cidrs) for subnet in subnets):
         raise ValueError("Public subnet lies outside its VPC CIDRs")
-    if data["policy"] == "temporary":
-        raise ValueError(
-            "Temporary VPC access is no longer supported; set bastion=True and redeploy"
-        )
     try:
         policy = BastionPolicy(data["policy"])
     except (TypeError, ValueError) as error:
@@ -291,7 +287,7 @@ def manifest_from_records(records: list[dict]) -> NetworkManifest:
         if (
             not isinstance(data, dict)
             or type(data.get("version")) not in (int, float)
-            or data["version"] not in (1, VERSION)
+            or data["version"] != VERSION
         ):
             raise ValueError(
                 "Unsupported or missing network metadata version; "

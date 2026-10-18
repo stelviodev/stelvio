@@ -194,8 +194,8 @@ Function(
 
 # Your own security groups instead of the app security group
 Function(
-    "legacy",
-    handler="functions/legacy.handler",
+    "worker",
+    handler="functions/worker.handler",
     vpc={"vpc": vpc, "security_groups": ["sg-0123456789abcdef0"]},
 )
 ```
@@ -250,8 +250,8 @@ vpc = Vpc("main", bastion=True)
 ```
 
 The bastion is created by deployment and stays until a deploy changes `bastion`
-to `False`, or the app is destroyed. There are no temporary instances or separate
-access stacks. Explicit `None` is invalid. Without a bastion, provide your own
+to `False`, or the app is destroyed. Explicit `None` is invalid. Without a bastion,
+provide your own
 connectivity if the local handler needs a private resource; Stelvio does not
 establish or verify that external path. The warning does not block execution.
 

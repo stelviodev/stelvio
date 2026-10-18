@@ -93,22 +93,13 @@ if [ ! -e {installed} ] && [ ! -L {installed} ] && [ -e "$retired" ]; then
     /bin/ln "$retired" {installed}
     /bin/rm "$retired"
 fi
-legacy=/Library/PrivilegedHelperTools/dev.stelvio.tunnel
-if [ -e "$legacy" ] || [ -L "$legacy" ]; then
-    safe_file "$legacy"
-    /usr/bin/xattr -p dev.stelvio.tunnel.installation "$legacy" >/dev/null
-    [ "$(/usr/bin/env -i PATH=/usr/bin:/bin "$legacy" --version)" = 'stelvio-tunnel-helper/1' ]
-    /usr/bin/env -i PATH=/usr/bin:/bin "$legacy" --uninstall
-fi
 if [ -e {installed} ] &&
    [ "$(/usr/bin/shasum -a 256 {installed})" != "{digest}  {INSTALLED_HELPER}" ]; then
     safe_file {installed}
     /usr/bin/xattr -p dev.stelvio.traforo.installation {installed} >/dev/null
     current=$(/usr/bin/env -i PATH=/usr/bin:/bin {installed} version)
-    if [ "$current" != 'stelvio-traforo/1 helper=1 carrier=1' ]; then
-        /usr/bin/printf '%s\\n' "$current" |
-            /usr/bin/grep -Eq '^v[0-9]+\\.[0-9]+\\.[0-9]+(-dev\\+g[0-9a-f]{{7,40}})?$'
-    fi
+    /usr/bin/printf '%s\\n' "$current" |
+        /usr/bin/grep -Eq '^v[0-9]+\\.[0-9]+\\.[0-9]+(-dev\\+g[0-9a-f]{{7,40}})?$'
     # Validate and retain the replacement before retiring the previous installation.
     if [ ! -e "$stage" ]; then (set -C; : > "$stage"); fi
     safe_file "$stage"
@@ -253,7 +244,6 @@ def uninstall_helper() -> None:
     elif (
         Path("/Library/LaunchDaemons/dev.stelvio.tunnel.plist").exists()
         or Path("/Library/Application Support/Stelvio/tunnel").exists()
-        or Path("/Library/PrivilegedHelperTools/dev.stelvio.tunnel").exists()
     ):
         raise HelperError(
             "The native helper is missing but recovery artifacts remain; "

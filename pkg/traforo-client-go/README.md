@@ -43,8 +43,6 @@ injects the release tag and commit through linker flags. Local builds report
 `v0.0.7-dev+g<short-commit>`, using the pinned base version rather than Stelvio's
 tags. Provenance also records the source fingerprint, including uncommitted edits.
 Stelvio requires the exact pinned base version; snapshots require the override.
-Older installed helpers can be retired safely, but cannot activate current managed
-networking. There is no separate capabilities command in new builds.
 Selected images are version-checked before installation or host changes.
 
 To build and validate without installing, run `make build` in this directory, or
@@ -64,7 +62,7 @@ uv run stlv tunnel install
 There is no persistent developer mode or root-owned override marker. The script
 sets the variable only inside its installation process; it cannot export into your
 shell. Invalid paths, unsafe permissions/ACLs, and incompatible images fail without
-falling back. Older Stelvio versions do not recognize the override.
+falling back.
 
 See `stelvio/tunnel/testing.md` for release, developer, host and AWS acceptance.
 
@@ -81,7 +79,7 @@ Binary compatibility uses the semantic version, while internal helper, carrier,
 control and journal format identifiers remain unchanged. DNS control has
 configure/reject/retire, upstream/direct-host probes, and arm/check/release query
 observations. Request IDs, unit generations, attempts and DNS revisions fence
-stale messages. No DNS parser or dnspython dependency remains in Python.
+stale messages. Python owns AWS discovery and orchestration; Go owns DNS protocol handling.
 
 DNS wire support uses pinned `github.com/miekg/dns`. Its Go TLS/X.509 dependency
 links Apple's Security framework, explicitly allowed by the developer builder;
@@ -93,18 +91,8 @@ go test -mod=readonly ./internal/dnsrelay -run='^$' -fuzz='^FuzzAnswer$' -fuzzti
 go test -mod=readonly ./internal/forwarder -run='^$' -fuzz='^FuzzControl$' -fuzztime=5s -parallel=2
 ```
 
-Stelvio itself no longer requires `dnspython`. Application drivers such as PyMongo
-may independently install it for their own DNS/SRV support; that is separate from
-Traforo and the tunnel. A clean Stelvio-only wheel environment should have no
-`dns` module.
-
-
 ### Native ARM64 race testing
 
-Run `make race` directly on arm64 macOS. The updated gVisor Go-branch revision
-`v0.0.0-20261017122056-1b7906fdee8c` fixes the CAS register defect in
-`pkg/sync/race_arm64.s`; the large-stream regression no longer has a platform guard.
-The previous pin required amd64/Rosetta for race testing. That limitation remains
-historical evidence in the tunnel testing guide, not a current testing prerequisite.
-Dependency changes do not update the pinned downloadable Traforo release or the
-installed helper. Native networking acceptance is separate from these unit tests.
+Run `make race` directly on arm64 macOS, including the large-stream regression.
+Unit/race results validate local source. Downloaded release validation and native
+networking acceptance are separate gates described in the testing guide.

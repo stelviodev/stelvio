@@ -111,7 +111,7 @@ def test_two_vpc_go_dns_and_packet_forwarding_reconnect():
     assert_two_vpc_dns_and_packet_forwarding()
 
 
-def assert_two_vpc_dns_and_packet_forwarding(during_session=None, historical_digest=None):  # noqa: PLR0915 - complete host/carrier acceptance
+def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest=None):  # noqa: PLR0915 - complete host/carrier acceptance
     """Shared actual-host acceptance for the selected installed image."""
     import socket
 
@@ -125,14 +125,14 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, historical_dig
     with ExitStack() as scope:
         lease = helper.acquire(owner)
         scope.callback(lease.close)
-        if historical_digest is None:
+        if release_digest is None:
             binary = scope.enter_context(packaged_forwarder())
         else:
-            # Upgrade compatibility uses an independently verified older release,
+            # Upgrade acceptance uses the independently verified pinned release,
             # never a relaxed production activation gate or a user-owned image.
             from stelvio.tunnel.installation import INSTALLED_HELPER, _installed_digest
 
-            assert _installed_digest() == historical_digest
+            assert _installed_digest() == release_digest
             binary = INSTALLED_HELPER
         forwarding = Forwarding(binary, lease.carrier)
         scope.callback(forwarding.close)

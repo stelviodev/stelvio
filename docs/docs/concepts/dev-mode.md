@@ -94,12 +94,10 @@ host changes. Local builds are optional; contributors can select one with
     Run these as your ordinary user. Installation asks for macOS administrator
     authorization. Do not run `stlv dev` with `sudo`.
 
-!!! info "Platform validation"
-    Traforo v2 native routing, private DNS, crash cleanup, helper restart, upgrades,
-    and legacy migration have passed on macOS 15.7.5 arm64 with Go 1.27.2.
-    Both architectures have build checks and x86_64 Go tests pass through Rosetta.
-    Native Intel networking and other macOS releases remain unverified. See the
-    contributor validation record for the current live AWS acceptance status.
+!!! info "Supported platforms"
+    Managed networking requires macOS 15+ on arm64 or x86_64. Native networking
+    acceptance must be run on each target OS and architecture; Rosetta command
+    checks do not establish native Intel networking acceptance.
 
 ### Start and use the session
 
@@ -205,17 +203,15 @@ stlv tunnel cleanup
 `cleanup` retries removal of stale Stelvio-owned host state and leaves the helper
 installed. It refuses live sessions and foreign resources. Preserve the journal
 when ownership is uncertain; resolve the reported conflict and retry. This
-command does not delete AWS resources. The former temporary AWS access stack and
-`tunnel recover` command have been removed.
+command does not delete AWS resources.
 
 ### Upgrades and uninstall
 
-`stlv tunnel install`, `stlv dev`, and `stlv tunnel start` ensure the packaged
+`stlv tunnel install`, `stlv dev`, and `stlv tunnel start` ensure the pinned
 Traforo version is installed. Close active tunnel/dev sessions before replacing
 an older helper. Stelvio requests macOS administrator authorization for the
-replacement, handles compatible legacy ownership records, and retains evidence
-if an interrupted upgrade cannot finish safely. You do not need the old Python
-package. Conflicting or unsupported ownership records must be resolved before
+replacement and retains evidence if an interrupted upgrade cannot finish safely.
+Conflicting or unsupported ownership records must be resolved before
 replacement; they are never overwritten blindly.
 
 ```bash
@@ -226,12 +222,6 @@ stlv tunnel uninstall
 sessions. The private AWS plugin cache remains available. Neither cleanup nor
 uninstall destroys your application or bastion. Remove the bastion with a deploy
 using `bastion=False`, or destroy the application.
-
-Applications deployed with the former temporary policy must set `bastion=True`
-and redeploy before managed access works. Existing compatible persistent and
-disabled deployment metadata can still be read. Any old temporary AWS resources
-must be disposed of through their original ownership workflow before upgrading;
-v2 does not adopt or delete that infrastructure.
 
 ### Private DNS implementation
 

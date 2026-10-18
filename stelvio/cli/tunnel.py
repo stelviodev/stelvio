@@ -49,13 +49,6 @@ def inspect() -> None:
     _run(show)
 
 
-@tunnel.command("reconcile")
-def reconcile() -> None:
-    """Reconcile stale host state, refusing a live owner."""
-    _run(lambda: NativeHelper().reconcile())
-    click.echo("Host recovery complete.")
-
-
 @tunnel.command("cleanup")
 def cleanup() -> None:
     """Clean stale owned host networking, leaving the helper installed."""

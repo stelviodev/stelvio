@@ -27,12 +27,6 @@ if TYPE_CHECKING:
 DEVELOPMENT_BINARY_ENV = "STLV_TRAFORO_DEV_BINARY"
 TRAFORO_VERSION = "0.0.7"
 EXPECTED_VERSION = f"v{TRAFORO_VERSION}\n"
-LEGACY_VERSION = b"stelvio-traforo/1 helper=1 carrier=1\n"
-# Only these released images may use the pre-semver version command.
-LEGACY_RELEASE_DIGESTS = {
-    "arm64": "b408afcaca01f760f4999c674a21271302c98eedad61678067ab80f844a4ba0f",
-    "x86_64": "4008c435efb5bb3913784a10da61df8fdbaadcbc324e42f2bfd470dbbc86faba",
-}
 EXECUTABLE_MODE = 0o755
 MAX_BINARY_BYTES = 16 * 1024 * 1024
 MACHO_HEADER = struct.Struct("<8I")
@@ -127,11 +121,6 @@ def validate_version(path: Path, *, allow_development: bool = False) -> str:
             re.escape(release).encode() + rb"-dev\+g[0-9a-f]{7,40}\n", result.stdout
         ):
             return result.stdout.decode().strip()
-        if result.stdout == LEGACY_VERSION and TRAFORO_VERSION == "0.0.5":
-            with path.open("rb") as stream:
-                data = stream.read(MAX_BINARY_BYTES + 1)
-            if hashlib.sha256(data).hexdigest() == LEGACY_RELEASE_DIGESTS[_architecture()]:
-                return release
     raise NativeAssetError(
         f"Traforo must report {release}; rebuild the developer image or run stlv tunnel install"
     )

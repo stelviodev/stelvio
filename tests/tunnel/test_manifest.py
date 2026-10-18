@@ -66,7 +66,7 @@ def deployed_state():
                         "type": "stelvio:aws:Vpc",
                         "outputs": {
                             "_stelvio_network": {
-                                "version": 1,
+                                "version": 2,
                                 "kind": "vpc",
                                 "identity": vpc,
                                 "account": "123456789012",
@@ -98,7 +98,7 @@ def deployed_state():
                         "type": "stelvio:aws:DocumentDb",
                         "outputs": {
                             "_stelvio_network": {
-                                "version": 1,
+                                "version": 2,
                                 "kind": "resource",
                                 "identity": database,
                                 "vpc": vpc,
@@ -117,7 +117,7 @@ def deployed_state():
                         "type": "stelvio:aws:Function",
                         "outputs": {
                             "_stelvio_network": {
-                                "version": 1,
+                                "version": 2,
                                 "kind": "endpoint",
                                 "identity": function,
                                 "endpoint_id": "api-generation",
@@ -320,14 +320,14 @@ def test_incomplete_or_ambiguous_state_is_rejected(deployed_state, change, messa
         read_network_manifest(deployed_state)
 
 
-def test_legacy_non_vpc_app_requires_no_network_metadata():
+def test_non_vpc_app_requires_no_network_metadata():
     state = {
         "checkpoint": {
             "latest": {
                 "resources": [
                     {
                         "type": "stelvio:aws:Function",
-                        "urn": "urn:legacy",
+                        "urn": "urn:plain",
                         "outputs": {"url": "https://example.com"},
                     },
                 ]
@@ -414,13 +414,23 @@ def test_inventory_refuses_changed_aws_ownership(deployed_state, mismatch):
         stub.assert_no_pending_responses()
 
 
-def test_legacy_temporary_metadata_requires_explicit_redeploy(deployed_state):
+@mark.parametrize("version", [0, 1, 3, "2", None])
+def test_unsupported_metadata_versions_are_rejected(deployed_state, version):
     metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
         "_stelvio_network"
     ]
-    metadata["version"] = 1
-    metadata["policy"] = "temporary"
-    with raises(ValueError, match="set bastion=True and redeploy"):
+    metadata["version"] = version
+    with raises(ValueError, match="Unsupported or missing network metadata version"):
+        read_network_manifest(deployed_state)
+
+
+@mark.parametrize("policy", ["temporary", "auto", None])
+def test_invalid_bastion_policy_is_rejected(deployed_state, policy):
+    metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
+        "_stelvio_network"
+    ]
+    metadata["policy"] = policy
+    with raises(ValueError, match="Invalid network metadata bastion policy"):
         read_network_manifest(deployed_state)
 
 

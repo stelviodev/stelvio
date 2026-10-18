@@ -1,12 +1,12 @@
-Contribution guidelines are maintained in the main repository: https://github.com/stelviodev/stelvio/blob/main/CONTRIBUTING.md
+# Contributing to Traforo
 
+Contribution guidelines: <https://github.com/stelviodev/stelvio/blob/main/CONTRIBUTING.md>.
 
-### Native ARM64 race testing
+The Stelvio monorepo source is authoritative for the Go client API and unit tests.
+The split repository owns release builds and Go implementation CI.
 
-Run `make race` directly on arm64 macOS. The updated gVisor Go-branch revision
-`v0.0.0-20261017122056-1b7906fdee8c` fixes the CAS register defect in
-`pkg/sync/race_arm64.s`; the large-stream regression no longer has a platform guard.
-The previous pin required amd64/Rosetta for race testing. That limitation remains
-historical evidence in the tunnel testing guide, not a current testing prerequisite.
-Dependency changes do not update the pinned downloadable Traforo release or the
-installed helper. Native networking acceptance is separate from these unit tests.
+Run `make lint vet test race` on macOS. Run race tests natively on arm64 as well
+as Intel where available. Use the shared GoReleaser builder and
+`STLV_TRAFORO_DEV_BINARY` workflow in the README for local integration testing.
+Python tests do not compile Go. Host networking and AWS acceptance are separate,
+explicitly enabled test tiers described in Stelvio's tunnel testing guide.

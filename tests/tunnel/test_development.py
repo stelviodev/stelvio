@@ -413,7 +413,7 @@ def test_builder_help_has_no_build_or_install_side_effect(builder, monkeypatch):
         b"v0.0.5-dev+gabcdef123456\n",
         b"v0.0.7-dev\n",
         b"v0.0.7-dev+gNOTHEX\n",
-        assets.LEGACY_VERSION,
+        b"stelvio-traforo/1 helper=1 carrier=1\n",
     ],
 )
 def test_developer_semantic_version_acceptance(local_image, output):
