@@ -25,7 +25,6 @@ import (
 // unit, including carrier framing, TCP stack, SOCKS handshake and stream copying.
 // No host routes, root process or AWS resources are involved.
 func TestTwoVPCLargeStreamsAndHalfClose(t *testing.T) {
-	checkStreamRacePlatform(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	carrier, peer := pair(t)

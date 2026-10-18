@@ -951,3 +951,33 @@ from all earlier historical records.
 - Documentation build passed; all integration tests collect (235 total at this
   snapshot). New tier safety tests verify default skips, both-flag AWS gating,
   serial-only execution, platform/root refusal and exclusion of ordinary tiers.
+
+
+### 2026-10-18 dependency update: unit-only acceptance
+
+Updated miekg/dns to v1.1.73, tun2socks/v2 to v2.7.0, x/sys to v0.49.0,
+x/net to v0.61.0, x/time to v0.16.0, x/exp to
+v0.0.0-20261014143641-f0251eb4aa3e, and testify to v1.12.1. btree remains
+current at v1.1.3. Go tooling regenerated go.sum and removed obsolete entries;
+its retained YAML v3.0.5 and x/sync v0.24.0 checksums are current as well.
+
+The latest gVisor main revision (9e9495997e29) failed compilation because its
+Bazel source layout mixes Go package names. The corresponding Go-consumable
+branch revision, v0.0.0-20261017122056-1b7906fdee8c, compiles without Traforo API
+changes and includes the corrected ARM64 CAS new-value register R2. The
+platform fail-fast guard was removed without weakening the stream regression.
+
+On macOS 15.7.5 arm64 with Go 1.27.2, both complete suites passed (all six
+packages), including the native ARM64 large-stream race regression:
+
+```sh
+cd pkg/traforo-client-go
+go test -mod=readonly -count=1 -timeout=120s ./...
+go test -mod=readonly -race -count=1 -timeout=180s ./...
+```
+
+The go.mod and go.sum SHA-256 digests were identical before and after both runs.
+This supersedes the historical ARM64 race blocker for local source only. No
+release pins, installed helper, host networking or AWS resources were changed;
+no release build or native networking acceptance was performed. Real Intel
+networking remains pending.

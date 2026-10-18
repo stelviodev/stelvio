@@ -37,8 +37,8 @@ evidence. Maintained tests neither import these scripts nor write evidence there
 # No host routes/DNS or AWS provisioning:
 uv run pytest tests/tunnel -q
 (cd pkg/traforo-client-go && make lint vet test)
-# On ARM64 macOS, use Rosetta for race testing; see the limitation below.
-(cd pkg/traforo-client-go && GOARCH=amd64 CGO_ENABLED=1 make race)
+# Run the race suite natively, including on ARM64 macOS.
+(cd pkg/traforo-client-go && make race)
 
 # Actual macOS networking and administration, no AWS deployment:
 uv run pytest tests/integration --integration-macos-privileged -n 0 -v
@@ -75,12 +75,17 @@ Native Intel and any unexercised macOS version remain pending regardless of skip
 Rosetta execution, or earlier arm64 evidence.
 
 
-## Native ARM64 race blocker
+## Historical native ARM64 race blocker
 
-The large-stream regression exposes a pinned gVisor race-only ARM64 assembly defect
+Before the dependency update, the large-stream regression exposed a pinned gVisor race-only ARM64 assembly defect
 (`pkg/sync/race_arm64.s`, new value loaded into R1 instead of R2). It spins TCP
 workers instead of parking and can starve deadlines. The test fails early on that
 combination with an explanation. It is not skipped. Run the full race suite under
 amd64/Rosetta on this host; native ARM64 race acceptance remains blocked pending a
 separate upstream dependency fix. No module-cache edits or dependency-pin changes
 are made by this test migration.
+
+The subsequent dependency update selects gVisor's Go-consumable branch at
+`v0.0.0-20261017122056-1b7906fdee8c`, which loads the new value into R2 correctly.
+The ARM64 fail-fast guard is removed; use native `make race` now. This source
+update does not change release downloads or establish new host/AWS acceptance.
