@@ -6,7 +6,6 @@ import subprocess
 import sys
 from contextlib import ExitStack
 from ipaddress import IPv4Network
-from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -18,7 +17,7 @@ from stelvio.tunnel.helper_protocol import ResolverEndpoint
 
 from .tunnel_dns_fixture import SocksDnsFixture
 
-pytestmark = mark.integration_tunnel
+pytestmark = mark.integration_macos_privileged
 
 
 def _os_lookup(name: str) -> set[str]:
@@ -41,9 +40,9 @@ def _os_lookup(name: str) -> set[str]:
     return set(json.loads(result.stdout))
 
 
-def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline():  # noqa: PLR0915 - complete host DNS acceptance
+def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_path):  # noqa: PLR0915 - complete host DNS acceptance
     assert platform.system() == "Darwin"
-    assert platform.mac_ver()[0] == "15.7.5"
+    assert int(platform.mac_ver()[0].split(".")[0]) >= 15
     helper = NativeHelper()
     baseline = helper.inspect()
     assert not baseline.owned
@@ -105,9 +104,7 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline():  
     assert not final.uncertain
     assert not final.units
     evidence["fallback_rejected_and_baseline_restored"] = True
-    path = Path(__file__).resolve().parents[2] / "spikes/dev-vpc-v1/build/p6/os-dns.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(evidence, indent=2))
+    (tmp_path / "os-dns.json").write_text(json.dumps(evidence, indent=2))
 
 
 def test_two_vpc_go_dns_and_packet_forwarding_reconnect():

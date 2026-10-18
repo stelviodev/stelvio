@@ -20,13 +20,13 @@ from .assert_tunnel import (
 )
 from .cli_session import CliSession
 
-pytestmark = [mark.integration_tunnel, mark.integration_vpc]
+pytestmark = [mark.integration_tunnel, mark.integration_macos_privileged]
 
 
 @fixture
-def cli_session(request):
+def cli_session(request, tmp_path):
     assert platform.system() == "Darwin"
-    assert platform.mac_ver()[0] == "15.7.5"
+    assert int(platform.mac_ver()[0].split(".")[0]) >= 15
     assert INSTALLED_HELPER.exists(), (
         "Install the approved helper before the exclusive tunnel lane"
     )
@@ -34,7 +34,7 @@ def cli_session(request):
     assert not baseline.owned
     assert not baseline.uncertain
     assert not baseline.units
-    session = CliSession(request.param)
+    session = CliSession(request.param, project=tmp_path / "application")
     if request.param == "multi":
         session.make_multi_vpc()
     try:
@@ -79,6 +79,7 @@ def test_example_actual_cli_tls_discovery_reconnect_and_cleanup(cli_session):  #
     invocations = session.invocations()
     assert len({i["id"] for i in invocations}) == len(invocations)
     session.evidence("example-reconnected", after)
+    _exercise_host_key_rotation(session, vpc, url)
     session.stop()
     host = NativeHelper().inspect()
     assert not host.owned
@@ -358,3 +359,122 @@ finally: client.close()
     assert observed["replica_set"] == "rs0"
     assert observed["members"]
     session.evidence("standalone-database", observed)
+
+
+def _remote_fixture(session, instance, command):
+    """Run only against the instance recorded by this disposable application."""
+    assert instance in {v.access.instance_id for v in session.manifest().enabled_vpcs}
+    ssm = session.sdk.client("ssm")
+    identity = ssm.send_command(
+        InstanceIds=[instance],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": ["set -eu\n" + command]},
+        TimeoutSeconds=90,
+    )["Command"]["CommandId"]
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        try:
+            result = ssm.get_command_invocation(CommandId=identity, InstanceId=instance)
+        except ssm.exceptions.InvocationDoesNotExist:
+            time.sleep(1)
+            continue
+        if result["Status"] == "Success":
+            return
+        assert result["Status"] in ("Pending", "InProgress", "Delayed"), result["Status"]
+        time.sleep(1)
+    raise TimeoutError("Proof-owned remote fault command exceeded its budget")
+
+
+def _exercise_host_key_rotation(session, vpc, url):
+    instance = vpc.access.instance_id
+    backup = "/run/stelvio-test-key-" + session.run_id
+    key = "/etc/ssh/ssh_host_ed25519_key"
+    try:
+        _remote_fixture(
+            session,
+            instance,
+            f"mkdir -m 0700 {backup}\ncp -p {key} {backup}/original\n"
+            f"cp -p {key}.pub {backup}/original.pub\n"
+            f'ssh-keygen -q -t ed25519 -N "" -f {backup}/changed\n'
+            f"install -m 0600 {backup}/changed {key}\n"
+            f"install -m 0644 {backup}/changed.pub {key}.pub\nsystemctl restart sshd",
+        )
+        interrupt_transport(instance, session.transport_owner())
+        deadline = time.monotonic() + 180
+        while True:
+            lines = session.log.read_text().splitlines()
+            if any("identity-or-configuration" in line and "failed" in line for line in lines):
+                break
+            assert session.process.poll() is None
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "Changed SSH identity did not cause terminal admission failure"
+                )
+            time.sleep(1)
+        before = len(session.invocations())
+        assert invoke_url(url)["status"] == 500
+        assert len(session.invocations()) == before
+        # Prove rejection reached Traforo rather than a prior positive OS cache.
+        # Exact DocumentDB names are owned, but their OS result may remain cached;
+        # direct UDP uses a fixed independent DNS wire query through the scoped port.
+        from .macos_dns_query import query_scoped
+
+        assert query_scoped(vpc, session.manifest()) == 2  # SERVFAIL
+        session.evidence("host-key-change-refused", {"instance": instance})
+    finally:
+        _remote_fixture(
+            session,
+            instance,
+            f"if [ -f {backup}/original ]; then cp -p {backup}/original {key}; "
+            f"cp -p {backup}/original.pub {key}.pub; systemctl restart sshd; "
+            f"rm -r {backup}; fi",
+        )
+    # Identity failure is terminal for that session. Restore the key and explicitly
+    # start a new session; do not silently teach the old session to trust it.
+    session.stop()
+    session.start()
+    session.wait_ready()
+    assert_example_response(url, marker=session.marker, pid=session.process.pid)
+    session.evidence("host-key-restored-new-session", {"instance": instance})
+
+
+def test_non_vpc_actual_cli_without_helper(macos_host, tmp_path):
+    from stelvio.tunnel import installation
+
+    session = CliSession(project=tmp_path / "plain-application")
+    source = f"""from stelvio.app import StelvioApp
+from stelvio.config import StelvioAppConfig, AwsConfig
+from stelvio.aws.function import Function
+app=StelvioApp({session.app!r})
+@app.config
+def configuration(env):
+    return StelvioAppConfig(aws={session.provider_source()})
+@app.run
+def run():
+    Function("plain",handler="functions/plain.handler",url="public")
+"""
+    (session.project / "stlv_app.py").write_text(source)
+    (session.project / "functions/plain.py").write_text(
+        "import json,os\ndef handler(event,context):\n"
+        '    return {"statusCode":200,"body":json.dumps({"plain":True,'
+        '"marker":os.environ["STLV_P6_MARKER"],"pid":os.getpid()})}\n'
+    )
+    installation.uninstall_helper()
+    try:
+        session.start()
+        deadline = time.monotonic() + 1200
+        while "local dev server connected to AppSync" not in session.log.read_text():
+            assert session.process.poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(1)
+        assert invoke_url(session.url()) == {
+            "status": 200,
+            "body": {"plain": True, "marker": session.marker, "pid": session.process.pid},
+        }
+        assert not INSTALLED_HELPER.exists()
+        session.evidence("plain-without-helper", {"passed": True})
+    finally:
+        try:
+            session.destroy()
+        finally:
+            installation.install_helper()

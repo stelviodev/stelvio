@@ -279,3 +279,37 @@ DNS/runtime interoperability. Both actual pinned legacy images remain accepted.
 Wheel/sdist exclusions and documentation build passed. No privileged installation,
 AWS deployment, release publication, commit or branch change was performed by this
 implementation. Exact bundle/source/binary hashes are in testing.md's 2026-10-18 record.
+
+
+## Maintained regression tiers (2026-10-18)
+
+Read `spike-coverage.md` for the mapping from every historical proof family to
+maintained tests or obsolete policies. Go owns the large two-VPC stream/half-close
+regression and parser algorithms. Pytest owns actual installed-binary/OS/CLI
+interoperability. It must not compile Go.
+
+All host mutations require `--integration-macos-privileged -n 0`; AWS scenarios
+also require `--integration-tunnel`. `run_all.sh` never enables these tests.
+The host fixture locks across UIDs, preserves/restores the installed image and
+checks independent routes/interfaces/resolver/service/process inventories.
+100-cycle, command/parent death, helper restart, foreign resolver replacement,
+interrupted upgrades and migration are maintained tests. Legacy and cross-venv
+artifacts are explicit prerequisites. Missing artifacts produce pending acceptance.
+
+Canonical application fixtures live under `tests/integration/fixtures/tunnel_app`;
+all generated ownership/evidence uses pytest temporary directories. Historical
+spikes remain preserved and are not executable instructions for the current code.
+Record current-run results in testing.md/task log separately from historical results.
+
+Current acceptance: macOS15.7.5 arm64 native suite12passed, including100cycles,
+real legacy migration and cross-venv use. Both refined safety cases passed again.
+All4AWS scenarios passed across two runs using default/us-east-1; the initial run's
+authorization timeouts remain recorded as failures. Retry4passed includes2AWS and
+2native cases, teardown and original-helper restoration. Fresh audits verified all
+proof-owned AWS resources/metadata absent and both host baselines restored.
+Evidence roots: `/private/tmp/stelvio-aws-regression-20261018` and
+`/private/tmp/stelvio-aws-regression-retry-20261018`. Read testing.md for exact
+artifacts, hashes and summaries. Go lint/vet/unit, bounded fuzzing and full
+amd64/Rosetta race passed; native ARM64 race is blocked by the pinned gVisor CAS
+assembly defect and fails early. Real Intel networking remains pending. Do not
+describe the pinned release as carrying the local DNS listener collision fix.

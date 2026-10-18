@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import shutil
 import signal
 import subprocess
+import sys
+import tempfile
 import time
 from base64 import urlsafe_b64encode
 from hashlib import sha256
@@ -16,7 +19,8 @@ from uuid import uuid4
 
 from stelvio.stack_outputs import read_network_manifest
 from stelvio.tunnel.credentials import AWS_IO
-from stelvio.tunnel.helper_client import HelperError, NativeHelper
+from stelvio.tunnel.helper_client import STATE_DIRECTORY, HelperError, NativeHelper
+from stelvio.tunnel.installation import INSTALLED_HELPER
 
 from .assert_helpers import _boto3_session
 from .assert_tunnel import (
@@ -26,21 +30,20 @@ from .assert_tunnel import (
 )
 from .tunnel_cleanup import purge_test_metadata
 
-REPO = Path(__file__).resolve().parents[2]
-EXAMPLE = REPO / "spikes/vpc-tunnel-app"
+EXAMPLE = Path(__file__).parent / "fixtures/tunnel_app"
 STARTUP_SECONDS = 1200
 SHUTDOWN_SECONDS = 700
 DESTROY_SECONDS = 3600  # Provider subnet deletion allows 45 minutes, plus DB/network teardown.
 
 
 class CliSession:
-    def __init__(self, policy: str = "True") -> None:
+    def __init__(self, policy: str = "True", *, project: Path | None = None) -> None:
         self.run_id = uuid4().hex[:6]
         self.app = f"stlv-{self.run_id}"
         self.env = "test"
         self.marker = str(uuid4())
-        self.project = REPO / "spikes/dev-vpc-v1/build/p6" / self.run_id
-        self.project.mkdir(parents=True)
+        self.project = project or Path(tempfile.mkdtemp(prefix="stelvio-tunnel-"))
+        self.project.mkdir(parents=True, exist_ok=True)
         shutil.copytree(EXAMPLE / "functions", self.project / "functions")
         source = (EXAMPLE / "stlv_app.py").read_text()
         assert source.count('StelvioApp("vpc-tunnel")') == 1
@@ -92,9 +95,9 @@ class CliSession:
             PYTHONUNBUFFERED="1",
             COLUMNS="240",
         )
-        self.cli = Path(
-            os.environ.get("STLV_TEST_TUNNEL_PYTHON", str(EXAMPLE / ".venv/bin/python"))
-        ).with_name("stlv")
+        self.cli = Path(os.environ.get("STLV_TEST_TUNNEL_PYTHON", sys.executable)).with_name(
+            "stlv"
+        )
         self.process = None
         self.started = None
         self.log = self.project / "dev.log"
@@ -136,6 +139,11 @@ class CliSession:
                     "pid": self.process.pid if self.process else None,
                     "project": str(self.project),
                     "started": self.started,
+                    "host": {
+                        "system": platform.system(),
+                        "version": platform.mac_ver()[0],
+                        "architecture": platform.machine(),
+                    },
                 },
                 indent=2,
             )
@@ -500,7 +508,10 @@ def run():
 
     def recover_access(self) -> None:
         """Wait for automatic helper cleanup; no AWS infrastructure is session-owned."""
-        self.wait_host_empty()
+        if INSTALLED_HELPER.exists():
+            self.wait_host_empty()
+        else:
+            assert not STATE_DIRECTORY.exists()
 
     def wait_host_empty(self) -> None:
         deadline = time.monotonic() + 60
@@ -530,10 +541,13 @@ def run():
                 failures.append(error)
         if failures:
             raise ExceptionGroup(f"Cleanup incomplete; retain ownership {self.project}", failures)
-        inventory = NativeHelper().inspect()
-        assert not inventory.owned
-        assert not inventory.uncertain
-        assert not inventory.units
+        if INSTALLED_HELPER.exists():
+            inventory = NativeHelper().inspect()
+            assert not inventory.owned
+            assert not inventory.uncertain
+            assert not inventory.units
+        else:
+            assert not STATE_DIRECTORY.exists()
         app_segment = urlsafe_b64encode(self.app.encode()).decode().rstrip("=")
         env_segment = urlsafe_b64encode(self.env.encode()).decode().rstrip("=")
         s3 = self.sdk.client("s3", config=AWS_IO)

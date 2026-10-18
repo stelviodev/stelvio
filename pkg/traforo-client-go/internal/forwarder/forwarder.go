@@ -26,6 +26,13 @@ import (
 const frameHeader = 16 // unit32 + generation64 + AF_INET32, all network order
 const mtu = 1500
 
+// packetCarrier is the existing datagram write boundary. Tests substitute bounded
+// queues without Darwin datagram ENOBUFS terminating the synthetic device.
+type packetCarrier interface {
+	SetWriteDeadline(time.Time) error
+	WriteMsgUnix([]byte, []byte, *net.UnixAddr) (int, int, error)
+}
+
 type unit struct {
 	id          uint32
 	generation  uint64
@@ -34,7 +41,7 @@ type unit struct {
 	packets     chan []byte
 	ctx         context.Context
 	cancel      context.CancelFunc
-	carrier     *net.UnixConn
+	carrier     packetCarrier
 	writer      *sync.Mutex
 	stack       *stack.Stack
 	endpoint    *iobased.Endpoint

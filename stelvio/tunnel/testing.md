@@ -427,16 +427,16 @@ aws ec2 describe-availability-zones \
   --query 'AvailabilityZones[?State==`available`].ZoneName' --output text
 export STLV_TEST_TUNNEL_AZS=us-east-1a,us-east-1b
 "$TRAFORO_SOURCE_PYTHON" -m pytest tests/integration/test_tunnel.py \
-  --integration-tunnel -n 0 --collect-only -q
+  --integration-macos-privileged --integration-tunnel -n 0 --collect-only -q
 ```
 
 Choose two AZs supported by DocumentDB in the selected account/region. The previous
-run used those two because the default account AZ choice was unsuitable. The live
-fixture currently asserts **macOS 15.7.5** and requires an installed, empty helper.
-On another macOS release, arrange a reviewed fixture update and record new platform
-acceptance; do not just suppress the assertion and claim the old certification.
+run used those two because the default account AZ choice was unsuitable. The fixture accepts macOS 15+ and preflights a certain, empty host. It preserves
+and restores the installed helper. Record the actual OS/architecture tested; support
+checks do not certify untested platforms.
 
-Do not combine `--integration-tunnel` with other integration flags or xdist workers.
+The AWS lane requires both `--integration-macos-privileged` and `--integration-tunnel`.
+Do not combine them with other tier flags or xdist workers.
 One helper owns host networking globally. Collection should include `True`, `{}` and
 `multi` cases. A skipped test is not AWS acceptance.
 
@@ -449,7 +449,7 @@ downloaded release and a freshly built candidate wheel:
 cd "$TRAFORO_REPO"
 caffeinate -i "$TRAFORO_SOURCE_PYTHON" -m pytest \
   'tests/integration/test_tunnel.py::test_example_actual_cli_tls_discovery_reconnect_and_cleanup[True]' \
-  --integration-tunnel -n 0 -v --tb=short \
+  --integration-macos-privileged --integration-tunnel -n 0 -v --tb=short \
   > "$TRAFORO_RUN/aws-true.log" 2>&1
 ```
 
@@ -457,8 +457,8 @@ Use another terminal to `tail -f` the log. Do not add a pipe that hides pytest's
 code. Wait for the final summary and teardown, even after `[100%]` or body success.
 The fixture allows up to 20 minutes for startup and one hour for destroy.
 
-The test copies `spikes/vpc-tunnel-app` into a uniquely owned project under
-`spikes/dev-vpc-v1/build/p6/<run-id>`. It invokes the installed wheel CLI, and proves:
+The test copies `tests/integration/fixtures/tunnel_app` into a uniquely owned
+pytest temporary directory. It invokes the installed wheel CLI, and proves:
 
 1. Actual `stlv dev` deploys the Lambda proxy and runs a handler locally, identified
    by a unique marker/process ID rather than merely receiving an HTTP 200.
@@ -488,11 +488,11 @@ Run sequentially, waiting for each teardown:
 ```bash
 caffeinate -i "$TRAFORO_SOURCE_PYTHON" -m pytest \
   'tests/integration/test_tunnel.py::test_example_actual_cli_tls_discovery_reconnect_and_cleanup[{}]' \
-  --integration-tunnel -n 0 -v --tb=short \
+  --integration-macos-privileged --integration-tunnel -n 0 -v --tb=short \
   > "$TRAFORO_RUN/aws-config.log" 2>&1
 caffeinate -i "$TRAFORO_SOURCE_PYTHON" -m pytest \
   tests/integration/test_tunnel.py::test_multi_vpc_partial_failure_distinct_markers_and_crash_recovery \
-  --integration-tunnel -n 0 -v --tb=short \
+  --integration-macos-privileged --integration-tunnel -n 0 -v --tb=short \
   > "$TRAFORO_RUN/aws-multi.log" 2>&1
 ```
 
@@ -562,7 +562,7 @@ If pytest fails or is interrupted:
 From the repository root, set `TRAFORO_PROJECT` to the exact generated project:
 
 ```bash
-export TRAFORO_PROJECT='/absolute/path/to/spikes/dev-vpc-v1/build/p6/RUN_ID'
+export TRAFORO_PROJECT='/absolute/path/to/retained/pytest/application'
 "$TRAFORO_SOURCE_PYTHON" - <<'PY'
 import hashlib, json, os
 from pathlib import Path
@@ -716,7 +716,7 @@ acceptance is claimed by these developer-mode tests.
 
    ```bash
    "$TRAFORO_SOURCE_PYTHON" -m pytest tests/integration/test_tunnel_dns.py \
-     --integration-tunnel -n 0 -v --tb=short
+     --integration-macos-privileged --integration-tunnel -n 0 -v --tb=short
    ```
 
    Require public-fallback rejection with an observed scoped outage query,
@@ -836,3 +836,118 @@ performed. The installed helper remained at SHA-256
 
 Native Intel networking remains pending. Intel's inability to execute arm64 is
 covered by a simulated builder test, not a claim of native Intel acceptance.
+
+
+## 2026-10-18: maintained spike replacement tests
+
+The authoritative coverage map is [spike-coverage.md](spike-coverage.md).
+Historical scripts remain unchanged apart from warnings; do not use them as current
+installer/recovery instructions. Maintained tests use checked-in fixtures and pytest
+temporary evidence directories, with no dependence on spike scripts.
+
+Run the no-AWS native lane separately:
+
+```bash
+export STLV_TEST_STELVIO_WHEEL='/absolute/path/to/candidate.whl'
+uv run pytest tests/integration --integration-macos-privileged -n 0 -v --tb=short
+```
+
+Use both macOS and tunnel flags for AWS acceptance. `run_all.sh` never runs either
+host lane, including when `STLV_TEST_TUNNEL=1`. All host tests serialize across users
+and restore the original installed image or absent-helper baseline. An uncertain
+journal or foreign resource fails acceptance and preserves evidence.
+
+Run these lanes in an attended, unlocked macOS desktop session. Installation,
+replacement, uninstall and root-owned fault fixtures use normal administrator
+authorization dialogs, including when the expected outcome is active-session
+refusal. Authorization expires during long AWS deployments; respond to later
+dialogs as well. A 180-second authorization timeout fails the test and can prevent
+final helper restoration. Retain the saved original image and inventories, restore
+through the ordinary installer transaction, and audit the baseline before retrying.
+Do not bypass authorization or delete journals to finish a run.
+
+Pytest can print a test's `PASSED` line before its fixture teardown finishes.
+Wait for the final suite summary, each application's `cleanup` evidence record,
+and the final host inventory. AWS may retain Lambda VPC interfaces while it
+retires them after function deletion; leave the provider's bounded teardown
+running. An empty DocumentDB list alone does not certify VPC or IAM cleanup.
+See [AWS's Hyperplane ENI lifecycle guidance](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html).
+
+The 100-cycle test runs all 100 cycles. Legacy migration and cross-venv acceptance
+need their explicit artifacts; missing artifacts are named skips and remain pending.
+Use a new `--basetemp` path for every run. Do not erase failed-run evidence before
+certifying host/AWS restoration. Results below are current-run evidence, separate
+from all earlier historical records.
+
+
+### 2026-10-18 regression migration: current execution evidence
+
+- Python tunnel and CLI regressions: **358 passed, 5 image-dependent skips**.
+- Go lint/vet/unit tests passed. Full amd64/Rosetta race suite passed.
+  Native ARM64 race is **blocked**, not passed: pinned gVisor
+  `pkg/sync/race_arm64.s` loads the CAS new value into the old-value register.
+  The stream regression now fails early on that combination instead of hanging.
+  Use `GOARCH=amd64 CGO_ENABLED=1 make race` with Rosetta. No dependency pin changed.
+- Bounded fuzzing passed: DNS 110,705 executions; helper requests 486,772;
+  snapshots 253,351; forwarder control 35,947 (three-second budgets, two workers).
+- Native final run: **12 passed in 197.74 seconds** on macOS 15.7.5 arm64,
+  including all 100 cycles, owner/parent death, restart, descriptor/elevation
+  refusal, foreign resolver protection/restoration, cross-venv, interrupted
+  replacement and checksum-verified legacy migration. No skips.
+  Evidence: `/private/tmp/stelvio-native-regression-final-20261018`,
+  log `/private/tmp/stelvio-native-regressions-final.log`. Original installed
+  image `fd65dee8e07f72f0303a51140a7b1158dcfa11f5cc6856ebbb675a21c1516625`
+  was restored with independent baseline checks.
+- The endurance run exposed an ephemeral UDP/TCP listener-port collision. Go now
+  retries only address-in-use collisions, at most eight attempts, closing every
+  failed UDP socket. Independent injected tests cover retry, exhaustion and
+  unrelated errors. Pinned external releases remain unchanged; this fix is tested
+  through `STLV_TRAFORO_DEV_BINARY` until a future release carries it.
+- AWS execution build: `pkg/traforo-client-go/build/traforo-6pntvbfo/build.json`,
+  version `v0.0.5-dev+g395a5cc3df2c`, source fingerprint
+  `d1b0c40ae3bbc14047e20391f6b8fe07fdc7734057edf725456901e46dd6656d`.
+  Both architectures built and validated (amd64 through Rosetta). A subsequent
+  reviewed-source build, `build/traforo-29lz0w9r/build.json`, has source fingerprint
+  `47f2a29a02d1d49dd59fd0a42a4adb78812f892f6c56b16433e73efeed856453`.
+  Both executable hashes are identical between builds; the changes were test-only.
+  Arm64 SHA-256: `9a300bdb5acde28e6fc3bf7ec95e9e70ee337d6b9e463ddd93a6ab0e511713c6`;
+  amd64: `d1e550f71be8a7edcfb6224ac9f9f7baf677b1f844d562ee675222adeb8969ed`.
+- Wheel/sdist built under `/private/tmp/stelvio-tunnel-regressions/dist`;
+  neither contains Go source or Traforo executables.
+- All four AWS scenarios passed across the original and retry runs using the
+  default profile in us-east-1: both explicit bastion forms, multi-VPC faults and
+  real non-VPC CLI invocation with no installed helper. This includes verified
+  DocumentDB TLS/member discovery/read-write, standalone access/reconnection,
+  SSH host-key-change rejection/restoration, private aliases, independent outages,
+  invocation admission, partial startup and command-death cleanup. Normal session
+  exit retained deployed bastions; application teardown subsequently removed them.
+- The original AWS runner finished **2 passed, 2 failed, 1 teardown error** in
+  4773.09 seconds. Failures were 180-second macOS authorization timeouts, not
+  networking assertions. Its three deployed applications were destroyed, and the
+  original helper was restored through the normal authorization transaction.
+  Preserve `/private/tmp/stelvio-aws-regression-20261018` and
+  `/private/tmp/stelvio-aws-regressions.log` as failed-run evidence.
+- The retry finished **4 passed in 3602.67 seconds**, including full teardown and
+  helper restoration: the two remaining AWS cases plus the refined frozen-orphan
+  and foreign-resolver native cases. Evidence:
+  `/private/tmp/stelvio-aws-regression-retry-20261018`; log
+  `/private/tmp/stelvio-aws-regressions-retry.log`. Lambda interface retirement
+  accounted for much of the teardown wait; no manual AWS deletion was needed.
+- Fresh-client audits confirmed absence of all five deployed proof applications
+  (`stlv-d52d82`, `stlv-a8a80d`, `stlv-9546e1`, `stlv-8e5217`, `stlv-f1e54c`),
+  plus the never-deployed `stlv-ff14c1` attempt. Recorded sessions, private zones,
+  log groups, state versions and passphrase parameters are absent. Each evidence
+  root contains `independent-audit.json`.
+- The final independent live-host audit matched **both** AWS runs' initial
+  routes, interface identities, resolver inode/content ownership, service and
+  process inventories. Helper inspection was empty and certain. Original image
+  `fd65dee8e07f72f0303a51140a7b1158dcfa11f5cc6856ebbb675a21c1516625`
+  is restored. See the retry root's `independent-host-audit.json` and
+  `independent-host.json`. Native Intel acceptance remains pending.
+
+- Additional actual Python–Traforo process interoperability: **5 passed** using
+  `traforo-6pntvbfo` (fixed-wire UDP/TCP DNS, retained endpoints and isolated runtime
+  normal/error/owner-death paths). Log `/private/tmp/stelvio-native-process-interop.log`.
+- Documentation build passed; all integration tests collect (235 total at this
+  snapshot). New tier safety tests verify default skips, both-flag AWS gating,
+  serial-only execution, platform/root refusal and exclusion of ordinary tiers.

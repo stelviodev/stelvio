@@ -98,7 +98,8 @@ like `Resources.results`, so the component name in your test has to match.
 |---|---|---|---|
 | Standard | `integration` | `--integration` | AWS profile |
 | VPC | `integration_vpc` | `--integration-vpc` | AWS profile (4 workers max; account VPC quota is 5 including the default VPC) |
-| Tunnel | `integration_tunnel` | `--integration-tunnel` | Exclusive controlled macOS lane, matching installed Traforo, Session Manager plugin, AWS profile; no xdist workers |
+| macOS privileged | `integration_macos_privileged` | `--integration-macos-privileged` | macOS 15+, ordinary user, administrator authorization, exclusive host, `-n 0`; never in `run_all.sh` |
+| Tunnel AWS | `integration_tunnel` plus `integration_macos_privileged` | Both `--integration-tunnel` and `--integration-macos-privileged` | Same host prerequisites plus AWS profile; billable disposable applications |
 | CloudFront | `integration_cf` | `--integration-cf` | AWS profile |
 | DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` (optional `STLV_TEST_ACM_CERTIFICATE_ARN` for a pre-issued `*.domain` cert). One `*.domain` cert plus its validation record stay in the account for reuse (`stelvio:env=test` only, no `stelvio:app`, so cleanup skips them). |
 
@@ -127,7 +128,7 @@ STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration-v
 STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -k dynamo
 ```
 
-Never combine tier flags in one pytest run: it opens too many files and the run collapses.
+Except for the two explicit macOS/tunnel flags below, never combine tier flags: it opens too many files and the run collapses.
 Don't interrupt after `[100%]` — teardown is still destroying stacks. Wait for the summary
 line.
 
@@ -141,58 +142,51 @@ Default is state files in the temp dir; `--tags` scans by `stelvio:env=test`, `-
 `stlv-<hex>-test-` prefix, `--dry-run` shows without deleting, `--region` repeats for
 cross-region runs.
 
-## Controlled macOS tunnel lane
+## Explicit privileged macOS and tunnel lanes
 
-`tests/integration/test_tunnel.py` runs the actual CLI and public Function URL
-against local DocumentDB handlers. It keeps persistent (`bastion=True`) and
-explicit configuration cases, plus non-overlapping multiple VPCs. `test_tunnel_dns.py`
-checks the real OS resolver, private aliases, outage rejection, and restoration.
-These are four serial cases. Do not combine tier flags or run another dev
-session during this lane. `run_all.sh` waits for the ordinary tiers before
-running it with `-n 0`, and only when `STLV_TEST_TUNNEL=1`.
-
-The current native fixtures explicitly require macOS **15.7.5**, although the
-product targets macOS 15+. The 2026-10-16 v2 run used arm64 and Go 1.27.2:
-native routing/DNS, upgrades and crash cleanup passed, along with the one-VPC
-dev/standalone DocumentDB TLS, member discovery, read/write and reconnection
-workflow. Its application teardown and independent absence audits passed.
-Additional configuration/multi-VPC AWS cases and a separate full dev-command
-SIGKILL run remain unverified for v2. Native Intel and other macOS releases also
-remain pending. Rosetta package tests do not replace native Intel networking
-acceptance. Keep dated results in `tasks/dev-vpc.md` separate from earlier builds.
-
-Prepare a clean Python environment containing the wheel under test **and
-PyMongo**, then run `stlv tunnel install` from that wheel's environment. The command
-downloads pinned Traforo and Session Manager plugin releases. Run as a nonroot user and obtain permission
-for billable AWS provisioning and administrator-authorized host changes before
-starting. `stlv tunnel inspect` must show an empty, certain helper baseline.
+Every test that changes host routes, interfaces, resolver files or helper installation
+requires `--integration-macos-privileged`. Run pytest as an ordinary user on macOS
+15+ with no live dev/tunnel session. The fixture refuses uncertain ownership and
+serializes across users. It preserves and restores the original helper installation.
+Administrator authorization is requested through the ordinary installer.
 
 ```bash
-# Set this to the clean wheel environment, not the repository interpreter.
-export STLV_TEST_TUNNEL_PYTHON=/absolute/path/to/proof-venv/bin/python
-export STLV_TEST_AWS_PROFILE=default
-export STLV_TEST_AWS_REGION=us-east-1
-uv run pytest tests/integration --integration-tunnel -n 0 -v --tb=short
+# Actual host lifecycle, DNS, packet forwarding and administration; no AWS deployment.
+uv run pytest tests/integration --integration-macos-privileged -n 0 -v --tb=short
 
-# Or opt into the serial lane after run_all.sh's ordinary tiers:
-STLV_TEST_TUNNEL=1 ./tests/integration/run_all.sh
+# Adds actual CLI -> Function URL -> local DocumentDB, standalone and outage tests.
+STLV_TEST_AWS_PROFILE=default STLV_TEST_AWS_REGION=us-east-1 \
+  uv run pytest tests/integration --integration-macos-privileged \
+  --integration-tunnel -n 0 -v --tb=short
 ```
 
-Without `STLV_TEST_TUNNEL_PYTHON`, the fixture selects
-`spikes/vpc-tunnel-app/.venv/bin/python`. Its sibling `stlv` executable must
-exist. `STLV_TEST_TUNNEL_AZS` optionally supplies comma-separated zone names
-in the proof region when a DocumentDB instance class needs different capacity;
-check current AWS availability rather than copying a historical zone list.
+These are the only integration flags that may be combined. Other tiers and xdist
+workers are rejected. `run_all.sh` never executes privileged tests; the former
+`STLV_TEST_TUNNEL=1` opt-in has been removed.
 
-The fixture copies the example into an isolated app and records ownership,
-resolved resources, and evidence under `spikes/dev-vpc-v1/build/p6/<run>/`.
-Wait for the final pytest summary: `[100%]` is followed by potentially lengthy
-AWS teardown. Preserve `ownership.json`, `resolved-ownership*.json`, logs,
-and `evidence.jsonl` if teardown fails. Run `stlv tunnel cleanup` for stale owned
-host state and destroy the recorded application through its state owner. There
-is no temporary access stack or AWS recover command. Finish with an independent
-AWS absence audit and host-baseline comparison. Use `stlv tunnel uninstall` only
-after the helper state is empty and certain.
+Set `STLV_TEST_TUNNEL_PYTHON` to a candidate wheel environment's Python containing
+PyMongo. Otherwise the current Python and its sibling `stlv` are used. Set
+`STLV_TEST_STELVIO_WHEEL` to the absolute candidate wheel for cross-venv acceptance.
+Legacy migration requires an approved `STLV_TEST_LEGACY_HELPER` and its independent
+`STLV_TEST_LEGACY_SHA256`. Missing artifacts produce named skips, not acceptance.
+`STLV_TEST_TUNNEL_AZS` can select comma-separated zones in the test region.
+
+The canonical app is in `tests/integration/fixtures/tunnel_app`. Applications,
+ownership receipts, logs and baseline inventories go into pytest temporary directories,
+not `spikes/`. Retain failure evidence; use a unique `--basetemp` for each run.
+Never reuse an evidence directory with unresolved cleanup, since pytest clears it.
+
+The native lane covers owner death including frozen children, real helper restart,
+100 two-VPC cycles, foreign resolver ownership, safe installation/replacement,
+cross-venv operation and cleanup/uninstall separation. AWS scenarios additionally
+cover TLS/member discovery/read-write, independent VPC failure, host-key changes,
+reconnection, standalone access and non-VPC dev without a helper. Normal session
+exit retains deployment-owned bastions; application teardown removes them.
+
+Test existence and dated acceptance are separate. The supported floor is macOS 15;
+native Intel and untested OS releases remain pending. See the coverage map and
+recorded results in `stelvio/tunnel/spike-coverage.md` and
+`stelvio/tunnel/testing.md` in the repository.
 
 Go parser, journal, packet, identity, and native syscall tests belong to the
 [Traforo repository](https://github.com/stelviodev/traforo). The source under

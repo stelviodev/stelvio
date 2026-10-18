@@ -4,11 +4,13 @@ package dnsrelay
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/miekg/dns"
@@ -101,13 +103,11 @@ func New(c Config) (*Relay, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	udp, tcp, err := listenPair(
+		func() (*net.UDPConn, error) { return net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}) },
+		func(address string) (net.Listener, error) { return net.Listen("tcp4", address) },
+	)
 	if err != nil {
-		return nil, err
-	}
-	tcp, err := net.Listen("tcp4", udp.LocalAddr().String())
-	if err != nil {
-		_ = udp.Close()
 		return nil, err
 	}
 	r := &Relay{udp: udp, tcp: tcp, observations: make(map[string]observation), connections: make(map[net.Conn]struct{}), slots: make(chan struct{}, MaxRequests)}
@@ -120,6 +120,26 @@ func New(c Config) (*Relay, error) {
 	go r.serveUDP()
 	go r.serveTCP()
 	return r, nil
+}
+
+// UDP and TCP allocate ephemeral ports independently. A UDP-selected port can
+// already have a TCP listener. Retry only that collision, with a fixed bound.
+func listenPair(udpListen func() (*net.UDPConn, error), tcpListen func(string) (net.Listener, error)) (*net.UDPConn, net.Listener, error) {
+	for range 8 {
+		udp, err := udpListen()
+		if err != nil {
+			return nil, nil, err
+		}
+		tcp, err := tcpListen(udp.LocalAddr().String())
+		if err == nil {
+			return udp, tcp, nil
+		}
+		_ = udp.Close()
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			return nil, nil, err
+		}
+	}
+	return nil, nil, fmt.Errorf("DNS listener pair: %w", syscall.EADDRINUSE)
 }
 func (r *Relay) Port() uint16 { return uint16(r.udp.LocalAddr().(*net.UDPAddr).Port) }
 func (r *Relay) Activate(c Config) error {
