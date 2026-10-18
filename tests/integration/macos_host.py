@@ -67,6 +67,7 @@ def inventory():
         "host": {"os": platform.mac_ver()[0], "architecture": platform.machine()},
         "interfaces": run("/sbin/ifconfig", "-l").stdout.split(),
         "routes": run("/usr/sbin/netstat", "-rn", "-f", "inet").stdout,
+        "dns": run("/usr/sbin/scutil", "--dns").stdout,
         "resolvers": {
             str(p): {
                 "inode": p.lstat().st_ino,
@@ -107,6 +108,19 @@ def stable_routes(text):
         for row in rows
         if len(row) >= 4 and row[0] != "Destination" and "W" not in row[2] and "L" not in row[2]
     }
+
+
+def stable_dns(text):
+    """Keep resolver ordering/scopes, ignoring only labels and live reachability."""
+    lines = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("reach "):
+            continue
+        if line.startswith("resolver #"):
+            line = "resolver"
+        lines.append(line)
+    return lines
 
 
 def network_processes(text):
@@ -190,11 +204,19 @@ class MacOSHost:
             assert not Path("/Library/Application Support/Stelvio/tunnel").exists()
             assert not Path("/Library/LaunchDaemons/dev.stelvio.tunnel.plist").exists()
         current = inventory()
+        deadline = time.monotonic() + 10
+        while stable_dns(current["dns"]) != stable_dns(self.baseline["dns"]):
+            self.save(name + "-dns-pending", {"dns": current["dns"]})
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+            current["dns"] = run("/usr/sbin/scutil", "--dns").stdout
         self.save(name, current)
         assert current["resolvers"] == self.baseline["resolvers"]
         # Compare actual interface identities; an owned utun must not survive.
         assert set(current["interfaces"]) == set(self.baseline["interfaces"])
         assert stable_routes(current["routes"]) == stable_routes(self.baseline["routes"])
+        assert stable_dns(current["dns"]) == stable_dns(self.baseline["dns"])
         before = network_processes(self.baseline["processes"])
         assert network_processes(current["processes"]) <= before, (
             "New networking process survived test cleanup"
@@ -217,6 +239,7 @@ class MacOSHost:
         self.save("final", final)
         assert final["service"] == self.baseline["service"]
         assert stable_routes(final["routes"]) == stable_routes(self.baseline["routes"])
+        assert stable_dns(final["dns"]) == stable_dns(self.baseline["dns"])
 
     def close(self):
         if self.lock is not None:

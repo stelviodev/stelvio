@@ -89,3 +89,18 @@ The subsequent dependency update selects gVisor's Go-consumable branch at
 `v0.0.0-20261017122056-1b7906fdee8c`, which loads the new value into R2 correctly.
 The ARM64 fail-fast guard is removed; use native `make race` now. This source
 update does not change release downloads or establish new host/AWS acceptance.
+
+
+## Runbook coverage beyond historical spikes
+
+| Runbook gate | Maintained regression | Remaining prerequisite |
+| --- | --- | --- |
+| Wheel/sdist exclusions and isolated installed CLI | `tests/tunnel/test_distribution_acceptance.py` | Supply absolute wheel/sdist paths; no builds inside pytest. |
+| Actual pinned release assets, both architectures | `tests/tunnel/test_release_acceptance.py` | Explicit live-download opt-in; Rosetta/native execution where supported. |
+| Genuine release-to-local upgrade with active traffic | Native `test_pinned_release_to_local_candidate_upgrade` | Verified v0.0.5 plus a distinct developer candidate. |
+| Replacement interruption at staging, retirement, publication | Parametrized native changed-image test | Explicit privileged tier. |
+| Effective scoped DNS baseline | `MacOSHost` raw/normalized DNS evidence; `test_host_evidence.py` | Dedicated macOS host; bounded dynamic-store convergence. |
+| Graceful standalone exit and abrupt death | Both single-VPC AWS policies | Explicit AWS and privileged flags; full teardown. |
+
+An automated scenario existing is distinct from its current candidate passing.
+See the latest dated testing-guide evidence, including skips and restoration.

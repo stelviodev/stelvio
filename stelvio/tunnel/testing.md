@@ -981,3 +981,66 @@ This supersedes the historical ARM64 race blocker for local source only. No
 release pins, installed helper, host networking or AWS resources were changed;
 no release build or native networking acceptance was performed. Real Intel
 networking remains pending.
+
+
+## 2026-10-18 acceptance coverage additions
+
+The remaining runbook checks now have maintained regression tests. This section
+records the new procedures; execution results are appended separately below.
+
+### Artifacts and installed distributions
+
+Build artifacts before invoking pytest. Tests never compile Go or build wheels:
+
+```bash
+uv build --out-dir "$TRAFORO_RUN/dist"
+export STLV_TEST_STELVIO_WHEEL="$TRAFORO_RUN/dist/stelvio-<version>-py3-none-any.whl"
+export STLV_TEST_STELVIO_SDIST="$TRAFORO_RUN/dist/stelvio-<version>.tar.gz"
+uv run pytest tests/tunnel/test_distribution_acceptance.py -q
+STLV_TEST_TRAFORO_RELEASE_DOWNLOADS=1 \
+  uv run pytest tests/tunnel/test_release_acceptance.py -q
+```
+
+Use the actual absolute artifact filenames. The distribution tests inspect both
+archives for excluded Go source, native build scripts and executable payloads, then
+install the wheel into an isolated temporary venv. Imports and CLI checks run
+outside the checkout with `python -I`, including unsupported-platform/non-VPC
+checks and absence of Stelvio's former `dns` dependency. The database acceptance
+venv separately installs PyMongo, which may bring its own dnspython dependency.
+
+Release tests use real production downloads into a test-owned cache, verify both
+pinned hashes, Mach-O architectures, size, approved direct libraries and cache
+reuse, and execute compatible versions. On Apple Silicon, amd64 runs through
+Rosetta. Unsupported execution is a named pending skip after structural inspection.
+Live downloads are disabled unless explicitly enabled; mocked tests retain HTTP
+failure, authentication and redirect coverage. Only an existing environment
+`GITHUB_TOKEN` authenticates production requests; never log it.
+
+### Native and AWS additions
+
+The native cross-venv test now verifies installed-package provenance using
+isolated Python outside the checkout. Its wheel prerequisite remains explicit.
+The real release-to-candidate test requires `STLV_TRAFORO_DEV_BINARY` selecting a
+locally built image with different bytes from the pinned v0.0.5 release. It installs
+the verified release, proves two-VPC DNS/TCP still work across an active upgrade
+refusal, upgrades while idle, then repeats routing/DNS/carrier checks on the
+candidate. Missing or identical candidates leave this acceptance pending.
+
+Native replacement interruption tests cover staging before retirement, retirement
+before publication, and publication before activation. Only test-owned bootstrap
+copies receive injected exits; production fault switches are not introduced.
+The host fixture records raw `scutil --dns` output, compares normalized resolver
+order, domains, endpoints, options and interface scopes, and allows ten seconds
+for dynamic-store convergence. Only resolver numbering and reachability lines
+are ignored. Raw mismatch evidence is retained.
+
+The single-VPC AWS tests now separately exercise standalone SIGINT and SIGKILL.
+SIGINT must produce exit code zero and `Tunnel stopped.`, empty/certain helper
+state, absent owned transports, unchanged deployed state and the original running
+bastion. A new standalone session then exercises abrupt command death.
+
+Run the existing exclusive native and AWS commands above, serially. Keep the same
+candidate override in every test process, supply the candidate wheel, preserve
+the original installation, and require independent host/AWS restoration. Never
+claim skipped legacy fixtures, Rosetta execution or historical results as native
+Intel acceptance.

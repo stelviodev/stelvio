@@ -265,9 +265,13 @@ def test_fresh_install_cross_venv_cleanup_and_uninstall(macos_host, tmp_path):
         )
         run(
             str(directory / "bin/python"),
+            "-I",
             "-c",
+            "import sys,stelvio; from pathlib import Path; "
+            "assert Path(stelvio.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); "
             "from uuid import uuid4; from stelvio.tunnel.helper_client import NativeHelper; "
             "h=NativeHelper(); assert not h.inspect().owned; h.acquire(str(uuid4())).close()",
+            cwd=tmp_path,
         )
         wait_empty()
         assert installation._installed_digest() == digest
@@ -278,7 +282,8 @@ def test_fresh_install_cross_venv_cleanup_and_uninstall(macos_host, tmp_path):
     installation.install_helper()
 
 
-def test_changed_image_refusal_idle_upgrade_and_interrupted_replacement(macos_host, tmp_path):
+@mark.parametrize("cut", ["staged", "retired", "published"])
+def test_changed_image_refusal_idle_upgrade_and_interrupted_replacement(macos_host, tmp_path, cut):
     original = tmp_path / "candidate"
     original.write_bytes(installation.INSTALLED_HELPER.read_bytes())
     original.chmod(0o700)
@@ -302,18 +307,65 @@ def test_changed_image_refusal_idle_upgrade_and_interrupted_replacement(macos_ho
     try:
         # Inject only in the test-owned copy of the real bootstrap shell.
         script = installation._bootstrap(changed, digest)
-        needle = (
-            f"/usr/bin/env -i PATH=/usr/bin:/bin {installation.INSTALLED_HELPER}"
-            " helper uninstall\n"
-        )
+        needle = {
+            "staged": "    /bin/sync\n",
+            "retired": (
+                f"/usr/bin/env -i PATH=/usr/bin:/bin {installation.INSTALLED_HELPER}"
+                " helper uninstall\n"
+            ),
+            "published": '    /bin/ln "$stage" ' + str(installation.INSTALLED_HELPER) + "\n",
+        }[cut]
         assert script.count(needle) == 1
-        with raises(HelperError):
-            macos_host.admin(script.replace(needle, needle + "exit 73\n"))
-        assert not installation.INSTALLED_HELPER.exists()
+        marker = "stelvio-test-cut-" + cut + "-" + uuid4().hex
+        fault = f"/usr/bin/printf '%s\\n' {shlex.quote(marker)} >&2\nexit 73\n"
+        with raises(HelperError, match=marker):
+            macos_host.admin(script.replace(needle, needle + fault))
+        if cut == "staged":
+            assert installation._installed_digest() == before
+        elif cut == "retired":
+            assert not installation.INSTALLED_HELPER.exists()
+        else:
+            assert installation._installed_digest() == digest
+        assert list(installation.INSTALLED_HELPER.parent.glob(".stelvio-traforo.bootstrap.*"))
         macos_host.install(changed)
         assert installation._installed_digest() == digest
+        assert not list(installation.INSTALLED_HELPER.parent.glob(".stelvio-traforo.*"))
     finally:
         macos_host.install(original)
+
+
+def test_pinned_release_to_local_candidate_upgrade(macos_host, monkeypatch):
+    from stelvio.tunnel.assets import downloaded_helper
+
+    from .test_tunnel_dns import assert_two_vpc_dns_and_packet_forwarding
+
+    selection = macos_host.selection
+    if selection.local_path is None:
+        skip("Real release upgrade pending: select a local STLV_TRAFORO_DEV_BINARY candidate")
+    with downloaded_helper() as release:
+        if hashlib.sha256(release.read_bytes()).hexdigest() == selection.digest:
+            skip("Real release upgrade pending: candidate and pinned release are identical")
+        macos_host.install(release)
+        release_digest = installation._installed_digest()
+
+        def refuse_candidate():
+            with raises(HelperError):
+                installation.install_helper(
+                    environment={
+                        "STLV_TRAFORO_DEV_BINARY": str(selection.local_path),
+                    }
+                )
+            assert installation._installed_digest() == release_digest
+            assert len(NativeHelper().inspect().units) == 2
+
+        with monkeypatch.context() as previous:
+            previous.delenv("STLV_TRAFORO_DEV_BINARY", raising=False)
+            assert_two_vpc_dns_and_packet_forwarding(during_session=refuse_candidate)
+        wait_empty()
+        installation.install_helper()
+        assert installation._installed_digest() == selection.digest
+    # Prove both scopes and host TCP through the new image, not only installation.
+    assert_two_vpc_dns_and_packet_forwarding()
 
 
 def test_legacy_migration_requires_verified_legacy_fixture(macos_host):

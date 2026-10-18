@@ -2,6 +2,7 @@
 
 import json
 import platform
+import signal
 import socket
 import subprocess
 import time
@@ -96,6 +97,26 @@ def test_example_actual_cli_tls_discovery_reconnect_and_cleanup(cli_session):  #
     _standalone_database(session)
     old = interrupt_transport(instance, session.transport_owner())
     wait_new_transport(instance, old, session.transport_owner())
+    session.wait_ready()
+    _standalone_database(session)
+    # Signal the actual standalone command, rather than its whole process group.
+    session.process.send_signal(signal.SIGINT)
+    session.process.wait(timeout=60)
+    assert session.process.returncode == 0
+    assert "Tunnel stopped." in session.log.read_text().splitlines()
+    session.recover_access()
+    assert session.state() == before_state
+    retained = session.sdk.client("ec2").describe_instances(InstanceIds=[instance])["Reservations"]
+    assert retained[0]["Instances"][0]["State"]["Name"] == "running"
+    saved = json.loads((session.project / "resolved-ownership.json").read_text())
+    from .assert_tunnel import wait_owned_transports_absent
+
+    for transport in saved["transports"]:
+        wait_owned_transports_absent(
+            transport["instance"], transport["owner_hash"], sdk=session.sdk
+        )
+    session.evidence("standalone-sigint-clean", {"bastion": instance, "state_unchanged": True})
+    session.start(tunnel=True)
     session.wait_ready()
     _standalone_database(session)
     session.crash_and_recover()

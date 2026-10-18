@@ -108,6 +108,11 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
 
 
 def test_two_vpc_go_dns_and_packet_forwarding_reconnect():
+    assert_two_vpc_dns_and_packet_forwarding()
+
+
+def assert_two_vpc_dns_and_packet_forwarding(during_session=None):  # noqa: PLR0915 - complete host/carrier acceptance
+    """Shared actual-host acceptance for the selected installed image."""
     import socket
 
     assert platform.system() == "Darwin"
@@ -152,6 +157,13 @@ def test_two_vpc_go_dns_and_packet_forwarding_reconnect():
                 assert connection.recv(256) == b"actual host carrier payload"
             networks.append((unit, network, proxy, address))
             ports.append(port)
+        if during_session is not None:
+            during_session()
+            for _, network, _, address in networks:
+                assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == {address}
+                with socket.create_connection((address, 27017), timeout=3) as connection:
+                    connection.sendall(b"healthy after refused upgrade")
+                    assert connection.recv(256) == b"healthy after refused upgrade"
         unit, network, proxy, address = networks[0]
         forwarding.dns("reject", unit, 1, 1)
         forwarding.remove(unit, 1, 1)
