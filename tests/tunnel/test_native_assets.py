@@ -176,7 +176,8 @@ def test_concurrent_installers_publish_once(world):
 
 def test_release_change_uses_separate_cache(world, monkeypatch):
     first = assets.ensure_traforo()
-    monkeypatch.setattr(assets, "TRAFORO_VERSION", "next")
+    monkeypatch.setattr(assets, "TRAFORO_VERSION", "0.0.6")
+    world.execute.return_value.stdout = b"v0.0.6\n"
     second = assets.ensure_traforo()
     assert first != second
     assert first.read_bytes() == second.read_bytes() == world.binary
@@ -228,60 +229,52 @@ def test_requests_does_not_consult_netrc(world, monkeypatch):
 
 
 @mark.parametrize("override", [None, ""])
-def test_release_network_capabilities_use_verified_cache(world, monkeypatch, override):
-    if override is None:
-        monkeypatch.delenv(assets.DEVELOPMENT_BINARY_ENV, raising=False)
-    else:
-        monkeypatch.setenv(assets.DEVELOPMENT_BINARY_ENV, override)
-
-    def execute(arguments, **kwargs):
-        stdout = (
-            b'{"forwarder":2,"dns":1}'
-            if arguments[-1] == "capabilities"
-            else assets.EXPECTED_VERSION.encode()
-        )
-        return SimpleNamespace(returncode=0, stdout=stdout, stderr=b"")
-
-    world.execute.side_effect = execute
-    assets.require_network_capabilities()
-    assets.require_network_capabilities()
+def test_release_version_uses_verified_cache_without_capability_command(
+    world, monkeypatch, override
+):
+    monkeypatch.setenv(assets.DEVELOPMENT_BINARY_ENV, override or "")
+    assets.require_network_version()
+    assets.require_network_version()
     world.download.assert_called_once()
     assert assets.traforo_path().name == "stelvio-traforo-0.0.5-arm64"
-    assert [str(assets.traforo_path()), "capabilities"] in [
-        call.args[0] for call in world.execute.call_args_list
-    ]
+    assert all(call.args[0][-1] == "version" for call in world.execute.call_args_list)
 
 
 @mark.parametrize(
-    "output",
-    [b"invalid", b"{}", b'{"forwarder":1,"dns":1}', b'{"forwarder":2,"dns":true}', b"null"],
+    "output", [b"invalid", b"{}", b"v0.0.4\n", b"v0.0.6\n", b"v0.0.5-dev+g1234567\n"]
 )
-def test_release_missing_capabilities_fails_before_networking(world, output):
+def test_release_wrong_version_fails_before_networking(world, output):
     path = assets.ensure_traforo()
-    world.execute.side_effect = lambda arguments, **kwargs: SimpleNamespace(
-        returncode=0,
-        stdout=output if arguments[-1] == "capabilities" else assets.EXPECTED_VERSION.encode(),
-        stderr=b"",
-    )
-    with raises(assets.NativeAssetError, match="forwarder=2 and dns=1"):
-        assets.require_network_capabilities({})
+    world.execute.return_value.stdout = output
+    with raises(assets.NativeAssetError, match=r"must report v0\.0\.5"):
+        assets.require_network_version({})
     assert path.read_bytes() == world.binary
-    world.download.assert_called_once()
 
 
 @mark.parametrize("change", ["removed", "modified"])
-def test_release_changed_during_capability_check_is_rejected(world, change):
+def test_release_changed_during_version_check_is_rejected(world, change):
     path = assets.ensure_traforo()
 
     def execute(arguments, **kwargs):
-        if arguments[-1] == "capabilities":
+        if path.exists():
             if change == "removed":
                 path.unlink()
             else:
                 path.write_bytes(world.binary + b"changed")
-            return SimpleNamespace(returncode=0, stdout=b'{"forwarder":2,"dns":1}', stderr=b"")
         return SimpleNamespace(returncode=0, stdout=assets.EXPECTED_VERSION.encode(), stderr=b"")
 
     world.execute.side_effect = execute
     with raises(assets.NativeAssetError):
-        assets.require_network_capabilities({})
+        assets.require_network_version({})
+
+
+@mark.parametrize("verified", [False, True])
+def test_legacy_version_requires_exact_legacy_release_digest(world, monkeypatch, verified):
+    path = assets.ensure_traforo()
+    world.execute.return_value.stdout = assets.LEGACY_VERSION
+    if verified:
+        monkeypatch.setitem(assets.LEGACY_RELEASE_DIGESTS, "arm64", world.target["sha256"])
+        assert assets.validate_version(path) == "v0.0.5"
+    else:
+        with raises(assets.NativeAssetError, match="must report"):
+            assets.validate_version(path)

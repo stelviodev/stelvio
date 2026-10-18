@@ -19,8 +19,8 @@ def control_peer(monkeypatch):
     def make(fault):
         script = """import json,sys,time
 fault=sys.argv[1]
-hello={"version":2,"status":"ready","dns":1}
-if fault=="hello": hello["dns"]=0
+hello={"version":2,"status":"ready"}
+if fault=="hello": hello["version"]=1
 print(json.dumps(hello),flush=True)
 for line in sys.stdin:
     request=json.loads(line)

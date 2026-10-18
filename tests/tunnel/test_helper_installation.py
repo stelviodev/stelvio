@@ -4,6 +4,7 @@ import shlex
 import subprocess
 from contextlib import contextmanager
 from hashlib import sha256
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -183,9 +184,12 @@ def test_uninstall_uses_installed_image_without_cache_or_download(setup, monkeyp
     assert f"{installed} helper uninstall" in calls[0]
 
 
-def test_forwarder_validates_installed_pin_without_cache(monkeypatch):
+@pytest.mark.parametrize("developer", [False, True])
+def test_forwarder_validates_installed_pin_without_cache(monkeypatch, developer):
     checked = []
-    monkeypatch.setattr("stelvio.tunnel.assets.validate_network_capabilities", checked.append)
+    monkeypatch.setattr(
+        "stelvio.tunnel.assets.validate_version", lambda path, **kw: checked.append((path, kw))
+    )
     monkeypatch.setattr(
         "stelvio.tunnel.assets.ensure_traforo",
         lambda: (_ for _ in ()).throw(AssertionError("runtime downloaded an asset")),
@@ -194,11 +198,14 @@ def test_forwarder_validates_installed_pin_without_cache(monkeypatch):
 
     monkeypatch.setattr(installation, "_installed_digest", lambda: "a" * 64)
     monkeypatch.setattr(
-        "stelvio.tunnel.assets.select_traforo", lambda: installation.TraforoSelection("a" * 64)
+        "stelvio.tunnel.assets.select_traforo",
+        lambda: installation.TraforoSelection(
+            "a" * 64, Path("/local/traforo") if developer else None
+        ),
     )
     with packaged_forwarder() as path:
         assert path == installation.INSTALLED_HELPER
-    assert checked == [installation.INSTALLED_HELPER]
+    assert checked == [(installation.INSTALLED_HELPER, {"allow_development": developer})]
     monkeypatch.setattr(installation, "_installed_digest", lambda: "b" * 64)
     with pytest.raises(RuntimeError, match="differs"), packaged_forwarder():
         raise AssertionError("Wrong forwarder yielded")

@@ -105,7 +105,10 @@ if [ -e {installed} ] &&
     safe_file {installed}
     /usr/bin/xattr -p dev.stelvio.traforo.installation {installed} >/dev/null
     current=$(/usr/bin/env -i PATH=/usr/bin:/bin {installed} version)
-    [ "$current" = 'stelvio-traforo/1 helper=1 carrier=1' ]
+    if [ "$current" != 'stelvio-traforo/1 helper=1 carrier=1' ]; then
+        /usr/bin/printf '%s\\n' "$current" |
+            /usr/bin/grep -Eq '^v[0-9]+\\.[0-9]+\\.[0-9]+(-dev\\+g[0-9a-f]{{7,40}})?$'
+    fi
     # Validate and retain the replacement before retiring the previous installation.
     if [ ! -e "$stage" ]; then (set -C; : > "$stage"); fi
     safe_file "$stage"

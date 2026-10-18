@@ -24,9 +24,13 @@ From the Stelvio repository root, using its development environment:
 uv run python pkg/traforo-client-go/scripts/build.py
 ```
 
-The script builds the native architecture with cgo and the installed macOS SDK,
-validates the image, and installs it using the normal privileged replacement
-transaction. Stop managed sessions first. No release needs to be published.
+Install GoReleaser v2.18.3 (the version pinned in `.github/workflows/release.yml`)
+and Go compatible with `go.mod`. The script uses `.goreleaser.yml` and the same
+cgo/SDK flags, linker flags, and artifact names as CI. It builds both macOS
+architectures, validates them, then installs this Mac's image using the normal
+privileged replacement transaction. On Apple Silicon, Rosetta must be available
+for amd64 command validation. On Intel, arm64 receives structural and embedded
+version/metadata validation; native arm64 execution is recorded as pending. Stop managed sessions first. No release needs to be published.
 Run as your ordinary user; authorize replacement through the macOS prompt.
 
 Copy the exact `export STLV_TRAFORO_DEV_BINARY=...` command printed by the script
@@ -34,9 +38,22 @@ into every shell that will run `stlv`. The variable selects the local build for
 helper installation and the isolated forwarder. Build output and provenance JSON
 are under the ignored `build/` directory. Re-run the script after Go edits.
 
-Managed networking requires `forwarder=2` and `dns=1`, supplied by the pinned
-v0.0.5 release. The override is optional and intended for testing local changes.
-Selected images are capability-checked before installation or host changes.
+`traforo version` reports one semantic version for the whole binary. GoReleaser
+injects the release tag and commit through linker flags. Local builds report
+`v0.0.5-dev+g<short-commit>`, using the pinned base version rather than Stelvio's
+tags. Provenance also records the source fingerprint, including uncommitted edits.
+Stelvio requires the exact pinned base version; snapshots require the override.
+The existing v0.0.5 release uses the older output and is accepted only by its
+pinned digest. There is no separate capabilities command in new builds.
+Selected images are version-checked before installation or host changes.
+
+To build and validate without installing, run `make build` in this directory, or
+`uv run python pkg/traforo-client-go/scripts/build.py --build-only` at the repository
+root. Both artifacts (`traforo-darwin-arm64`, `traforo-darwin-amd64`) and `build.json`
+are published together in a unique ignored `build/traforo-*/` directory. A failed
+build preserves prior bundles. The snapshot pipeline disables publication and
+receives no GitHub token. Identical source/settings exercise the same build path;
+byte-for-byte parity additionally requires matching SDK/toolchain/build metadata.
 To restore the pinned release and normal managed networking:
 
 ```bash
@@ -60,8 +77,8 @@ with SERVFAIL until the new revision is active. The root helper only owns host
 resolver files, routes and devices. Python supplies AWS-discovered policy and
 coordinates readiness through bounded control-v2 JSON request/reply messages.
 
-`stelvio-traforo capabilities` returns `{"forwarder":2,"dns":1}`. The existing
-`version`, helper protocol and carrier protocol stay unchanged. DNS control has
+Binary compatibility uses the semantic version, while internal helper, carrier,
+control and journal format identifiers remain unchanged. DNS control has
 configure/reject/retire, upstream/direct-host probes, and arm/check/release query
 observations. Request IDs, unit generations, attempts and DNS revisions fence
 stale messages. No DNS parser or dnspython dependency remains in Python.

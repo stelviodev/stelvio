@@ -106,7 +106,7 @@ Lambda deployed; use `stlv deploy` to restore production handlers.
 
 Managed networking uses the checksum-pinned Traforo v0.0.5 release, including
 private DNS. See [VPC dev setup](../concepts/dev-mode.md#setup). A local developer
-build is optional; incompatible images fail capability checks before host changes.
+build is optional; incompatible images fail version checks before host changes.
 
 Run tunnel commands as your ordinary user. Helper installation, replacement,
 and removal request macOS administrator authorization. See [setup and upgrades](../concepts/dev-mode.md#setup).

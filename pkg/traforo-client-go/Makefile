@@ -1,8 +1,3 @@
-BINARY := traforo
-VERSION := $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse HEAD 2>/dev/null || echo dev)
-COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
-LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
-
 GO ?= go
 GOFMT ?= gofmt
 
@@ -14,8 +9,7 @@ export CGO_LDFLAGS := $(CGO_LDFLAGS) -mmacosx-version-min=15.0
 .PHONY: build test lint vet clean race test-race format
 
 build:
-	mkdir -p build
-	$(GO) build -mod=readonly -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o build/$(BINARY) ./cmd/stelvio-traforo
+	cd ../.. && uv run python pkg/traforo-client-go/scripts/build.py --build-only
 
 test:
 	$(GO) test -mod=readonly ./...
@@ -40,6 +34,6 @@ test-race: race
 format:
 	$(GOFMT) -w cmd internal
 
-# Retain outputs and metadata created by the developer installation script.
+# Remove local build bundles; leave the installed helper and release cache intact.
 clean:
-	rm -f build/$(BINARY)
+	rm -rf build/traforo-*

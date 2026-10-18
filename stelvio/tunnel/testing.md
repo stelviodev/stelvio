@@ -9,11 +9,13 @@ zsh/bash, Python 3.12+, and `uv`. Keep one terminal for the foreground command a
 another for observation. Run as an ordinary user; only helper administration and
 explicit fault injection should request administrator authorization.
 
-## Current release and capability gate
+## Current release and version gate
 
-Managed networking requires `forwarder=2` and `dns=1`, supplied by pinned Traforo
-v0.0.5. Leave `STLV_TRAFORO_DEV_BINARY` unset for release acceptance. The optional
-**Developer-image route** tests local Go changes. Both routes validate capabilities
+Managed networking requires the pinned Traforo base version, currently v0.0.5.
+New builds report one semantic version, with no component capability command.
+The existing v0.0.5 release has the old output and is accepted only when its bytes
+match the pinned architecture digest. Leave `STLV_TRAFORO_DEV_BINARY` unset for release acceptance. The optional
+**Developer-image route** tests local Go changes. Both routes validate the binary version
 before helper installation or host changes; no Python DNS fallback exists.
 Unsetting the override restores normal pinned-release networking when installation
 can safely replace the developer image.
@@ -114,7 +116,7 @@ for architecture in ('arm64', 'x86_64'):
         assert digest == assets.expected_digest()
         assert subprocess.check_output(
             ['/usr/bin/arch', '-' + architecture, str(image), 'version'], text=True
-        ) == assets.EXPECTED_VERSION
+        ) in (f'v{assets.TRAFORO_VERSION}\n', assets.LEGACY_VERSION.decode())
         print(subprocess.check_output(['/usr/bin/otool', '-L', str(image)], text=True))
         results.append(dict(architecture=architecture, path=str(image),
                             sha256=digest, bytes=image.stat().st_size))
@@ -143,18 +145,31 @@ export STLV_TRAFORO_DEV_BINARY='/absolute/path/printed/by/the/script'
 export STLV_TEST_TRAFORO_IMAGE="$STLV_TRAFORO_DEV_BINARY"
 ```
 
-The script builds only the native architecture with cgo and the installed SDK,
-validates the executable and libraries, records source/toolchain/digest provenance
-under the ignored module `build/`, and uses normal macOS authorization to replace
-the helper. Existing sessions must stop before changing images. No release pins,
+Install GoReleaser v2.18.3, matching the workflow. The script uses `.goreleaser.yml`
+for both macOS architectures and the installed SDK. It validates Mach-O architecture,
+size, linked libraries, and version; Apple Silicon requires Rosetta for amd64.
+On Intel, arm64 is structurally checked with embedded-version/GoReleaser metadata
+validation, and native execution is explicitly pending. Artifact names match CI:
+`traforo-darwin-arm64` and `traforo-darwin-amd64`. Both images and `build.json`
+are atomically published together in a unique ignored `build/traforo-*/` bundle.
+The host image is installed through normal macOS authorization. Existing sessions must stop before changing images. No release pins,
 download caches or persistent root markers are changed. The export is mandatory:
 the script's environment affects only its own installation, not its parent shell.
-Verify `"$STLV_TRAFORO_DEV_BINARY" capabilities` reports `forwarder=2` and `dns=1`.
+Verify `"$STLV_TRAFORO_DEV_BINARY" version` reports
+`v0.0.5-dev+g<12-character-commit>`. This base version must match Stelvio's pin.
+Provenance records the full commit and source/config fingerprint, distinguishing
+uncommitted edits. Internal wire/journal format identifiers remain unchanged.
+
+For nonprivileged validation, use `make -C pkg/traforo-client-go build` or add
+`--build-only` to the script. It runs the same snapshot release pipeline with
+publication disabled and no GitHub token. Build failure preserves prior bundles.
+Matching local/CI bytes additionally requires matching source, version, commit,
+Go toolchain and SDK; a snapshot intentionally has a different version from a tag.
 
 Run the Python tests below with both variables to include real local-image process
 interop; pytest never compiles Go. Use this checkout's editable Stelvio environment
 for developer-mode acceptance. Wheel packaging/administration acceptance remains a separate path; managed
-networking from the wheel must receive the same developer override until release pins change. The same local binary must be selected for
+networking from the wheel must receive the same developer override to select this snapshot. The same local binary must be selected for
 helper installation and the isolated forwarder, which executes the root-owned image.
 
 Native acceptance must cover local install/reuse, two-unit routing/DNS/TCP, actual
@@ -787,3 +802,37 @@ Local evidence: `/private/tmp/traforo-v005-proof`.
 
 Wheel and sdist exclusion checks passed: neither contains Go source, developer
 build scripts or executable assets; wheel metadata has no dnspython requirement.
+
+
+## 2026-10-18 unified GoReleaser and semantic-version acceptance
+
+This acceptance is separate from the historical local-build AWS and v0.0.5 release
+proofs above. No helper installation, host route/DNS mutation or AWS deployment was
+performed. The installed helper remained at SHA-256
+`fd65dee8e07f72f0303a51140a7b1158dcfa11f5cc6856ebbb675a21c1516625`.
+
+- The official GoReleaser v2.18.3 Darwin arm64 tool was downloaded to
+  `/private/tmp/traforo-goreleaser-proof`; its archive matched GitHub's published
+  SHA-256 `821c58ab8c31d57bb331cab9f1a703eb3673bff4fce0db9cc3c4a038af14f76f`.
+- `make -C pkg/traforo-client-go build` exercised the real snapshot release pipeline,
+  publication disabled. Both architecture outputs passed Mach-O, size, library,
+  version and GoReleaser metadata checks. Arm64 executed natively; amd64 through
+  Rosetta. Both report `v0.0.5-dev+g671d8150fe20`.
+- Final bundle: `pkg/traforo-client-go/build/traforo-g7lj3c0p`. Source fingerprint:
+  `9f6555cc8fb3856c2ef03a14ad00cb10558cb11ef6841fe9ebf9ae43b32389ac`. Full commit: `671d8150fe20047801f810e1e17cebc3e9dbc010`.
+- arm64: 7,690,130 bytes, SHA-256
+  `602803d9e22acd51ce54341efc1530fd9fd9ce5836c64a546e38ffe94851f198`.
+- amd64: 8,159,352 bytes, SHA-256
+  `10bd6ab4f6feedaa6c3c44c75c017bd2e710082c30772c90a10809311cffc2a4`.
+- `make lint vet test race` passed with zero lint findings. The affected Python/CLI
+  suite passed **350 tests** with both developer/testing environment variables set,
+  including actual DNS and isolated-runtime process interoperability. No pytest
+  test compiled Go. Build failures, metadata/config/source changes, missing Rosetta,
+  version mismatches, and exact installed-image snapshot selection are covered.
+- Both previously downloaded pinned v0.0.5 images passed the new digest-bound legacy
+  version validation. Release pins, URLs/checksums and caches were not changed.
+- Documentation build and Python wheel/sdist builds passed. Both distributions
+  exclude Go source, developer build scripts, release configuration and executables.
+
+Native Intel networking remains pending. Intel's inability to execute arm64 is
+covered by a simulated builder test, not a claim of native Intel acceptance.

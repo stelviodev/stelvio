@@ -29,16 +29,17 @@ def packaged_forwarder() -> Iterator[Path]:
     """Both roles use the exact verified root-owned installed Traforo image."""
     from stelvio.tunnel.assets import (  # noqa: PLC0415 - lazy platform assets
         select_traforo,
-        validate_network_capabilities,
+        validate_version,
     )
     from stelvio.tunnel.installation import (  # noqa: PLC0415 - lazy platform installation
         INSTALLED_HELPER,
         _installed_digest,
     )
 
-    if _installed_digest() != select_traforo().digest:
+    selected = select_traforo()
+    if _installed_digest() != selected.digest:
         raise RuntimeError("The installed Traforo differs; run stlv tunnel install")
-    validate_network_capabilities(INSTALLED_HELPER)
+    validate_version(INSTALLED_HELPER, allow_development=selected.local_path is not None)
     yield INSTALLED_HELPER
 
 
@@ -57,11 +58,7 @@ class Forwarding:
         )
         try:
             hello = self._reply()
-            if (
-                hello.get("version") != CONTROL_VERSION
-                or hello.get("status") != "ready"
-                or hello.get("dns") != 1
-            ):
+            if hello.get("version") != CONTROL_VERSION or hello.get("status") != "ready":
                 raise RuntimeError("Nonroot forwarder failed to start")  # noqa: TRY301
         except BaseException:
             self.close()

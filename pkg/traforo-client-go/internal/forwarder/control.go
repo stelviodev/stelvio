@@ -36,7 +36,6 @@ type reply struct {
 	ID       uint64 `json:"id"`
 	Status   string `json:"status"`
 	Code     string `json:"code,omitempty"`
-	DNS      int    `json:"dns,omitempty"`
 	Port     uint16 `json:"port,omitempty"`
 	Observed bool   `json:"observed"`
 }
@@ -233,7 +232,7 @@ func (m *manager) closeDNS() {
 
 func (m *manager) serveControl(input io.Reader, output io.Writer) error {
 	encoder := json.NewEncoder(output)
-	if err := encoder.Encode(reply{Version: 2, Status: "ready", DNS: 1}); err != nil {
+	if err := encoder.Encode(reply{Version: 2, Status: "ready"}); err != nil {
 		return err
 	}
 	scanner := bufio.NewScanner(input)

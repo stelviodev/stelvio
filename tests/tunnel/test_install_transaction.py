@@ -38,8 +38,9 @@ def transaction(tmp_path, monkeypatch):
     stat.chmod(0o755)
     xattr.chmod(0o755)
 
-    def image(path, *, legacy=False):
-        version = "stelvio-tunnel-helper/1" if legacy else "stelvio-traforo/1 helper=1 carrier=1"
+    def image(path, *, legacy=False, version="v0.0.5"):
+        # Administrative retirement also supports previously installed images.
+        version = "stelvio-tunnel-helper/1" if legacy else version
         path.write_text(
             '#!/bin/sh\ncase "$*" in\n'
             f'"version"|"--version") echo {shlex.quote(version)};;\n'
@@ -126,3 +127,26 @@ def test_legacy_retirement_does_not_require_old_python_package(transaction):
     assert not legacy.exists()
     assert world["installed"].read_bytes() == world["asset"].read_bytes()
     assert world["result"].exists()
+
+
+@mark.parametrize(
+    "version",
+    [
+        "v0.0.5",
+        "v0.0.5-dev+gabcdef123456",
+        "stelvio-traforo/1 helper=1 carrier=1",
+        "foreign-image",
+    ],
+)
+def test_retirement_accepts_owned_semver_and_legacy_but_refuses_unknown(transaction, version):
+    world = transaction
+    world["image"](world["installed"], version=version)
+    before = world["installed"].read_bytes()
+    result = world["execute"](world["script"]())
+    if version == "foreign-image":
+        assert result.returncode != 0
+        assert world["installed"].read_bytes() == before
+        assert not world["result"].exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert world["installed"].read_bytes() == world["asset"].read_bytes()

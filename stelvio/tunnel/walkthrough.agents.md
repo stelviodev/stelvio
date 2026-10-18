@@ -61,8 +61,8 @@ only the GitHub API request; cross-origin redirects drop authorization. Otherwis
 use the pinned public download URL. Production never calls `gh`. Both helper and
 forwarder still execute the same root-owned installed image; forwarder checks its
 selected digest without a cache or network operation. Managed startup additionally
-requires forwarder=2/dns=1 before installation; the old pin is administration-only
-until a compatible release is pinned. Normal uninstall also works offline.
+validates the binary version before installation. New images use one semantic
+version; the old v0.0.5 output is accepted only for its pinned architecture digest. Normal uninstall also works offline.
 
 
 ## Answering a reviewer
@@ -196,10 +196,10 @@ SOCKS and ordinary host paths, and uses an isolated OS getaddrinfo subprocess wi
 Go arm/check/release observations. Never replace these checks with SOCKS-only
 readiness. No production Python DNS parser or dnspython dependency remains.
 
-`capabilities` reports forwarder=2/dns=1; base version/helper/carrier stay at 1.
-Managed startup validates the captured selection before installer/host changes and
-checks capabilities directly on the installed forwarder, without downloading
-again. Pinned v0.0.5 supplies these capabilities; STLV_TRAFORO_DEV_BINARY is optional
+At migration time, `capabilities` reported forwarder=2/dns=1. The semantic-version
+build change below supersedes that handshake. Managed startup validates the
+captured selection before installer/host changes and checks the installed
+forwarder directly without downloading again. STLV_TRAFORO_DEV_BINARY is optional
 for local development. During the historical migration, v0.0.4 lacked them and
 required a local build. No release publication or CI changes were made here.
 Existing historical acceptance predates Go DNS unless stated.
@@ -237,3 +237,45 @@ AWS evidence stays historical; native Intel networking remains pending.
 
 Wheel and sdist exclusion checks passed: neither contains Go source, developer
 build scripts or executable assets; wheel metadata has no dnspython requirement.
+
+
+## Unified GoReleaser builds and semantic versions (2026-10-18)
+
+The release workflow and developer builder use GoReleaser v2.18.3 and the same
+`.goreleaser.yml`. Read that file for flags, cgo settings, macOS 15 minimum,
+architectures, artifact names and linker injection. The script captures Go source,
+config and workflow, supplies original checkout Git metadata, and runs
+`goreleaser release --snapshot --clean --skip=publish,announce` without credentials.
+Both binaries and build.json publish together under a unique ignored build bundle.
+It installs only the host image, unless `--build-only` (also used by make build).
+Rosetta validates amd64 on arm64; Intel statically checks cross-built arm64 and
+records native execution pending. A failed build never replaces an earlier bundle.
+
+`traforo version` now prints only vMAJOR.MINOR.PATCH. CI derives it from its tag;
+local snapshots use the pinned base plus `-dev+g<12-character-commit>`, independent
+of Stelvio's tags. Source fingerprints distinguish uncommitted edits. No new
+capabilities command or DNS handshake field exists. Internal helper/carrier,
+control framing and journal schema identifiers remain intact.
+
+Stelvio accepts the exact pinned base, plus its snapshots only with the developer
+override. The published v0.0.5 assets retain their legacy output: only their known
+architecture hashes enable that compatibility path. No old arbitrary developer
+image receives legacy acceptance. The root-owned installed forwarder is checked
+directly using the captured selection, without downloading. Inspect/cleanup/
+uninstall remain usable offline. Bootstrap retirement accepts owned semantic-version
+images as well as owned legacy installations, preserving receipt and resource checks.
+
+Reviewer checks: GoReleaser shared flags and pin; captured source/config mutation
+checks; both artifact paths from artifacts.json; snapshot version/commit metadata;
+pre-install version gating; digest-bound legacy acceptance; developer-only snapshots;
+installed image digest agreement; build-only never authorizes. Historical capabilities,
+local-build AWS and release acceptance above describe the images tested at those dates.
+This change introduces no new AWS or privileged host acceptance.
+
+Validation for this change: real GoReleaser arm64/amd64 build passed; native arm64
+and Rosetta version/library/architecture checks passed. Go lint/vet/unit/race passed;
+350 affected Python/CLI tests passed with the developer image, including actual
+DNS/runtime interoperability. Both actual pinned legacy images remain accepted.
+Wheel/sdist exclusions and documentation build passed. No privileged installation,
+AWS deployment, release publication, commit or branch change was performed by this
+implementation. Exact bundle/source/binary hashes are in testing.md's 2026-10-18 record.

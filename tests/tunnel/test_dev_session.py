@@ -97,7 +97,7 @@ def world(monkeypatch, tmp_path):
     closed = []
     monkeypatch.setattr("stelvio.tunnel.credentials.os.geteuid", lambda: 1000)
     monkeypatch.setattr("stelvio.tunnel.credentials.os.getuid", lambda: 1000)
-    monkeypatch.setattr("stelvio.tunnel.session.require_network_capabilities", lambda *a: None)
+    monkeypatch.setattr("stelvio.tunnel.session.require_network_version", lambda *a: None)
     monkeypatch.setattr("stelvio.tunnel.session.install_helper", lambda **kw: None)
 
     def launch(description, contexts, **kw):
@@ -383,7 +383,7 @@ def test_developer_override_is_captured_for_install_and_runtime(world, network_s
         session.close()
 
 
-def test_missing_dns_capability_never_installs_or_starts_runtime(
+def test_incompatible_binary_version_never_installs_or_starts_runtime(
     world, network_state, monkeypatch
 ):
     from stelvio.tunnel.assets import NativeAssetError
@@ -392,16 +392,16 @@ def test_missing_dns_capability_never_installs_or_starts_runtime(
 
     def missing(environment):
         seen.append(environment)
-        raise NativeAssetError("Run local build and export STLV_TRAFORO_DEV_BINARY")
+        raise NativeAssetError("Traforo must report v0.0.5; rebuild local image")
 
     def forbidden(**options):
         raise AssertionError("installation must not run")
 
-    monkeypatch.setattr("stelvio.tunnel.session.require_network_capabilities", missing)
+    monkeypatch.setattr("stelvio.tunnel.session.require_network_version", missing)
     monkeypatch.setattr("stelvio.tunnel.session.install_helper", forbidden)
     session = world.make(network_state)
     try:
-        with raises(NativeAssetError, match="local build"):
+        with raises(NativeAssetError, match="must report"):
             session.start()
         assert len(seen) == 1
         assert world.launches == []

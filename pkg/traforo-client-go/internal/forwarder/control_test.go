@@ -93,7 +93,10 @@ func TestControlFramingAndSequence(t *testing.T) {
 	}
 	d := json.NewDecoder(&output)
 	var hello, first, duplicate reply
-	if d.Decode(&hello) != nil || hello.Version != 2 || hello.DNS != 1 || hello.Status != "ready" {
+	if bytes.Contains(output.Bytes(), []byte(`"dns"`)) {
+		t.Fatal("redundant DNS capability advertisement")
+	}
+	if d.Decode(&hello) != nil || hello.Version != 2 || hello.Status != "ready" {
 		t.Fatal("missing protocol handshake")
 	}
 	if d.Decode(&first) != nil || d.Decode(&duplicate) != nil || first.ID != 1 || duplicate.Status != "error" {

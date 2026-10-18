@@ -1,0 +1,47 @@
+version: 2
+
+project_name: traforo
+
+builds:
+  - id: traforo
+    main: ./cmd/stelvio-traforo
+    binary: traforo
+    goos:
+      # - linux
+      - darwin
+      # - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - 'CC=clang -arch {{ if eq .Arch "amd64" }}x86_64{{ else }}arm64{{ end }}'
+      - CGO_CFLAGS=-mmacosx-version-min=15.0
+      - CGO_LDFLAGS=-mmacosx-version-min=15.0
+      - MACOSX_DEPLOYMENT_TARGET=15.0
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }} -X main.commit={{ .Commit }}
+
+snapshot:
+  version_template: "{{ .Env.TRAFORO_SNAPSHOT_VERSION }}"
+
+archives:
+  - formats:
+      - binary
+    name_template: >-
+      traforo-{{ .Os }}-{{ .Arch }}
+
+checksum:
+  disable: true
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

@@ -241,8 +241,13 @@ export STLV_TRAFORO_DEV_BINARY='/absolute/path/printed/by/the/script'
 uv run stlv dev
 ```
 
-The script builds only this Mac's architecture with the available SDK, validates it,
-and installs through the ordinary administrator-authorized replacement transaction.
+Install GoReleaser v2.18.3, matching the release workflow. The script uses the shared
+GoReleaser configuration to build both macOS architectures with the available SDK,
+validates them, and installs the host image through the ordinary
+administrator-authorized replacement transaction. `make build` in the Go directory
+(or the script's `--build-only` option) validates without installation.
+Apple Silicon requires Rosetta for amd64 checks; Intel records arm64 execution as
+pending after structural and embedded-version checks.
 Stop live sessions before changing builds. It never updates release pins or caches.
 The override is process environment input, captured before local handler execution.
 Both helper startup and forwarder validation select its digest; the forwarder still
@@ -287,7 +292,9 @@ failure ownership, two-VPC routing/carrier payloads, and stable ports on reconne
 
 For release acceptance, leave `STLV_TRAFORO_DEV_BINARY` unset and use the pinned
 v0.0.5 image. For Go changes, optionally build locally and export its exact path
-in every networking shell. Both selections must advertise `forwarder=2` and `dns=1`
-before installation or host changes. The external repository owns release
+in every networking shell. New binaries report one semantic version. Stelvio
+requires the pinned base version, allowing `v0.0.5-dev+g<commit>` snapshots only
+with the override. Existing v0.0.5 release images use the old output and are accepted
+by their pinned digests. Version validation happens before installation or host changes. The external repository owns release
 builds/implementation CI. Follow
 `stelvio/tunnel/testing.md` for the ordered native and AWS acceptance runbook.

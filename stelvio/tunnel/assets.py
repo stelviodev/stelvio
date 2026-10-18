@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import platform
+import re
 import stat
 import struct
 import subprocess
@@ -26,7 +26,13 @@ if TYPE_CHECKING:
 
 DEVELOPMENT_BINARY_ENV = "STLV_TRAFORO_DEV_BINARY"
 TRAFORO_VERSION = "0.0.5"
-EXPECTED_VERSION = "stelvio-traforo/1 helper=1 carrier=1\n"
+EXPECTED_VERSION = f"v{TRAFORO_VERSION}\n"
+LEGACY_VERSION = b"stelvio-traforo/1 helper=1 carrier=1\n"
+# Only these released images may use the pre-semver version command.
+LEGACY_RELEASE_DIGESTS = {
+    "arm64": "b408afcaca01f760f4999c674a21271302c98eedad61678067ab80f844a4ba0f",
+    "x86_64": "4008c435efb5bb3913784a10da61df8fdbaadcbc324e42f2bfd470dbbc86faba",
+}
 EXECUTABLE_MODE = 0o755
 MAX_BINARY_BYTES = 16 * 1024 * 1024
 MACHO_HEADER = struct.Struct("<8I")
@@ -96,20 +102,39 @@ def _ready(path: Path, architecture: str) -> bool:
         raise NativeAssetError("Cached Traforo has unsafe ownership or permissions")
     with path.open("rb") as stream:
         _binary(stream.read(MAX_BINARY_BYTES + 1), architecture)
-    validate_protocol(path)
+    validate_version(path)
+    try:
+        with path.open("rb") as stream:
+            _binary(stream.read(MAX_BINARY_BYTES + 1), architecture)
+    except OSError:
+        raise NativeAssetError("Cached Traforo changed during version validation") from None
     return True
 
 
-def validate_protocol(path: Path) -> None:
-    """Run the ordinary-user version command after validating image bytes."""
+def validate_version(path: Path, *, allow_development: bool = False) -> str:
+    """Validate the single binary version after validating executable bytes."""
     try:
         result = subprocess.run(  # noqa: S603 - validated ordinary-user executable
             [str(path), "version"], capture_output=True, timeout=10, check=False
         )
     except (OSError, subprocess.TimeoutExpired):
         raise NativeAssetError("Traforo version check failed") from None
-    if result.returncode or result.stdout != EXPECTED_VERSION.encode() or result.stderr:
-        raise NativeAssetError("Traforo reported an incompatible protocol version")
+    release = f"v{TRAFORO_VERSION}"
+    if not result.returncode and not result.stderr:
+        if result.stdout == (release + "\n").encode():
+            return release
+        if allow_development and re.fullmatch(
+            re.escape(release).encode() + rb"-dev\+g[0-9a-f]{7,40}\n", result.stdout
+        ):
+            return result.stdout.decode().strip()
+        if result.stdout == LEGACY_VERSION and TRAFORO_VERSION == "0.0.5":
+            with path.open("rb") as stream:
+                data = stream.read(MAX_BINARY_BYTES + 1)
+            if hashlib.sha256(data).hexdigest() == LEGACY_RELEASE_DIGESTS[_architecture()]:
+                return release
+    raise NativeAssetError(
+        f"Traforo must report {release}; rebuild the developer image or run stlv tunnel install"
+    )
 
 
 @dataclass(frozen=True)
@@ -167,7 +192,7 @@ def select_traforo(environment: Mapping[str, str] | None = None) -> TraforoSelec
             data = stream.read(MAX_BINARY_BYTES + 1)
             validate_macho(data, architecture)
             digest = hashlib.sha256(data).hexdigest()
-            validate_protocol(path)
+            validate_version(path, allow_development=True)
             _no_developer_acl(path)
             after = path.lstat()
             _developer_permissions(after)
@@ -256,7 +281,10 @@ def ensure_traforo() -> Path:
             if _ready(path, architecture):
                 return path
         except NativeAssetError:
-            info = path.lstat()
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                raise NativeAssetError("Cached Traforo disappeared during validation") from None
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
                 raise
         data = _download(architecture)
@@ -290,36 +318,13 @@ def downloaded_helper() -> Iterator[Path]:
     yield ensure_traforo()
 
 
-def validate_network_capabilities(path: Path) -> None:
-    """Check a previously verified release, developer, or root-owned image."""
-    instruction = (
-        "Managed networking requires Traforo forwarder=2 and dns=1. "
-        "Run stlv tunnel install to restore the pinned release; "
-        "if STLV_TRAFORO_DEV_BINARY is set, rebuild that image or unset the override."
-    )
-    try:
-        result = subprocess.run(  # noqa: S603 - previously validated executable
-            [str(path), "capabilities"], capture_output=True, timeout=5, check=False
-        )
-        capabilities = json.loads(result.stdout)
-        if (
-            result.returncode
-            or result.stderr
-            or capabilities != {"forwarder": 2, "dns": 1}
-            or any(type(value) is not int for value in capabilities.values())
-        ):
-            raise ValueError("capabilities")  # noqa: TRY301 - unify capability errors
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        raise NativeAssetError(instruction) from None
-
-
-def require_network_capabilities(environment: Mapping[str, str] | None = None) -> None:
+def require_network_version(environment: Mapping[str, str] | None = None) -> None:
     """Gate managed startup before installation or any host mutation."""
     selected = select_traforo(environment)
     path = selected.local_path if selected.local_path is not None else ensure_traforo()
-    validate_network_capabilities(path)
+    validate_version(path, allow_development=selected.local_path is not None)
     if selected.local_path is not None:
         if select_traforo(environment).digest != selected.digest:
-            raise NativeAssetError("Developer Traforo changed during capability validation")
+            raise NativeAssetError("Developer Traforo changed during version validation")
     elif not _ready(path, _architecture()):
-        raise NativeAssetError("Pinned Traforo disappeared during capability validation")
+        raise NativeAssetError("Pinned Traforo disappeared during version validation")
