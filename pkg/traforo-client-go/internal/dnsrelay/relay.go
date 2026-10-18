@@ -235,7 +235,7 @@ func exchange(v *view, q *dns.Msg, direct bool) (*dns.Msg, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	dc := &dns.Conn{Conn: c}
 	if err = dc.WriteMsg(q); err != nil {
 		return nil, err

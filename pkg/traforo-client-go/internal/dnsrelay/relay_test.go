@@ -38,7 +38,7 @@ func proxy(t *testing.T, answer func(*dns.Msg) *dns.Msg) string {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				greeting := make([]byte, 3)
 				if _, e := io.ReadFull(c, greeting); e != nil {
@@ -255,7 +255,7 @@ func TestBoundsAndConcurrentShutdown(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_, _ = c.Write([]byte{255}) // Slow partial DNS frame.
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -333,10 +333,11 @@ func TestDirectProbeRequiresMatchingPayloadAndResourceConnection(t *testing.T) {
 				c, peer := net.Pipe()
 				workers.Add(1)
 				connections++
-				if target == "10.254.0.2:53" {
+				switch target {
+				case "10.254.0.2:53":
 					go func() {
 						defer workers.Done()
-						defer peer.Close()
+						defer func() { _ = peer.Close() }()
 						_ = peer.SetDeadline(time.Now().Add(time.Second))
 						dc := &dns.Conn{Conn: peer}
 						q, e := dc.ReadMsg()
@@ -366,9 +367,9 @@ func TestDirectProbeRequiresMatchingPayloadAndResourceConnection(t *testing.T) {
 						}
 						_ = dc.WriteMsg(a)
 					}()
-				} else if target == "10.254.1.3:27017" {
+				case "10.254.1.3:27017":
 					go func() { defer workers.Done(); _ = peer.Close() }()
-				} else {
+				default:
 					t.Error("direct probe used SOCKS or a hostname", target)
 					workers.Done()
 					_ = peer.Close()
@@ -397,7 +398,7 @@ func TestTCPConnectionQueryLimitAndDeadline(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	dc := &dns.Conn{Conn: c}
 	q := new(dns.Msg)
@@ -419,7 +420,7 @@ func TestTCPConnectionQueryLimitAndDeadline(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer slow.Close()
+	defer func() { _ = slow.Close() }()
 	_ = slow.SetDeadline(time.Now().Add(5 * time.Second))
 	_, _ = slow.Write([]byte{1})
 	if _, e = slow.Read(make([]byte, 1)); e == nil {
@@ -453,7 +454,7 @@ func TestWireSaturationKeepsOwnershipAndResponsePolicy(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 	q := new(dns.Msg)
 	q.SetQuestion("db.private.test.", dns.TypeA)

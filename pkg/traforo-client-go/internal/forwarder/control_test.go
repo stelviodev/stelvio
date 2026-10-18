@@ -9,8 +9,8 @@ import (
 
 func TestDNSControlOwnershipAndReconnect(t *testing.T) {
 	a, b := pair(t)
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	m := &manager{units: make(map[uint32]*unit), generations: make(map[uint32]uint64), carrier: a}
 	defer m.closeDNS()
 	defer func() {
@@ -117,8 +117,8 @@ func FuzzControl(f *testing.F) {
 
 func TestRetainedDNSViewsAreBounded(t *testing.T) {
 	a, b := pair(t)
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	m := &manager{units: make(map[uint32]*unit), generations: make(map[uint32]uint64), carrier: a}
 	defer m.closeDNS()
 	defer func() {
@@ -146,8 +146,8 @@ func TestRetainedDNSViewsAreBounded(t *testing.T) {
 
 func TestRetiredDNSRevisionCannotBeResurrected(t *testing.T) {
 	a, b := pair(t)
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	m := &manager{units: make(map[uint32]*unit), generations: make(map[uint32]uint64), carrier: a}
 	defer m.closeDNS()
 	defer func() {
