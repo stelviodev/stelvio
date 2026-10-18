@@ -123,8 +123,14 @@ def build_tools(source: Path) -> tuple[str, str, str]:
     compiler = shutil.which("go")
     releaser = shutil.which("goreleaser")
     required = goreleaser_version(source)
-    if compiler is None or releaser is None:
-        raise RuntimeError(f"Install Go compatible with go.mod and GoReleaser {required}")
+    if compiler is None:
+        raise RuntimeError("Go was not found on PATH; install Go compatible with go.mod")
+    if releaser is None:
+        raise RuntimeError(
+            f"GoReleaser was not found on PATH; install GoReleaser {required} from "
+            f"https://github.com/goreleaser/goreleaser/releases/tag/{required} "
+            "and add its executable directory to PATH"
+        )
     reported = tool(releaser, "--version")
     if not re.search(
         r"(?m)^GitVersion:\s*" + re.escape(required.removeprefix("v")) + r"\s*$", reported

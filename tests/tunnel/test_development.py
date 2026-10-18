@@ -276,6 +276,19 @@ def test_failed_build_preserves_previous_output_without_installation(
     assert list(previous.parent.parent.iterdir()) == [previous.parent]
 
 
+@mark.parametrize("missing", ["go", "goreleaser"])
+def test_missing_build_tool_identifies_prerequisite(builder, monkeypatch, missing):
+    monkeypatch.setattr(
+        builder.module.shutil, "which", lambda name: None if name == missing else "/" + name
+    )
+    label = "Go" if missing == "go" else "GoReleaser"
+    expected = f"{label} was not found on PATH"
+    with raises(RuntimeError, match=expected):
+        builder.module.build(builder.source)
+    builder.compile.assert_not_called()
+    assert not (builder.source / "build").exists()
+
+
 def test_wrong_goreleaser_version_fails_before_build(builder, monkeypatch):
     monkeypatch.setattr(builder.module, "tool", lambda *a, **kw: "GitVersion:    2.17.0")
     with raises(RuntimeError, match=r"matching release\.yml"):

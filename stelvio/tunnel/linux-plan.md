@@ -337,6 +337,95 @@ configuration requires introducing/reconfiguring a local resolver or narrowing
 the product promise. Do not add an invasive global fallback as incidental distro
 compatibility work.
 
+## Container support as a separate follow-up
+
+A Linux Traforo executable could run in Docker, but initial native Linux support
+does not imply container support. Ordinary application containers usually lack
+systemd, a system bus, and host-integrated systemd-resolved. A cgo-free executable
+removes a libc dependency; it does not supply these services or networking
+privileges.
+
+| Deployment | Required integration |
+| --- | --- |
+| Traforo and application in one container | TUN access, narrowly privileged helper, foreground supervision, and container DNS configuration. |
+| Traforo sidecar and separate application container | The same mechanisms plus a shared network namespace or explicitly configured inter-container routing and DNS. |
+| Traforo on Linux host and application in Docker | Verify container traffic reaches host-owned VPC routes through forwarding/firewall policy and that container DNS reaches the private resolver. |
+
+### Container-local tunnel
+
+Design the platform/service boundaries so a later container mode can start the
+helper under foreground supervision instead of installing a systemd service.
+Keep the existing privileged helper and ordinary-user forwarder separation; do
+not run the whole application or `stlv` as root to bypass that contract. Define
+trusted image/state paths and administration semantics for immutable container
+images separately from host installation.
+
+The expected rootful Docker setup requires `/dev/net/tun` device access and
+`NET_ADMIN` in the relevant network namespace, typically through
+`--device=/dev/net/tun` and `--cap-add=NET_ADMIN`. These are prerequisites to
+validate, not a complete launch recipe. Avoid unrestricted `--privileged`, host
+PID namespaces, host service sockets, and host root filesystem mounts. Rootless
+Docker/user namespaces require separate feasibility and acceptance work.
+
+Add a container DNS adapter instead of assuming systemd-resolved is present.
+One candidate is a local resolver reachable on port 53 that routes owned names
+to the existing per-VPC relays and forwards unrelated queries to the container's
+original DNS service. This adapter must preserve Docker service-name discovery,
+avoid forwarding loops, bind only in the intended namespace, handle upstream
+changes, and retain the existing refusal/outage policy for private names. Resolve
+privileged-port binding and multi-VPC dispatch without elevating the forwarder.
+Configure the container's resolver explicitly rather than assuming the host's
+split DNS is inherited.
+
+A sidecar can share a network namespace with the application, for example using
+Docker's `--network container:<name>` mechanism. Shared networking alone does
+not configure each container's resolver file or share its filesystem/IPC paths.
+Specify DNS, authenticated control access, process supervision, and namespace
+lifetime explicitly. Avoid passing the raw TUN descriptor to the application.
+
+Stelvio orchestration remains necessary: Traforo alone does not discover AWS
+resources or establish the SSM/OpenSSH transport. Decide whether the CLI/runtime
+lives in the tunnel container or communicates through a deliberately supported
+control boundary. Preserve ordinary-user credential handling and process-death
+cleanup across that boundary.
+
+### Host tunnel consumed by containers
+
+This can reuse the normal host helper, but needs explicit routing and DNS
+acceptance. Bridge traffic traverses host forwarding/firewall policy, unlike the
+locally originated traffic assumed by the initial Linux plan. Establish whether
+return routing or NAT is needed for the chosen topology; do not add broad host
+forwarding changes by default. A loopback-only host DNS relay is not directly
+reachable through the container's own loopback address.
+
+Native Linux host networking shares the host network namespace and simplifies
+route access, but still requires checking the application's resolver path. Docker
+Desktop on macOS and Windows places Linux containers inside a VM and needs
+separate routing, DNS, device, and lifecycle acceptance. Do not equate its host
+networking behavior with native Linux or imply the Darwin executable can run
+inside a Linux container.
+
+### Container acceptance gate
+
+Keep this gate after native Linux acceptance and record supported topologies
+individually:
+
+- Prove same-container and sidecar hostname/TLS/member discovery behavior,
+  including public DNS and Docker service-name resolution.
+- Test multiple VPC views, transport outages, DNS failure retention, and
+  reconnection without changing application connection settings.
+- Kill the CLI, forwarder, helper, and sidecar independently; verify cleanup
+  while other processes or namespace-sharing containers remain alive.
+- Recreate containers and namespaces with stale persisted journals. Fence
+  namespace identity and reused process/interface identifiers; never treat
+  container-local names as proof of host ownership.
+- Verify host networking/DNS remains unchanged for isolated-container tests and
+  confirm all effects of deliberately shared host networking are restored.
+- Exercise device/capability denial and SELinux/AppArmor restrictions, retaining
+  enforcement. Track rootless and Docker Desktop acceptance separately.
+- Repeat the AWS workflow and teardown audit for each topology advertised as
+  supported. Container startup alone is not networking acceptance.
+
 ## Reference material
 
 - [Linux TUN/TAP API](https://docs.kernel.org/networking/tuntap.html)
@@ -346,6 +435,9 @@ compatibility work.
 - [Fedora systemd-resolved adoption](https://fedoraproject.org/wiki/Changes/systemd-resolved)
 - [Omarchy networking](https://omarchy.org/manual/networking/)
 - [Go netlink library](https://github.com/vishvananda/netlink)
+- [Docker runtime permissions and device access](https://docs.docker.com/engine/containers/run/)
+- [Docker networking and container network sharing](https://docs.docker.com/engine/network/)
+- [Docker host networking](https://docs.docker.com/engine/network/drivers/host/)
 
 These describe mechanisms and distribution context, not a guarantee of the user's
 installed configuration. Recheck the APIs and exact supported distro releases
