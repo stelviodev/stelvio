@@ -17,13 +17,15 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 - The stub forwards each invocation over an AppSync Events channel.
 - The `stlv dev` process runs a local dev server, executes your real handler, then sends the result back to AWS.
 
-Your public entrypoint (API Gateway URL / Function URL) stays the same — you hit it like normal.
+Your public entrypoint (API Gateway URL / Function URL) stays the same. You hit it like normal.
 
 ## Using it
 
 No changes to `stlv_app.py` are needed.
 
 ```python
+from stelvio.aws.api_gateway import RestApi
+
 @app.run
 def run() -> None:
     api = RestApi("MyApi")
@@ -42,7 +44,7 @@ Now call your API like you normally would (e.g. `https://...execute-api.../v1/`)
 To stop the local server: `Ctrl+C`. 
 
 !!! warning
-    Stopping the dev server won't change the infrastructure in AWS. In particular, the replacement Lambda function that handles the dev mode ("stub Lambda") will remain deployed.
+    Stopping the dev server leaves your application infrastructure in AWS, including the replacement stub Lambda. Owned local routes, interfaces, and resolver files are cleaned up; the explicitly deployed bastion stays deployed. See [VPC access policies](../components/aws/vpc.md#dev-access-policy).
 
     You need to re-deploy without dev mode using `stlv deploy` again to switch back to your real Lambda code being deployed to AWS.
 
@@ -50,17 +52,182 @@ To stop the local server: `Ctrl+C`.
     `stlv dev` still deploys real AWS resources (so it needs AWS credentials and it can cost money). It will also create an AppSync API named `stelvio` in your account if it's not already present. The AppSync API is a purely usage-based cost model.
 
 
-## Limitations
+## Accessing a VPC from your local handler
 
-### Target Architecture
+On macOS, `stlv dev` can connect your local handlers to private IPv4 TCP services,
+including DocumentDB. Keep the same `Function(vpc=...)`, linked hostname, port,
+and driver TLS settings you use in production. You do not need a localhost URI
+or a separate handler for dev mode.
 
-Stelvio's dev mode will execute your local Lambda functions natively, i.e. the Python interpreter is used on your workstation's operating system and CPU architecture, no matter your Lambda function definition. There is no emulator in place that would match the os/architecture on AWS with the one on your workstation.
+### Setup
 
-Since your workstation is likely equipped with more RAM than your Lambda function, this also mean that you're less likely to run into memory limits on your workstation.
+Stelvio pins Traforo v0.0.7, which supports private DNS and packet forwarding.
+Managed startup verifies the selected binary version before helper installation or
+host changes. Local builds are optional; contributors can select one with
+`STLV_TRAFORO_DEV_BINARY` as described in the
+[testing guide](../contributing/integration-tests.md).
 
-### Request/Response Size Limits
+1. Use macOS 15 or newer on Apple Silicon or Intel. Stelvio downloads a checksum-pinned
+   **Traforo** release for your architecture into its private binary cache. You do not
+   need Go or Xcode. Linux, WSL, and Windows VPC networking are not implemented;
+   ordinary dev mode without managed VPC access still works on those platforms.
+2. Configure your AWS profile or normal SDK credential chain. Those credentials
+   need Systems Manager, EC2 Instance Connect, resource discovery, and access to
+   any secrets your local handler reads. Custom Pulumi-provider credentials,
+   assume-role settings, endpoints, and proxies are not supported for tunnels.
+   `stlv tunnel install` downloads a pinned AWS Session Manager plugin into
+   Stelvio's private `bin` directory alongside Pulumi. No manual plugin install,
+   Homebrew, or PATH configuration is required. First use needs network access;
+   verified downloads are reused. During private-repository development, set
+   `GITHUB_TOKEN` with repository read access. Public releases need no token, and
+   Stelvio never obtains credentials from the GitHub CLI.
+3. Install your handler's dependencies in the Python environment running `stlv`.
+   For DocumentDB, install `pymongo` there as well as declaring it in the
+   Function's `requirements`. Lambda packaging does not install local packages.
+4. Install the helper and private plugin from that Stelvio environment:
 
-Dev mode supports the same payload limits as [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html) (internally, large payloads are chunked into multiple AppSync events and reassembled on the other end):
+    ```bash
+    stlv tunnel install
+    stlv tunnel inspect
+    ```
 
-- **6 MB** for request and response (synchronous invocations)
-- **1 MB** for asynchronous invocations
+    Run these as your ordinary user. Installation asks for macOS administrator
+    authorization. Do not run `stlv dev` with `sudo`.
+
+!!! info "Supported platforms"
+    Managed networking requires macOS 15+ on arm64 or x86_64. Native networking
+    acceptance must be run on each target OS and architecture; Rosetta command
+    checks do not establish native Intel networking acceptance.
+
+### Start and use the session
+
+For a linked DocumentDB, the infrastructure definition can stay the same:
+
+```python
+from stelvio.aws.document_db import DocumentDb
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import NatConfig, Vpc
+
+vpc = Vpc("main", nat=NatConfig(type="managed", single=True))
+db = DocumentDb("todos", vpc=vpc)
+Function(
+    "api",
+    handler="functions/todos.handler",
+    requirements=["pymongo"],
+    url="public",
+    vpc=vpc,
+    links=[db],
+)
+```
+
+Put this inside your app's `@app.run` function. The handler must exist and use
+the [DocumentDB link properties](../components/aws/document-db.md#linking).
+NAT in this example lets the production Lambda call Secrets Manager; it is
+separate from the local dev tunnel.
+
+```bash
+stlv dev
+# Or: stlv dev staging
+```
+
+Stelvio deploys the stub Lambda, discovers the VPCs used by local handlers,
+and connects handler dependencies whose VPC explicitly enables a bastion.
+Set `bastion=True` (or a `BastionConfig`) and deploy to create the persistent
+bastion. Omitting `bastion` defaults to `False`: Stelvio warns and runs the
+handler without establishing or checking an external network path. Explicit
+`None` is rejected. See [VPC access policy](../components/aws/vpc.md#dev-access-policy).
+
+Wait for the networking readiness output, then call the printed Function URL
+or API URL in another terminal. Initial access can take several minutes while
+EC2 starts and Systems Manager becomes available. A handler depending on an
+unready VPC receives a network-unavailable response before its code runs.
+Handlers for healthy VPCs and handlers without a VPC can continue.
+
+### What changes on your machine
+
+The root-owned Traforo helper creates a virtual `utun` interface, scoped routes
+for the selected VPC CIDRs, and scoped macOS resolver files. A separate Traforo
+forwarder runs as your ordinary user and carries TCP traffic through OpenSSH's
+SOCKS proxy. SSH travels over a Systems Manager WebSocket session to the VPC
+access instance; no inbound SSH port is opened. The nonroot Traforo DNS relay sends
+the selected private queries through that connection to the VPC DNS resolver.
+Unrelated DNS keeps using your normal resolvers.
+
+The Lambda invocation and response use a separate AppSync Events connection.
+The stub Lambda does not need VPC attachment in dev mode; your real Lambda
+keeps its VPC attachment on an ordinary deploy.
+
+!!! warning "Machine-wide routes"
+    Routes apply to all processes on your Mac, not only the local handler.
+    Only one managed dev network session can own the helper at a time.
+    Overlapping VPC CIDRs, conflicting VPN routes, and foreign resolver files
+    are refused rather than overwritten. Multiple VPCs need non-overlapping
+    CIDRs and unambiguous DNS ownership.
+
+### Connect without dev mode
+
+```bash
+stlv deploy staging
+stlv tunnel start staging
+```
+
+`tunnel start` reads the deployed environment and connects the VPC dependencies
+of its handlers, including linked databases. It does not deploy infrastructure,
+start the Lambda bridge, or connect unreferenced VPCs. Use another terminal for
+your database client or agent, with the original hostname, port, and TLS settings.
+The tunnel stays in the foreground until Ctrl+C. With no eligible dependencies,
+it prints warnings where applicable and exits without activating the helper.
+
+### Transport loss and stopping
+
+Stelvio reconnects an interrupted transport using the existing deployed bastion.
+It never creates a replacement instance. New dependent dev invocations are
+rejected while their VPC is unavailable; unrelated handlers continue. Existing
+database calls can fail and are not replayed automatically.
+
+Ctrl+C stops the session and removes its owned routes, interfaces, and resolver
+files. If the command dies, the helper detects lease loss or owner death and
+cleans those resources itself. A helper restart resumes cleanup from its durable
+journal. Persistent bastions, DocumentDB, NAT, and the application remain deployed
+and continue to incur their applicable charges.
+
+### Recover an interrupted session
+
+If automatic host cleanup cannot finish:
+
+```bash
+stlv tunnel inspect
+stlv tunnel cleanup
+```
+
+`cleanup` retries removal of stale Stelvio-owned host state and leaves the helper
+installed. It refuses live sessions and foreign resources. Preserve the journal
+when ownership is uncertain; resolve the reported conflict and retry. This
+command does not delete AWS resources.
+
+### Upgrades and uninstall
+
+`stlv tunnel install`, `stlv dev`, and `stlv tunnel start` ensure the pinned
+Traforo version is installed. Close active tunnel/dev sessions before replacing
+an older helper. Stelvio requests macOS administrator authorization for the
+replacement and retains evidence if an interrupted upgrade cannot finish safely.
+Conflicting or unsupported ownership records must be resolved before
+replacement; they are never overwritten blindly.
+
+```bash
+stlv tunnel uninstall
+```
+
+`uninstall` removes the local helper after safe host cleanup and refuses active
+sessions. The private AWS plugin cache remains available. Neither cleanup nor
+uninstall destroys your application or bastion. Remove the bastion with a deploy
+using `bastion=False`, or destroy the application.
+
+### Private DNS implementation
+
+The nonroot Traforo forwarder accepts scoped local UDP/TCP DNS queries and sends
+DNS over TCP through the owning VPC's SSH/SOCKS transport to its VPC resolver.
+The privileged helper only manages owned macOS resolver configuration. Each VPC
+retains its local DNS listener during reconnects; owned queries fail until the
+transport is ready again. Other names keep using your normal DNS. Python performs
+AWS discovery and session coordination; it does not serve or parse DNS messages.

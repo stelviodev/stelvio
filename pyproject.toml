@@ -73,11 +73,13 @@ include = [
 markers = [
     "integration: integration tests that deploy real AWS resources",
     "integration_vpc: integration tests that create a Vpc (run with --integration-vpc, 4 workers max)",
+    "integration_macos_privileged: exclusive macOS host mutations (--integration-macos-privileged, -n 0; excluded from run_all.sh)",
+    "integration_tunnel: exclusive live macOS VPC dev lane (--integration-tunnel, no workers)",
     "integration_cf: integration tests with CloudFront distributions (slow teardown)",
     "integration_dns: integration tests that need a Route 53 domain configured",
 ]
-# A parametrize list built by a scan (docs pages, components) comes out empty when the scan
-# breaks; pytest's default skips that quietly.
+
+# A parametrized scan must fail collection if a broken scan produces no cases.
 empty_parameter_set_mark = "fail_at_collect"
 
 [tool.coverage.report]

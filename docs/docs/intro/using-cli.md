@@ -86,6 +86,43 @@ Human-readable deploy output shows changed components as they finish, then print
     for shared environments. `stlv deploy ENV --stream` follows the same rule.
     Outside CI, commands keep the existing default of using your personal environment when env is omitted.
 
+### dev
+
+`stlv dev [env]` deploys the app with stub Lambdas and runs your handlers locally.
+
+```bash
+stlv dev
+stlv dev staging
+```
+
+- `--yes, -y` skips shared-environment confirmation.
+- `--show-unchanged` includes unchanged resources in deployment output.
+
+See [dev mode](../concepts/dev-mode.md) for setup, supported platforms,
+VPC readiness, shutdown, and recovery. Stopping the local server leaves the stub
+Lambda deployed; use `stlv deploy` to restore production handlers.
+
+### tunnel
+
+Managed networking uses the checksum-pinned Traforo v0.0.7 release, including
+private DNS. See [VPC dev setup](../concepts/dev-mode.md#setup). A local developer
+build is optional; incompatible images fail version checks before host changes.
+
+Run tunnel commands as your ordinary user. Helper installation, replacement,
+and removal request macOS administrator authorization. See [setup and upgrades](../concepts/dev-mode.md#setup).
+
+| Command | Purpose |
+| --- | --- |
+| `stlv tunnel install` | Downloads pinned Traforo and AWS plugin releases, then installs or updates the helper |
+| `stlv tunnel start [ENV]` | Connects deployed handler VPC dependencies in the foreground without deploying or starting dev mode |
+| `stlv tunnel inspect` | Reports ownership, uncertainty, mutation status, and VPC units |
+| `stlv tunnel cleanup` | Cleans stale owned host networking while retaining the helper; refuses live sessions |
+| `stlv tunnel uninstall` | Removes the helper after safe cleanup; retains the private AWS plugin cache |
+
+`tunnel start` defaults to your personal environment. In CI, provide an explicit
+ENV. It requires an existing deployment. Bastions must be explicitly enabled;
+VPC dependencies without a bastion warn and bypass managed networking.
+
 ### refresh
 
 `stlv refresh [env]` - Updates your state to match what's actually in AWS for specified environment. Defaults to personal environment if not provided.

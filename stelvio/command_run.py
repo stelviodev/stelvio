@@ -79,6 +79,7 @@ from stelvio.home import Home
 from stelvio.project import get_dot_stelvio_dir, get_project_root, get_user_env
 from stelvio.provider import ProviderStore, aws_default_tags
 from stelvio.pulumi import get_stelvio_config_dir
+from stelvio.tunnel.session import NetworkSession
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +363,16 @@ class CommandRun:
                 shutil.rmtree(self._workdir)
 
         return False
+
+    def capture_network_session(self, report: "Callable[[str], None]") -> "NetworkSession":
+        """Capture resolved state/provider/home inputs while the workdir still exists."""
+        state = self.load_state()
+        return NetworkSession(
+            state=state,
+            app=self.app_name,
+            env=self.env,
+            report=report,
+        )
 
     @property
     def stack(self) -> Stack:

@@ -2,8 +2,10 @@ import asyncio
 import base64
 import datetime
 import json
+import time
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict
 
 import websockets
@@ -23,6 +25,7 @@ from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import discover_or_create_appsync
 
 NOT_A_TEAPOT = 418
+APPSYNC_ACK_TIMEOUT = 10
 
 # Chunk buffers for reassembling chunked requests from Lambda stub
 _request_chunk_buffers: dict[str, ChunkBuffer] = {}
@@ -47,12 +50,40 @@ async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol
     await ws.send(json.dumps(init_message))
 
     # Wait for connection_ack
-    ack = await asyncio.wait_for(ws.recv(), timeout=10)
-    ack_data = json.loads(ack)
-    if ack_data.get("type") != "connection_ack":
-        raise ConnectionError(f"Expected connection_ack, got: {ack_data.get('type')}")
+    await wait_for_appsync_ack(ws, "connection_ack")
 
     return ws
+
+
+async def wait_for_appsync_ack(
+    ws: websockets.WebSocketClientProtocol,
+    expected_type: str,
+    *,
+    operation_id: str | None = None,
+    channel: str | None = None,
+) -> dict:
+    """Wait for an AppSync protocol acknowledgement, ignoring keepalives."""
+    deadline = asyncio.get_running_loop().time() + APPSYNC_ACK_TIMEOUT
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}")
+        raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        message = json.loads(raw_message)
+        message_type = message.get("type")
+        if message_type == "ka":
+            continue
+        if message_type == "subscribe_error":
+            raise ConnectionError(
+                f"AppSync subscribe to {channel!r} failed: {message.get('errors', [])}"
+            )
+        if message_type != expected_type:
+            raise ConnectionError(f"Expected AppSync {expected_type}, received {message_type!r}")
+        if operation_id is not None and message.get("id") != operation_id:
+            raise ConnectionError(
+                f"AppSync {expected_type} acknowledgement had an unexpected operation ID"
+            )
+        return message
 
 
 async def subscribe_to_channel(
@@ -69,10 +100,9 @@ async def subscribe_to_channel(
             }
         )
     )
-    ack = json.loads(await ws.recv())
-    if ack.get("type") == "subscribe_error":
-        errors = ack.get("errors", [])
-        raise ConnectionError(f"AppSync subscribe to {channel!r} failed: {errors}")
+    await wait_for_appsync_ack(
+        ws, "subscribe_success", operation_id="request-sub", channel=channel
+    )
 
 
 async def publish_to_channel(
@@ -176,8 +206,13 @@ def log_invocation(result: BridgeInvocationResult) -> None:
         )
 
 
-async def _handle_data_message(
-    data: dict, ws: object, api_key: str, app_name: str, env: str
+async def _handle_data_message(  # noqa: PLR0913 - existing bridge context plus admission boundary
+    data: dict,
+    ws: object,
+    api_key: str,
+    app_name: str,
+    env: str,
+    admission: Callable[[str], BaseException | None] | None = None,
 ) -> None:
     event_data = json.loads(data["event"])
 
@@ -187,6 +222,28 @@ async def _handle_data_message(
             return
         data = {"type": "data", "event": json.dumps(complete_msg)}
 
+    if admission is not None:
+        event_data = json.loads(data["event"])
+        deadline = (event_data.get("context") or {}).get("epoch_deadline_time_in_ms")
+        error = (
+            TimeoutError("Invocation deadline expired before local dispatch")
+            if type(deadline) is int and deadline > 0 and time.time() * 1000 >= deadline
+            else admission(event_data.get("endpointId", ""))
+        )
+        if error is not None:
+            event = event_data.get("event") or {}
+            result = BridgeInvocationResult(
+                success_result=None,
+                error_result=error,
+                process_time_local=0.0,
+                request_path=event.get("rawPath") or event.get("path") or "N/A",
+                request_method=event.get("httpMethod") or "N/A",
+                status_code=-1,
+            )
+            await publish(result, ws, api_key, data, app_name, env)
+            log_invocation(result)
+            return
+
     for handler in WebsocketHandlers.all():
         result = await handler.handle_bridge_event(data)
         if result:
@@ -194,7 +251,13 @@ async def _handle_data_message(
             log_invocation(result)
 
 
-async def main(region: str, profile: str, app_name: str, env: str) -> None:
+async def main(
+    region: str,
+    profile: str,
+    app_name: str,
+    env: str,
+    admission: Callable[[str], BaseException | None] | None = None,
+) -> None:
     """Main loop."""
 
     # Discover AppSync API
@@ -203,50 +266,79 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
     # Connect
     ws = await connect_to_appsync(asdict(config))
 
-    # Subscribe to request channel
-    request_channel = f"/stelvio/{channel_segment(app_name)}/{channel_segment(env)}/in"
-    await subscribe_to_channel(ws, request_channel, config.api_key)
+    try:
+        # Subscribe to request channel
+        request_channel = f"/stelvio/{channel_segment(app_name)}/{channel_segment(env)}/in"
+        await subscribe_to_channel(ws, request_channel, config.api_key)
 
-    console = Console()
-    console.print("[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
-    console.print("Press Ctrl+C to stop.\n")
+        console = Console()
+        console.print("[bold cyan]Stelvio[/bold cyan] local dev server connected to AppSync.")
+        console.print("Press Ctrl+C to stop.\n")
 
-    # Handle messages
-    async for message in ws:
-        data = json.loads(message)
+        # Handle messages
+        async for message in ws:
+            data = json.loads(message)
 
-        # Debug: log all message types
-        msg_type = data.get("type")
+            # Debug: log all message types
+            msg_type = data.get("type")
 
-        match msg_type:
-            # Keepalive - also clean up stale buffers
-            case "ka":
-                cleanup_stale_buffers(_request_chunk_buffers)
-                continue
-            # Subscribe success/error
-            case "subscribe_success":
-                continue
-            case "subscribe_error":
-                errors = data.get("errors", [])
-                console.print(
-                    f"[bold red]AppSync subscribe_error:[/bold red] {escape(str(errors))}"
-                )
-                continue
-            # Publish success
-            case "publish_success":
-                continue
-            # Publish error - surface so silent failures don't masquerade as timeouts
-            case "publish_error":
-                errors = data.get("errors", [])
-                console.print(f"[bold red]AppSync publish_error:[/bold red] {escape(str(errors))}")
-                continue
-            # Data message (Lambda invocation)
-            case "data":
-                await _handle_data_message(data, ws, config.api_key, app_name, env)
-            case _:
-                pass
+            match msg_type:
+                # Keepalive - also clean up stale buffers
+                case "ka":
+                    cleanup_stale_buffers(_request_chunk_buffers)
+                    continue
+                # Subscribe success/error
+                case "subscribe_success":
+                    continue
+                case "subscribe_error":
+                    errors = data.get("errors", [])
+                    console.print(
+                        f"[bold red]AppSync subscribe_error:[/bold red] {escape(str(errors))}"
+                    )
+                    continue
+                # Publish success
+                case "publish_success":
+                    continue
+                # Publish error - surface so silent failures don't masquerade as timeouts
+                case "publish_error":
+                    errors = data.get("errors", [])
+                    console.print(
+                        f"[bold red]AppSync publish_error:[/bold red] {escape(str(errors))}"
+                    )
+                    continue
+                # Data message (Lambda invocation)
+                case "data":
+                    await _handle_data_message(data, ws, config.api_key, app_name, env, admission)
+                case _:
+                    pass
+    finally:
+        await asyncio.wait_for(ws.close(), timeout=2)
 
 
-def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
-    """Run the main loop in a blocking manner."""
-    asyncio.run(main(region=region, profile=profile, app_name=app_name, env=env))
+def run_bridge_server(
+    region: str,
+    profile: str,
+    app_name: str,
+    env: str,
+    admission: Callable[[str], BaseException | None] | None = None,
+) -> None:
+    """Keep serial dispatch; shutdown must not join an uncooperative handler thread.
+
+    CLI main exits the process after ownership cleanup. Cancelling the awaiter
+    does not stop or safely cancel the handler's executor thread.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    task = loop.create_task(main(region, profile, app_name, env, admission))
+    try:
+        loop.run_until_complete(task)
+    finally:
+        pending = asyncio.all_tasks(loop)
+        for future in pending:
+            future.cancel()
+        try:
+            if pending:
+                loop.run_until_complete(asyncio.wait(pending, timeout=3))
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)

@@ -194,8 +194,8 @@ Function(
 
 # Your own security groups instead of the app security group
 Function(
-    "legacy",
-    handler="functions/legacy.handler",
+    "worker",
+    handler="functions/worker.handler",
     vpc={"vpc": vpc, "security_groups": ["sg-0123456789abcdef0"]},
 )
 ```
@@ -220,9 +220,9 @@ IP, so a public subnet would leave the function with no route out.
 deploy while AWS creates its network interfaces. Later functions on the same
 VPC reuse them. Adding or removing `vpc` on an existing function is an in-place
 update. Destroying a VPC waits for Lambda to release the interfaces, which can
-take several minutes. `stlv dev` runs your handlers on your machine, outside
-the VPC, so resources reachable only from inside the VPC are not available in
-dev mode yet. Dev mode access to VPC resources is coming soon.
+take several minutes. In `stlv dev`, handlers run locally and can reach private
+VPC services through managed dev access on macOS. See the
+[setup and recovery workflow](../../concepts/dev-mode.md#accessing-a-vpc-from-your-local-handler).
 
 ## Linking resources in VPC
 
@@ -231,6 +231,75 @@ when you create it. Linking a Function injects connection details and IAM; it do
 not add a network grant. So a Function that links a datastore must join the same
 Vpc with `vpc=`, or Stelvio raises `ValueError` when you create the Function. See
 [Linking a DocumentDB cluster](document-db.md#linking) for an example.
+
+## Dev access policy
+
+The `bastion` argument enables a persistent, application-owned access instance.
+It does not control production Lambda VPC attachment. Access is disabled by default.
+
+| `bastion` value | Ordinary deploy | Tunnel/dev session exit |
+| --- | --- | --- |
+| Omitted or `False` | No managed bastion | Warns for handler dependencies and runs without managed networking |
+| `True` | Creates app-owned access resources | Keeps the access instance |
+| `BastionConfig(...)` or a dict, including `{}` | Creates a configured app-owned bastion | Keeps the access instance |
+
+```python
+from stelvio.aws.vpc import Vpc
+
+vpc = Vpc("main", bastion=True)
+```
+
+The bastion is created by deployment and stays until a deploy changes `bastion`
+to `False`, or the app is destroyed. Explicit `None` is invalid. Without a bastion,
+provide your own
+connectivity if the local handler needs a private resource; Stelvio does not
+establish or verify that external path. The warning does not block execution.
+
+`stlv tunnel start [ENV]` uses the same handler dependencies as dev mode without
+running the invocation bridge. It connects to deployed bastions and never deploys.
+
+The access instance uses a public subnet and public IP for outbound AWS
+connectivity. Its SSH server is reached through Systems Manager, with no public
+SSH ingress. DocumentDB admits the managed dev security group on its configured
+port. Links still provide connection details and IAM permissions; the tunnel
+provides the local network path.
+
+### Private DNS
+
+The nonroot Traforo forwarder serves scoped loopback DNS and forwards queries over
+TCP through the owning VPC transport. The privileged helper manages macOS resolver
+entries. The pinned Traforo v0.0.7 release includes this DNS relay; no local Go
+build is needed. See [dev setup](../../concepts/dev-mode.md#setup).
+
+Stelvio discovers DocumentDB cluster, reader, and member hostnames and routes
+their DNS through the VPC resolver. Keep the original names and ports so TLS
+hostname verification and replica discovery continue to work.
+
+For additional private zones, declare the suffixes explicitly:
+
+```python
+from stelvio.aws.vpc import BastionConfig, Vpc
+
+vpc = Vpc("main", bastion=BastionConfig(dns_domains=("internal.example.com",)))
+```
+
+This is a persistent policy. The dict equivalent is
+`bastion={"dns_domains": ["internal.example.com"]}`. Domains are normalized and
+validated; wildcards and IP addresses are not accepted. Declaring a suffix does
+not create a Route 53 zone or associate it with the VPC. The VPC resolver must
+already be able to answer it. Private queries fail closed when access is down;
+unrelated names continue using your normal DNS.
+
+### Dev access cost and lifetime
+
+Managed access adds EC2, public IPv4, storage, and any applicable transfer or
+service usage charges. See [EC2 pricing](https://aws.amazon.com/ec2/pricing/)
+and [VPC pricing](https://aws.amazon.com/vpc/pricing/) for your region. Access
+bills continuously while deployed, including between tunnel/dev sessions.
+
+Stopping a tunnel does not delete the bastion, DocumentDB, NAT, or application.
+Local `tunnel cleanup` repairs host networking; `tunnel uninstall` removes the
+helper. Neither performs AWS teardown. See [shutdown and cleanup](../../concepts/dev-mode.md#transport-loss-and-stopping).
 
 ## Cost
 
@@ -275,6 +344,13 @@ Pulumi resource properties. For an overview of how customization works, see the
 | `isolated_route_table`  | [RouteTableArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/routetable/#inputs)                      | Isolated route tables (all AZs) |
 | `elastic_ip`            | [EipArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/eip/#inputs)                                    | NAT Elastic IPs                 |
 | `nat_gateway`           | [NatGatewayArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/natgateway/#inputs)                      | NAT Gateways                    |
+
+Persistent access also supports these customization keys: `bastion`
+(`InstanceArgs`), `bastion_security_group` (`SecurityGroupArgs`), `bastion_role`
+(`RoleArgs`), `bastion_profile` (`InstanceProfileArgs`), and
+`bastion_identity_document` (`DocumentArgs`). Preserve the ownership, identity,
+and transport configuration required by managed access when customizing them.
+
 
 ### Example
 
@@ -332,33 +408,9 @@ vpc = Vpc(
 
 VPC support in Stelvio will grow in upcoming releases:
 
-- **Dev mode access** — reach resources inside your VPC from your local machine
-  during `stlv dev`.
 - **ec2 NAT** — much cheaper NAT using [fck-nat](https://fck-nat.dev) instances.
 
-<!-- Future sections: drafts for upcoming PRs (dev-mode bastion). Uncomment/adapt as they ship.
 
-## Dev mode
-
-IMPLEMENTATION INFO:
-For dev mode we'll also need to have `bastion` parameter to VPC. It will create
-small ec2 instance in VPC (or reuse NAT instance if it's ec2) which then we can
-connect to from local computer when in `stlv dev`.
-Stubs won't need to be in VPC, since those are just stubs and need to connect to AppSync. Bastion is needed for dev machine to reach VPC resources, not functions.
-
-```python
-from stelvio.aws.vpc import Vpc
-from stelvio.aws.function import Function
-from stelvio.aws.document_db import DocumentDb
-
-vpc = Vpc("main", nat="managed", bastion=True)
-
-db = DocumentDb("todos", vpc=vpc)
-
-Function("api", handler="functions/todos.handler", vpc=vpc, links=[db])
-```
-
--->
 
 ## Next Steps
 

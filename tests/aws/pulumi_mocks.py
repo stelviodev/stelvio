@@ -29,6 +29,10 @@ class R(StrEnum):
     VPC = "aws:ec2/vpc:Vpc"
     SUBNET = "aws:ec2/subnet:Subnet"
     INTERNET_GATEWAY = "aws:ec2/internetGateway:InternetGateway"
+    EC2_INSTANCE = "aws:ec2/instance:Instance"
+    INSTANCE_PROFILE = "aws:iam/instanceProfile:InstanceProfile"
+    SSM_DOCUMENT = "aws:ssm/document:Document"
+    ROUTE53_ZONE = "aws:route53/zone:Zone"
     ROUTE_TABLE = "aws:ec2/routeTable:RouteTable"
     ROUTE_TABLE_ASSOCIATION = "aws:ec2/routeTableAssociation:RouteTableAssociation"
     ROUTE = "aws:ec2/route:Route"
@@ -402,6 +406,19 @@ class PulumiTestMocks(Mocks):
             output_props |= _fill(templates, subs)
 
         # Conditional outputs can't be templated
+        if args.typ == R.EC2_INSTANCE:
+            subnet = next(
+                (
+                    resource
+                    for resource in self.created_resources
+                    if resource.typ == R.SUBNET
+                    and tid(resource.name) == args.inputs.get("subnetId")
+                ),
+                None,
+            )
+            if subnet is not None:
+                output_props.setdefault("availabilityZone", subnet.inputs["availabilityZone"])
+
         if args.typ == R.DYNAMO_TABLE and args.inputs.get("streamEnabled"):
             output_props["streamArn"] = (
                 f"arn:aws:dynamodb:{region}:{account_id}:table/{name}/stream/2025-01-01T00:00:00.000"
@@ -461,6 +478,12 @@ class PulumiTestMocks(Mocks):
             if regular_zones_only not in args.args.get("filters", []):
                 names.insert(0, f"{region}-atl-2a")
             return {"names": names}, []
+        if args.token == "aws:ssm/getParameter:getParameter":  # noqa: S105
+            if args.args["name"] != (
+                "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+            ):
+                raise AssertionError(f"Unexpected SSM parameter lookup: {args.args['name']}")
+            return {"name": args.args["name"], "value": "ami-test-arm64"}, []
 
         return {}, []
 

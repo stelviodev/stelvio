@@ -9,6 +9,7 @@
 #                       including the default VPC)
 #   integration_cf    —  14 tests /  7 workers
 #   integration_dns   —  10 tests /  3 workers
+#   Privileged macOS/tunnel acceptance is deliberately excluded from this runner.
 #
 # Usage:
 #   STLV_TEST_AWS_PROFILE=<profile> ./tests/integration/run_all.sh

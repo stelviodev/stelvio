@@ -1,6 +1,8 @@
 import os
+import platform
 import shutil
 import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,20 @@ from .stelvio_test_env import StelvioTestEnv
 # Shared customize dict to skip CloudFront edge propagation (10-20 min).
 # Property tests only verify configuration, not edge availability.
 NO_WAIT_DEPLOY = {"distribution": {"wait_for_deployment": False}}
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    if report.failed and item.get_closest_marker("integration_tunnel"):
+        session = item.funcargs.get("cli_session")
+        if session is not None:
+            # Best-effort diagnostics before long AWS teardown. Pytest retains
+            # its original report even if the diagnostic file cannot be saved.
+            with suppress(OSError):
+                (session.project / f"failure-{report.when}.txt").write_text(report.longreprtext)
+    return report
+
 
 # S3 buckets that receive objects during tests need force_destroy=True,
 # otherwise Pulumi can't delete non-empty buckets and destroy fails.
@@ -37,6 +53,18 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--integration-macos-privileged",
+        action="store_true",
+        default=False,
+        help="Exclusive macOS host mutation tests; never run by run_all.sh (use -n 0)",
+    )
+    parser.addoption(
+        "--integration-tunnel",
+        action="store_true",
+        default=False,
+        help="Run the exclusive real macOS VPC dev lane (use -n 0)",
+    )
+    parser.addoption(
         "--integration",
         action="store_true",
         default=False,
@@ -62,7 +90,33 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(config, items):  # noqa: C901, PLR0912 - explicit mutually exclusive test tiers
+    run_tunnel = config.getoption("--integration-tunnel")
+    run_host = config.getoption("--integration-macos-privileged")
+    if run_tunnel and not run_host:
+        raise pytest.UsageError(
+            "--integration-tunnel also requires --integration-macos-privileged"
+        )
+    if run_host:
+        if config.getoption("numprocesses", default=0) or any(
+            config.getoption(flag)
+            for flag in (
+                "--integration",
+                "--integration-vpc",
+                "--integration-cf",
+                "--integration-dns",
+            )
+        ):
+            raise pytest.UsageError(
+                "The privileged macOS lane requires -n 0; "
+                "only --integration-tunnel may be combined"
+            )
+        if platform.system() != "Darwin" or int(platform.mac_ver()[0].split(".")[0]) < 15:
+            raise pytest.UsageError("The privileged lane requires macOS 15+")
+        if os.geteuid() == 0:
+            raise pytest.UsageError(
+                "Run pytest as an ordinary user; authorize administration separately"
+            )
     run_integration = config.getoption("--integration")
     run_vpc = config.getoption("--integration-vpc")
     run_cf = config.getoption("--integration-cf")
@@ -74,6 +128,17 @@ def pytest_collection_modifyitems(config, items):
     skip_dns = pytest.mark.skip(reason="need --integration-dns flag to run")
 
     for item in items:
+        if item.get_closest_marker("integration_macos_privileged"):
+            if not run_host:
+                item.add_marker(pytest.mark.skip(reason="need --integration-macos-privileged"))
+            elif item.get_closest_marker("integration_tunnel") and not run_tunnel:
+                item.add_marker(pytest.mark.skip(reason="also need --integration-tunnel for AWS"))
+            continue
+        if item.get_closest_marker("integration_tunnel"):
+            raise pytest.UsageError("Tunnel tests must also declare integration_macos_privileged")
+        if run_host:
+            item.add_marker(pytest.mark.skip(reason="exclusive privileged macOS lane"))
+            continue
         # VPC tier takes precedence over the inherited/standard integration marker.
         if item.get_closest_marker("integration_vpc"):
             if not run_vpc:
@@ -248,3 +313,32 @@ def dns_certificate_arn():
     if not domain or not zone_id:
         pytest.skip("STLV_TEST_DNS_DOMAIN and STLV_TEST_DNS_ZONE_ID required")
     return _ensure_wildcard_certificate_arn(domain, zone_id)
+
+
+@pytest.fixture(scope="session")
+def macos_host(tmp_path_factory):
+    """Explicit host tier only: preserve the installation and serialize all mutations."""
+    from .macos_host import MacOSHost
+
+    host = MacOSHost(tmp_path_factory.mktemp("macos-host"))
+    try:
+        host.prepare()
+        yield host
+    finally:
+        try:
+            host.restore()
+        finally:
+            host.close()
+
+
+@pytest.fixture(autouse=True)
+def _privileged_host_baseline(request):
+    if not request.node.get_closest_marker("integration_macos_privileged"):
+        yield
+        return
+    host = request.getfixturevalue("macos_host")
+    host.assert_restored("before-" + request.node.name)
+    try:
+        yield
+    finally:
+        host.assert_restored("after-" + request.node.name)

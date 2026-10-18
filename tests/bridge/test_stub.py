@@ -129,6 +129,8 @@ def test_connect_with_correct_uri_and_subprotocols(mock_connect, reset_global_st
 
     # Check URI
     assert call_args[0][0] == "wss://realtime.example.com/event/realtime"
+    # Frozen Lambda runtimes must not carry a background ping deadline across invocations.
+    assert call_args[1]["ping_interval"] is None
 
     # Check subprotocols - exactly 2: protocol and auth header
     subprotocols = call_args[1]["subprotocols"]
@@ -168,11 +170,36 @@ def test_waits_for_connection_ack(mock_connect, reset_global_state):
     mock_ws.recv.assert_called_once()
 
 
+@patch("stelvio.bridge.remote.stub.function_stub.websockets.connect", new_callable=AsyncMock)
+def test_connection_ack_skips_keepalive(mock_connect, reset_global_state):
+    stub = reset_global_state
+    mock_ws = AsyncMock()
+    mock_connect.return_value = mock_ws
+    mock_ws.recv = AsyncMock(side_effect=['{"type":"ka"}', '{"type":"connection_ack"}'])
+
+    _run(stub.connect_to_appsync())
+
+    assert mock_ws.recv.await_count == 2
+
+
+@patch("stelvio.bridge.remote.stub.function_stub.websockets.connect", new_callable=AsyncMock)
+def test_connection_rejects_unexpected_ack_after_keepalive(mock_connect, reset_global_state):
+    stub = reset_global_state
+    mock_ws = AsyncMock()
+    mock_connect.return_value = mock_ws
+    mock_ws.recv = AsyncMock(
+        side_effect=['{"type":"ka"}', '{"type":"subscribe_success","id":"wrong"}']
+    )
+
+    with pytest.raises(ConnectionError, match="Expected AppSync connection_ack"):
+        _run(stub.connect_to_appsync())
+
+
 def test_sends_subscribe_message(reset_global_state):
     """Should send correct subscribe message to response channel."""
     stub = reset_global_state
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"response-sub"}')
 
     _run(stub.subscribe_to_channel(mock_ws))
 
@@ -190,11 +217,35 @@ def test_waits_for_subscribe_success(reset_global_state):
     """Should wait for subscribe_success response."""
     stub = reset_global_state
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"response-sub"}')
 
     _run(stub.subscribe_to_channel(mock_ws))
 
     mock_ws.recv.assert_called_once()
+
+
+def test_subscribe_ack_skips_keepalive_and_checks_operation_id(reset_global_state):
+    stub = reset_global_state
+    mock_ws = AsyncMock()
+    mock_ws.recv = AsyncMock(
+        side_effect=[
+            '{"type":"ka"}',
+            '{"type":"subscribe_success","id":"response-sub"}',
+        ]
+    )
+
+    _run(stub.subscribe_to_channel(mock_ws))
+
+    assert mock_ws.recv.await_count == 2
+
+
+def test_subscribe_rejects_success_for_different_operation(reset_global_state):
+    stub = reset_global_state
+    mock_ws = AsyncMock()
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"other-sub"}')
+
+    with pytest.raises(ConnectionError, match="unexpected operation ID"):
+        _run(stub.subscribe_to_channel(mock_ws))
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.connect_to_appsync", new_callable=AsyncMock)

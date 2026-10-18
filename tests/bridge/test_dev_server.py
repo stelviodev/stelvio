@@ -42,7 +42,7 @@ def test_connect_to_appsync(mock_json_dumps, mock_b64encode, mock_connect):
     # Mock websocket
     mock_ws = AsyncMock()
     mock_connect.return_value = mock_ws
-    mock_ws.recv = AsyncMock(return_value='{"type":"connection_ack"}')
+    mock_ws.recv = AsyncMock(side_effect=['{"type":"ka"}', '{"type":"connection_ack"}'])
 
     # Call function
     result = _run(connect_to_appsync(config))
@@ -53,13 +53,35 @@ def test_connect_to_appsync(mock_json_dumps, mock_b64encode, mock_connect):
         subprotocols=["aws-appsync-event-ws", "header-encoded_auth"],
     )
     mock_ws.send.assert_called_once_with('{"type": "connection_init"}')
-    mock_ws.recv.assert_called_once()
+    assert mock_ws.recv.await_count == 2
     assert result == mock_ws
+
+
+@patch("stelvio.bridge.local.listener.websockets.connect", new_callable=AsyncMock)
+def test_connect_rejects_unexpected_ack_after_keepalive(mock_connect):
+    mock_ws = AsyncMock()
+    mock_connect.return_value = mock_ws
+    mock_ws.recv = AsyncMock(
+        side_effect=['{"type":"ka"}', '{"type":"subscribe_success","id":"wrong"}']
+    )
+    config = {
+        "http_endpoint": "https://example.com",
+        "api_key": "test_key",
+        "realtime_endpoint": "realtime.example.com",
+    }
+
+    with pytest.raises(ConnectionError, match="Expected AppSync connection_ack"):
+        _run(connect_to_appsync(config))
 
 
 def test_subscribe_to_channel():
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
+    mock_ws.recv = AsyncMock(
+        side_effect=[
+            '{"type":"ka"}',
+            '{"type":"subscribe_success","id":"request-sub"}',
+        ]
+    )
     channel = "test_channel"
     api_key = "test_key"
 
@@ -74,7 +96,23 @@ def test_subscribe_to_channel():
         "authorization": {"x-api-key": api_key},
     }
     mock_ws.send.assert_called_once_with(json.dumps(expected_message))
-    mock_ws.recv.assert_called_once()
+    assert mock_ws.recv.await_count == 2
+
+
+def test_subscribe_rejects_unacknowledged_channel():
+    mock_ws = AsyncMock()
+    mock_ws.recv = AsyncMock(return_value='{"type":"data","event":"{}"}')
+
+    with pytest.raises(ConnectionError, match="Expected AppSync subscribe_success"):
+        _run(subscribe_to_channel(mock_ws, "test_channel", "test_key"))
+
+
+def test_subscribe_rejects_success_for_different_operation():
+    mock_ws = AsyncMock()
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"other-sub"}')
+
+    with pytest.raises(ConnectionError, match="unexpected operation ID"):
+        _run(subscribe_to_channel(mock_ws, "test_channel", "test_key"))
 
 
 @patch("uuid.uuid4", return_value="test-uuid")
