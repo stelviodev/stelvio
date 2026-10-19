@@ -8,6 +8,17 @@ lives in `internal/helper/darwin`; `internal/helper` provides a portable command
 dispatcher. The helper authorizes sessions, owns raw utun descriptors, and journals
 route and scoped resolver changes so it can recover them after interruption.
 
+Stelvio pins the Traforo `v0.0.7` release for macOS `arm64` and `x86_64`. It checks
+the artifact digest, Mach-O architecture, executable metadata, and reported version
+before it uses the image. The AWS Session Manager plugin is pinned at `1.2.707.0`
+and uses a separate private cache.
+
+For local Traforo development, set `STLV_TRAFORO_DEV_BINARY` to an absolute path to
+the executable. Stelvio accepts `v0.0.7` or `v0.0.7-dev+g<hex>` only through this
+explicit override. It validates ownership, permissions, ACLs, architecture, and the
+reported version. Invalid overrides fail without falling back to the release or
+changing its cache. This selection does not build or install the executable.
+
 `internal/dnsrelay` provides an isolated DNS view for one VPC. It listens only on
 loopback over UDP and TCP, serves configured exact hostnames and suffix domains,
 and sends upstream DNS over TCP through that view's SOCKS proxy. The resolver
