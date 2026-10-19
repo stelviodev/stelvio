@@ -154,6 +154,10 @@ Run with `-vv` for detailed logs
 rm -rf .stelvio/lambda_dependencies
 ```
 
+### Dev mode bridge does not connect
+
+The bridge waits up to 10 seconds for each AppSync connection or subscription acknowledgement. If it times out, check network access and the AppSync API key, then restart `stlv dev`.
+
 ## Getting Help
 
 If you're still stuck:
