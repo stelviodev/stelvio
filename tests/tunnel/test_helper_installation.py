@@ -287,6 +287,7 @@ def test_tunnel_help_lists_status_without_inspect_alias():
         "cleanup",
         "uninstall",
         "trust",
+        "start",
     }
     assert "Show the helper's owned networking state." in result.output
     assert "inspect" not in result.output
@@ -344,7 +345,7 @@ def test_inspect_is_rejected_and_unavailable_helper_error_is_preserved(monkeypat
     assert "Traceback" not in unavailable.output
 
 
-def test_root_cli_registers_only_step_eight_tunnel_commands():
+def test_root_cli_registers_tunnel_commands_through_step_twelve():
     from stelvio.cli import cli
 
     result = CliRunner().invoke(cli, ["tunnel", "--help"])
@@ -355,4 +356,4 @@ def test_root_cli_registers_only_step_eight_tunnel_commands():
     assert "inspect" not in result.output
     assert "cleanup" in result.output
     assert "uninstall" in result.output
-    assert "start" not in result.output
+    assert "start" in result.output
