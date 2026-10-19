@@ -4,6 +4,31 @@ Python tests validate helper requests, reply framing, descriptor handling,
 installation transactions, and forwarder control messages. They do not compile Go.
 The Go module owns the forwarder and helper implementations.
 
+## AWS transport and discovery
+
+The transport tests use deterministic AWS SDK responses and local loopback SOCKS
+peers. They verify captured credential isolation, deployed VPC and bastion
+ownership, SSM identity document version and hash, pinned SSH host identity,
+DocumentDB cluster/member discovery, error classification, and cleanup of partial
+SSM/SSH startup. They do not deploy AWS resources or change host routes, resolver
+files, or helper state.
+
+Run the focused suite with:
+
+```bash
+uv run pytest \
+  tests/tunnel/test_aws_inventory.py \
+  tests/tunnel/test_credentials.py \
+  tests/tunnel/test_discovery.py \
+  tests/tunnel/test_socks.py \
+  tests/tunnel/test_transport.py -q
+```
+
+The Session Manager plugin must already be available through the verified private
+cache for a live connection. Tests stub its selected path and never download or
+run the plugin. A missing or unsafe plugin is a terminal local artifact error;
+repair it through the existing installation command before retrying AWS transport.
+
 ## Unit tests
 
 Run the Python tunnel suite with the normal repository checks:
