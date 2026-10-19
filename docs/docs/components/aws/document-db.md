@@ -180,6 +180,11 @@ Functions that join the same Vpc with the default app group (`Function(vpc=vpc)`
 can reach the cluster. See
 [Lambda Functions in VPC](vpc.md#lambda-functions-in-vpc).
 
+If the Vpc uses `bastion=True` or a `BastionConfig`, deployment also opens the
+cluster port from the Vpc's bastion security group to each security group
+attached to the cluster. This grant is separate from the app security group
+rule and does not change the cluster's production configuration.
+
 With your own `security_groups` on `VpcAttachment`, the cluster still admits
 only the app security group. Add an ingress rule on
 `db.resources.security_group` yourself:
@@ -196,6 +201,12 @@ SecurityGroupIngressRule(
     to_port=27017,
 )
 ```
+
+If `customize={"cluster": {"vpc_security_group_ids": ...}}` supplies a single
+Pulumi `Output` for the full list, the list length is not known during preview.
+The deployment warns that bastion ingress rules may not appear in preview until
+the value resolves. Prefer a list with individual security group IDs or Outputs
+when the rule count must be visible during preview.
 
 ## Linking
 
