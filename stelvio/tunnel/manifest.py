@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from ipaddress import IPv4Network
 from typing import final
+from uuid import UUID
 
 from stelvio.tunnel.policy import BastionPolicy, domain_contains, normalize_dns_name
 
@@ -99,6 +100,29 @@ class NetworkManifest:
     @property
     def enabled_vpcs(self) -> tuple[VpcNetwork, ...]:
         return tuple(vpc for vpc in self.used_vpcs if vpc.policy != BastionPolicy.DISABLED)
+
+
+@final
+@dataclass(frozen=True)
+class SessionDescription:
+    """Validated identity and private state shared with the isolated runtime."""
+
+    session_id: str
+    app: str
+    environment: str
+    owner_uid: int
+    manifest: NetworkManifest
+    version: int = VERSION
+
+    def __post_init__(self) -> None:
+        if type(self.version) is not int or self.version != VERSION:
+            raise ValueError("Unsupported tunnel session version")
+        if not isinstance(self.session_id, str) or str(UUID(self.session_id)) != self.session_id:
+            raise ValueError("Tunnel session ID must be a canonical UUID")
+        if type(self.owner_uid) is not int or self.owner_uid <= 0:
+            raise ValueError("Tunnel session owner must be a nonroot UID")
+        _text(self.app, "app")
+        _text(self.environment, "environment")
 
 
 def _text(value: object, field: str) -> str:
