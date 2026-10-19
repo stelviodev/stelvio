@@ -64,6 +64,38 @@ hostnames to that VPC's private DNS view. Changed ownership or host identity is
 refused. AWS service or SSM availability issues can be retried after the deployed
 resources and permissions are checked.
 
+### Session ownership and readiness
+
+Before local handler code runs, Stelvio reads the deployed network metadata and
+captures the selected AWS provider, account, region, profile, and startup
+environment. It starts networking in a separate nonroot Python process with that
+captured environment. Later handler changes to AWS variables cannot redirect the
+session's clients. The parent and runtime exchange bounded messages over a private
+local socket; an independent lease pipe lets the runtime detect parent exit.
+
+Each eligible VPC has its own worker, transport attempt, helper generation, DNS
+revision, discovery state, and retry schedule. A failure in one VPC leaves workers
+for other VPCs running. The worker rejects that VPC's private DNS while its
+transport is down and keeps owned resolver claims and the DNS listener port stable
+while it reconnects to the existing bastion. It does not replace the bastion.
+
+`READY` means the scoped resolver answered through the VPC path, the helper's
+routes and resolver files are active, the transport and forwarder are healthy,
+and each discovered resource hostname resolved to an address in that VPC and
+accepted a TCP connection on its declared port. A working SOCKS proxy by itself
+does not make a VPC ready. New invocations that depend on an unready VPC are
+rejected before handler execution; unrelated VPCs and handlers without a VPC can
+continue.
+
+With no enabled VPC dependencies, Stelvio skips helper activation. A VPC whose
+bastion policy is disabled is reported and left to the developer's local network.
+On normal shutdown, each worker stops its owned SSH/SSM transport and retires its
+helper generation before the lease is released. If the parent exits unexpectedly,
+the lease closes and the helper recovers host state from its durable journal. A
+transport cleanup that cannot be certified leaves its ownership receipts and
+helper evidence available for inspection; Stelvio reports the existing recovery
+commands instead of claiming the VPC is ready.
+
 ## Using it
 
 No changes to `stlv_app.py` are needed.
