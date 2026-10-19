@@ -100,6 +100,7 @@ like `Resources.results`, so the component name in your test has to match.
 | VPC | `integration_vpc` | `--integration-vpc` | AWS profile (4 workers max; account VPC quota is 5 including the default VPC) |
 | CloudFront | `integration_cf` | `--integration-cf` | AWS profile |
 | DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` (optional `STLV_TEST_ACM_CERTIFICATE_ARN` for a pre-issued `*.domain` cert). One `*.domain` cert plus its validation record stay in the account for reuse (`stelvio:env=test` only, no `stelvio:app`, so cleanup skips them). |
+| Native macOS | `integration_macos_privileged` | `--integration-macos-privileged` | macOS 15+, ordinary user, exclusive host lane, `-n 0`; may install or replace the helper and changes routes and resolver files during tests. |
 
 CloudFront distributions take 3–5 minutes to delete, so they get their own tier; their property
 tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip themselves when the
@@ -129,6 +130,21 @@ STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -
 Never combine tier flags in one pytest run: it opens too many files and the run collapses.
 Don't interrupt after `[100%]` — teardown is still destroying stacks. Wait for the summary
 line.
+
+The native macOS lane is separate from `run_all.sh`. The runner never passes
+`--integration-macos-privileged`. Run this lane only when you have authorization to
+change the host and can restore its existing helper and networking state:
+
+```bash
+uv run pytest tests/integration/test_tunnel_host.py tests/integration/test_tunnel_dns.py \
+  --integration-macos-privileged -n 0 -q
+```
+
+The lane records the existing helper and host baseline before it runs. It restores
+the original helper and compares interfaces, routes, scoped resolvers, DNS state,
+and networking processes during teardown. Stop if the preflight finds an active
+session, foreign state, or an unfinished administration transaction. Do not run
+this lane with another integration tier or with xdist workers.
 
 A killed run leaves stacks and resources behind:
 
