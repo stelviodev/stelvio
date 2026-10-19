@@ -1,12 +1,21 @@
 import re
 from dataclasses import dataclass, field, replace
+from importlib import import_module
 from typing import Any, Literal
 
 import pulumi
 from pulumi_aws.ec2 import VpcArgs
 from pytest import mark, param, raises
 
-from stelvio.aws.vpc import NatConfig, NatConfigDict, Vpc, VpcAttachment, VpcAttachmentDict
+from stelvio.aws.vpc import (
+    BastionConfig,
+    BastionConfigDict,
+    NatConfig,
+    NatConfigDict,
+    Vpc,
+    VpcAttachment,
+    VpcAttachmentDict,
+)
 from tests.aws.pulumi_mocks import TP, R, tid
 from tests.test_utils import assert_config_dict_matches_dataclass
 
@@ -702,6 +711,36 @@ def test_vpc_resources_parented_to_vpc_component(pulumi_mocks):
 
 def test_nat_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(NatConfig, NatConfigDict)
+
+
+def test_bastion_config_dict_matches_dataclass():
+    assert_config_dict_matches_dataclass(BastionConfig, BastionConfigDict)
+
+
+def test_bastion_waits_for_public_route_associations(pulumi_mocks, monkeypatch):
+    vpc_module = import_module("stelvio.aws.vpc.vpc")
+    create_bastion = vpc_module.create_bastion
+    captured = {}
+
+    def capture_bastion_opts(**kwargs):
+        captured["depends_on"] = kwargs["opts"].depends_on
+        return create_bastion(**kwargs)
+
+    monkeypatch.setattr(vpc_module, "create_bastion", capture_bastion_opts)
+
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", bastion=True).resources
+
+    deploy()
+
+    dependency_names = {dependency._name.removeprefix(TP) for dependency in captured["depends_on"]}
+    assert dependency_names >= {
+        "main_vpc-public-subnet-a-rt",
+        "main_vpc-public-subnet-b-rt",
+        "main_vpc-public-subnet-a-rta",
+        "main_vpc-public-subnet-b-rta",
+    }
 
 
 def test_vpc_attachment_dict_matches_dataclass():
