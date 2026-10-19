@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -37,6 +39,53 @@ func TestResolverReceiptOwnership(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := receiptMatches(tc.data, tc.stat, tc.receipt, expected, tc.prefix); got != tc.accepted {
 				t.Fatalf("receiptMatches = %v, want %v", got, tc.accepted)
+			}
+		})
+	}
+}
+
+func TestUnpublishZeroReceiptRejectsReappearedResolverPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		publicFile  bool
+		privateFile bool
+	}{
+		{name: "public resolver", publicFile: true},
+		{name: "retired private resolver", privateFile: true},
+		{name: "both absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			privateDir := t.TempDir()
+			publicDir := t.TempDir()
+			spec := resolverSpec{private: "pending.resolver", public: "stelvio.resolver", contents: []byte("domain db.internal\n")}
+			if tc.privateFile {
+				if err := os.WriteFile(filepath.Join(privateDir, spec.private+".retired"), spec.contents, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.publicFile {
+				if err := os.WriteFile(filepath.Join(publicDir, spec.public), spec.contents, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			privateFD, err := unix.Open(privateDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = unix.Close(privateFD) }()
+			publicFD, err := unix.Open(publicDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = unix.Close(publicFD) }()
+
+			err = unpublish(privateFD, publicFD, spec, Receipt{})
+			if tc.publicFile || tc.privateFile {
+				if !errors.Is(err, errUncertain) {
+					t.Fatalf("unpublish error = %v, want %v", err, errUncertain)
+				}
+			} else if err != nil {
+				t.Fatalf("unpublish absent paths: %v", err)
 			}
 		})
 	}
