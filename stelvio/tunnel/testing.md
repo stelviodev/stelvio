@@ -97,6 +97,12 @@ uv run pytest \
   tests/tunnel/test_dev_session.py -q
 ```
 
+`test_standalone.py` exercises `stlv tunnel start` using captured state and a fake
+session. It verifies the state context is released before networking waits, the
+no-dependency path does not wait, and interruption, readiness failure, and uncertain
+cleanup produce the expected CLI result. The distribution acceptance also checks
+that the installed CLI exposes `start`.
+
 ## Unit tests
 
 Run the Python tunnel suite with the normal repository checks:
@@ -159,6 +165,23 @@ uv run pytest tests/integration/test_tunnel_host.py \
   tests/integration/test_tunnel_dns.py \
   --integration-macos-privileged -n 0 -q
 ```
+
+Standalone AWS acceptance is a separate exclusive lane. It deploys a disposable
+proof app with ordinary `stlv deploy`, then exercises only `stlv tunnel start`:
+
+```bash
+STLV_TEST_AWS_PROFILE=<authorized-profile> \
+STLV_TEST_TUNNEL_AWS_ACCOUNT=<expected-account-id> \
+uv run pytest tests/integration/test_tunnel.py \
+  --integration-macos-privileged --integration-tunnel -n 0 -q
+```
+
+The fixture checks the caller account before deployment and destroys only its proof
+app during teardown. Acceptance covers DocumentDB TLS, member discovery and
+read/write; transport recovery while another VPC remains available; and graceful
+and abrupt standalone shutdown with helper, SSM, deployment, bastion, and host
+baseline checks. This lane is not part of `tests/integration/run_all.sh`. Do not run
+it without explicit authorization for the AWS resources and privileged host changes.
 
 The session fixture records the current helper and host baseline, refuses active or
 uncertain state, and restores the original helper during teardown. It compares
