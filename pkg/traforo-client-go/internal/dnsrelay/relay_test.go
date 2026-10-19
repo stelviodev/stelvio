@@ -497,6 +497,107 @@ func TestTCPOverloadReturnsPolicyResponse(t *testing.T) {
 	}
 }
 
+func TestSlowTCPOverflowAllowsLegitimateConnectionAfterDeadline(t *testing.T) {
+	p := proxy(t, func(q *dns.Msg) *dns.Msg {
+		a := new(dns.Msg)
+		a.SetReply(q)
+		a.Answer = []dns.RR{&dns.A{
+			Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30},
+			A:   net.IPv4(10, 254, 0, 9),
+		}}
+		return a
+	})
+	r := newRelay(t, config(p, 1))
+
+	workers := make([]net.Conn, cap(r.tcpSlots))
+	defer func() {
+		for _, c := range workers {
+			if c != nil {
+				_ = c.Close()
+			}
+		}
+	}()
+	for i := range workers {
+		c, err := net.DialTimeout("tcp4", r.tcp.Addr().String(), Timeout)
+		if err != nil {
+			t.Fatalf("open TCP worker %d: %v", i, err)
+		}
+		workers[i] = c
+	}
+
+	connectionCount := func() int {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return len(r.connections)
+	}
+	waitFor := func(label string, ready func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(Timeout)
+		for !ready() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", label)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitFor("all TCP worker slots", func() bool {
+		return len(r.tcpSlots) == cap(r.tcpSlots) && connectionCount() == cap(r.tcpSlots)
+	})
+
+	// Send only the first byte of the DNS-over-TCP length prefix. The inline
+	// overload handler must wait for its bounded read deadline before accepting
+	// the legitimate connection queued behind it.
+	overflow, err := net.DialTimeout("tcp4", r.tcp.Addr().String(), Timeout)
+	if err != nil {
+		t.Fatalf("open overflow connection: %v", err)
+	}
+	defer func() { _ = overflow.Close() }()
+	if _, err := overflow.Write([]byte{0}); err != nil {
+		t.Fatalf("write partial DNS frame: %v", err)
+	}
+	waitFor("overflow handler", func() bool { return connectionCount() == cap(r.tcpSlots)+1 })
+
+	legitimate, err := net.DialTimeout("tcp4", r.tcp.Addr().String(), Timeout)
+	if err != nil {
+		t.Fatalf("open legitimate connection: %v", err)
+	}
+	defer func() { _ = legitimate.Close() }()
+	_ = legitimate.SetDeadline(time.Now().Add(2 * Timeout))
+	q := new(dns.Msg)
+	q.SetQuestion("db.private.test.", dns.TypeA)
+	if err := (&dns.Conn{Conn: legitimate}).WriteMsg(q); err != nil {
+		t.Fatalf("write legitimate DNS request: %v", err)
+	}
+	_ = legitimate.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, err := (&dns.Conn{Conn: legitimate}).ReadMsg(); err == nil {
+		t.Fatal("accept loop served a queued connection before the overflow deadline")
+	} else {
+		var netErr net.Error
+		if !errors.As(err, &netErr) || !netErr.Timeout() {
+			t.Fatalf("queued connection read error = %v, want timeout", err)
+		}
+	}
+
+	// Free a real worker while the accept loop is still blocked reading the
+	// overflow request and the legitimate request is queued behind it.
+	_ = workers[0].Close()
+	workers[0] = nil
+	waitFor("worker capacity", func() bool { return len(r.tcpSlots) < cap(r.tcpSlots) })
+
+	_ = legitimate.SetDeadline(time.Now().Add(2 * Timeout))
+	a, err := (&dns.Conn{Conn: legitimate}).ReadMsg()
+	if err != nil {
+		t.Fatalf("legitimate request was not served after overflow deadline: %v", err)
+	}
+	if a.Rcode != dns.RcodeSuccess || len(a.Answer) != 1 {
+		t.Fatalf("legitimate DNS response = %v", a)
+	}
+	got, ok := a.Answer[0].(*dns.A)
+	if !ok || !got.A.Equal(net.IPv4(10, 254, 0, 9)) {
+		t.Fatalf("legitimate DNS answer = %v, want 10.254.0.9", a.Answer)
+	}
+}
+
 func TestDirectProbeRequiresMatchingPayloadAndResourceConnection(t *testing.T) {
 	for _, fault := range []string{"success", "missing", "wrong-id", "wrong-question", "tc", "rcode", "foreign"} {
 		t.Run(fault, func(t *testing.T) {
