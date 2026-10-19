@@ -8,6 +8,10 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Bug Fixes
+
+- **Dev mode handles AppSync acknowledgements and interruption safely.** It ignores keepalives during acknowledgement waits, rejects mismatched subscription responses, and closes the local connection on shutdown. The Lambda stub disables background WebSocket pings so a warm connection can survive runtime freeze and thaw.
+
 ## 0.10.2b8 (2026-10-23)
 
 ### Security fixes
