@@ -23,4 +23,4 @@ fuzz:
 	$(GO) test -mod=readonly ./internal/protocol -run='^$$' -fuzz='^FuzzRequest$$' -fuzztime=30s -parallel=2
 
 fuzz-snapshot:
-	$(GO) test -mod=readonly ./internal/helper -run='^$$' -fuzz='^FuzzSnapshot$$' -fuzztime=30s -parallel=2
+	$(GO) test -mod=readonly ./internal/helper/darwin -run='^$$' -fuzz='^FuzzSnapshot$$' -fuzztime=30s -parallel=2

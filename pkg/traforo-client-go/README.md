@@ -3,21 +3,23 @@
 This module contains Traforo's bounded protocol, Darwin system adapter, and
 privileged helper. The protocol package is independent of operating-system APIs.
 The Darwin package contains narrow cgo bindings for native identity, descriptor,
-route, and network configuration operations. The helper authorizes sessions,
-owns raw utun descriptors, and journals route and scoped resolver changes so it
-can recover them after interruption.
+route, and network configuration operations. The privileged helper implementation
+lives in `internal/helper/darwin`; `internal/helper` provides a portable command
+dispatcher. The helper authorizes sessions, owns raw utun descriptors, and journals
+route and scoped resolver changes so it can recover them after interruption.
 
-The executable supports `version` and the internal `helper serve`, `helper
-install`, and `helper uninstall` operations. Stelvio does not expose a Python
-client or a tunnel command in this step. The helper does not accept a
-nonprivileged request to install or remove arbitrary host resources. It changes
-only resources that its durable receipt and journal can certify as owned. It
-retains recovery evidence when ownership is uncertain.
+The executable builds on all Go-supported platforms and supports `version`.
+Helper operations (`helper serve`, `helper install`, and `helper uninstall`) are
+available only on Darwin; other platforms return an unsupported-platform error.
+Stelvio does not expose a Python client or a tunnel command in this step. The
+helper does not accept nonprivileged requests to install or remove arbitrary
+host resources. It changes only resources that its durable receipt and journal
+can certify as owned. It retains recovery evidence when ownership is uncertain.
 
-The protocol package can be tested independently on supported Go hosts with
-`go test ./internal/protocol`. The full module tests require macOS, cgo, the
-Apple SDK, and Clang. Runtime support is limited to macOS 15 or newer on
-`arm64` and `amd64`.
+The protocol package and executable can be tested independently on supported Go
+hosts with `go test ./internal/protocol ./cmd/stelvio-traforo`. The full helper
+tests require macOS, cgo, the Apple SDK, and Clang. Runtime support is limited to
+macOS 15 or newer on `arm64` and `amd64`.
 
 Run checks from this directory:
 
