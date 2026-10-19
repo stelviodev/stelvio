@@ -122,7 +122,7 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         for line in help_result.stdout.split("Commands:\n", 1)[-1].splitlines()
         if line.strip()
     }
-    assert command_names == {"cleanup", "status", "install", "trust", "uninstall"}
+    assert command_names == {"cleanup", "status", "install", "start", "trust", "uninstall"}
     status_help = run(
         python,
         "-I",
