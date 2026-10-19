@@ -18,7 +18,7 @@ import (
 // These frozen vectors were independently encoded by the former Python harness.
 // Do not generate their expected bytes using the Go encoder under test.
 func TestIndependentVectors(t *testing.T) {
-	data, e := os.ReadFile("testdata/independent_vectors.json")
+	data, e := os.ReadFile("../testdata/independent_vectors.json")
 	if e != nil {
 		t.Fatal(e)
 	}
