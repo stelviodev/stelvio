@@ -8,6 +8,14 @@ lives in `internal/helper/darwin`; `internal/helper` provides a portable command
 dispatcher. The helper authorizes sessions, owns raw utun descriptors, and journals
 route and scoped resolver changes so it can recover them after interruption.
 
+`internal/dnsrelay` provides an isolated DNS view for one VPC. It listens only on
+loopback over UDP and TCP, serves configured exact hostnames and suffix domains,
+and sends upstream DNS over TCP through that view's SOCKS proxy. Each view keeps
+its listener ports across configuration revisions and rejects owned names with
+SERVFAIL while its upstream is unavailable. The relay bounds concurrent requests,
+message sizes, connection query counts, and I/O deadlines; it does not cache answers
+or modify host resolver settings.
+
 The executable builds on all Go-supported platforms and supports `version`.
 Helper operations (`helper serve`, `helper install`, and `helper uninstall`) are
 available only on Darwin; other platforms return an unsupported-platform error.
@@ -30,6 +38,7 @@ make vet
 make lint
 make fuzz
 make fuzz-snapshot
+make fuzz-dns
 ```
 
 Run `make format` to apply the configured Go formatters. The Darwin tests compile
