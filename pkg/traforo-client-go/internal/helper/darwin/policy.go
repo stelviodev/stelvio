@@ -30,6 +30,9 @@ func validChange(state Snapshot, packet []byte, r protocol.Request) bool {
 		if u == nil {
 			return true
 		}
+		if u.Phase == Retained {
+			return u.KeepDNS && r.Generation > u.Generation && r.Generation != math.MaxUint64 && r.VPC == u.Request.VPC && sameRanges(r.Ranges, u.Request.Ranges) && preservesResolvers(u.Request, r)
+		}
 		if u.Phase == Removed {
 			return r.Generation > u.Generation
 		}
