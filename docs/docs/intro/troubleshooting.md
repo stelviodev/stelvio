@@ -147,6 +147,27 @@ If installation reports an active helper, close the networking session and retry
 Use `stlv tunnel status` to see local helper ownership and whether any VPC unit
 remains active. This does not verify AWS or database connectivity.
 
+### Managed VPC transport identity and authorization
+
+Managed VPC access stops when the captured AWS account or region differs from the
+deployment metadata, the bastion or its security groups are no longer owned by the
+deployment, inbound SSH is enabled, or the SSM identity document has changed.
+Check `AwsConfig`, the selected profile, and the deployment's account and region;
+redeploy when the access resources or metadata have changed. Do not bypass a host
+key or ownership refusal.
+
+The AWS identity used by Stelvio needs permission to inspect the VPC and its
+subnets, bastion, security groups, and DocumentDB resources; use Systems Manager
+commands and sessions; and send an EC2 Instance Connect key. Check the selected
+profile's IAM policy and confirm the bastion is running and its SSM agent is
+online. Stelvio does not create or replace a bastion during a connection attempt.
+
+If the error says the private Session Manager plugin is missing, corrupt, or
+unsafe, run `stlv tunnel install` from the active Stelvio environment to repair
+the verified cache entry. A local plugin artifact error is terminal for that
+attempt; it is not an AWS connectivity retry. Authentication details are not
+included in transport errors.
+
 ### Permission Denied Errors
 
 **Problem:** "AccessDeniedException" when Stelvio reads its state, or "Access Denied" during a deploy
