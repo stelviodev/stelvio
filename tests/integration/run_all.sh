@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Run all integration test tiers in parallel.
+# Exclusive macOS host tests are skipped; this runner never passes their opt-in flag.
 #
 # This file is the single source of truth for default worker counts. Counts are
 # chosen so tests divide evenly across workers with no straggler left running
