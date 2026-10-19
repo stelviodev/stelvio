@@ -96,3 +96,54 @@ def reset_trust(partition: str, account: str, region: str, instance_id: str) -> 
         click.echo("SSH host trust removed. The next connection will establish a new pin.")
     except (HostTrustError, NativeAssetError, OSError) as error:
         raise click.ClickException(str(error)) from error
+
+
+@tunnel.command("start")
+@click.argument("env", required=False)
+def start(env: str | None) -> None:
+    """Connect to deployed VPC dependencies without deploying the app."""
+    from stelvio.cli import determine_env  # noqa: PLC0415 - avoid the CLI registration cycle
+    from stelvio.command_run import CommandRun  # noqa: PLC0415 - load project state on demand
+    from stelvio.exceptions import (  # noqa: PLC0415 - keep admin commands app-independent
+        StateLockedError,
+        StelvioProjectError,
+        StelvioValidationError,
+    )
+
+    session = None
+    interrupted = False
+    try:
+        environment = determine_env(env, require_explicit_in_ci=True, command_name="tunnel start")
+        with CommandRun(environment, state_only=True) as run:
+            if not run.has_deployed:
+                raise click.ClickException(
+                    f"No deployed environment '{environment}'; run stlv deploy first"
+                )
+            session = run.capture_network_session(click.echo)
+
+        session.start()
+        if session.description is not None:
+            session.wait()
+    except KeyboardInterrupt:
+        interrupted = True
+    except (
+        HelperError,
+        NativeAssetError,
+        PluginAssetError,
+        OSError,
+        RuntimeError,
+        ValueError,
+        StelvioProjectError,
+        StelvioValidationError,
+        StateLockedError,
+    ) as error:
+        raise click.ClickException(str(error)) from error
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception as error:
+                raise click.ClickException(str(error)) from error
+
+    if interrupted:
+        click.echo("Tunnel stopped.")
