@@ -20,6 +20,27 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 
 Your public entrypoint (API Gateway URL / Function URL) stays the same — you hit it like normal.
 
+### Managed VPC transport
+
+For a VPC with an enabled bastion, Stelvio uses the deployed networking metadata
+to identify the AWS account, provider, region, VPC, and owned access instance.
+It checks the complete VPC CIDR and subnet inventory and requires VPC DNS support
+and hostnames to be enabled before using private DNS. Handler changes to AWS
+environment variables cannot redirect the captured AWS session.
+
+The access path uses Systems Manager and EC2 Instance Connect; it does not open
+inbound SSH. Stelvio verifies the deployed identity document's content, version,
+and hash, reads the bastion's SSH host key through that document, and pins the key
+for the session. OpenSSH then uses the verified Session Manager plugin at its
+private cache path. A missing or unsafe plugin is a local artifact error; repair
+it with `stlv tunnel install` rather than retrying the AWS connection.
+
+For DocumentDB, discovery checks the cluster ARN, VPC, security groups, subnet
+group, port, and current member list before adding cluster, reader, and member
+hostnames to that VPC's private DNS view. Changed ownership or host identity is
+refused. AWS service or SSM availability issues can be retried after the deployed
+resources and permissions are checked.
+
 ## Using it
 
 No changes to `stlv_app.py` are needed.
