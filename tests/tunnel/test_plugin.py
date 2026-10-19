@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import platform
 import struct
 import zipfile
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from unittest.mock import MagicMock, Mock
 
 from pytest import fixture, mark, raises
 
-from stelvio.tunnel import plugin
+from stelvio.tunnel import assets, plugin
 
 
 @fixture
@@ -21,7 +22,11 @@ def plugin_world(tmp_path, monkeypatch):
     archive = stream.getvalue()
     monkeypatch.setattr(plugin, "_architecture", lambda: "arm64")
     monkeypatch.setattr(plugin, "get_bin_path", lambda: tmp_path)
-    monkeypatch.setattr(plugin, "_no_acl", lambda *args, **kwargs: None)
+    if platform.system() != "Darwin":
+        monkeypatch.setattr(plugin, "_no_acl", lambda *args, **kwargs: None)
+        # The cache directory validator is shared with the Traforo asset module.
+        # Its ACL inspector invokes macOS `ls -lde`, so stub it on non-Darwin CI.
+        monkeypatch.setattr(assets, "_no_acl", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         plugin, "TARGETS", {"arm64": ("mac_arm64", hashlib.sha256(archive).hexdigest())}
     )
