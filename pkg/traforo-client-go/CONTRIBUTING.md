@@ -1,17 +1,25 @@
 # Contributing to Traforo Go
 
 Keep protocol validation bounded and independent of Darwin APIs. Keep native
-system calls behind the Darwin adapter; authorization and lifecycle policy belong
-in higher-level packages.
+system calls behind the Darwin adapter. The Darwin-only helper owns authorization,
+session capabilities, route and resolver lifecycle, durable recovery, and
+installation receipts. Keep raw utun descriptors inside the helper. Treat a
+resource with uncertain ownership as evidence to retain, not as permission to
+delete it.
+
+Do not add a forwarder command or public tunnel API before its assigned stack
+step. Package initialization must not install a service or change host networking.
 
 Use the shared vectors in `internal/helper/testdata/independent_vectors.json` as
 independent test data. Do not regenerate expected bytes with the encoder under
 test. Preserve the vector format for later Go and Python consumers.
 
 From this directory, run `make test`, `make race`, `make vet`, and `make lint`.
-Run `make fuzz` for the bounded request decoder. Run `make format` before you
-commit Go source changes. Darwin tests require macOS, cgo, and the Apple SDK.
-Tests must not install a service or mutate host networking.
+Run `make fuzz` for the bounded request decoder. Run `make fuzz-snapshot` for
+the snapshot decoder on macOS. Run `make format` before you commit Go source
+changes. Darwin tests require macOS, cgo, and the Apple SDK. Tests must not
+install or uninstall the helper or mutate host routes and DNS settings. Actual
+host recovery acceptance belongs to the authorized native integration step.
 
 ## Destination ranges
 
