@@ -38,6 +38,7 @@ from stelvio.cli.init_command import (
     get_stlv_app_path,
     stelvio_art,
 )
+from stelvio.cli.tunnel import tunnel
 from stelvio.command_run import get_environment_confirmation_info
 from stelvio.exceptions import StateLockedError, StelvioProjectError, StelvioValidationError
 from stelvio.git import (
@@ -544,6 +545,7 @@ cli.add_command(unlock)
 cli.add_command(outputs)
 cli.add_command(state)
 cli.add_command(system)
+cli.add_command(tunnel)
 
 
 def determine_env(
