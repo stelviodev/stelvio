@@ -34,7 +34,10 @@ type resolverSpec struct {
 }
 
 func spec(s Snapshot, unit, domain int) resolverSpec {
-	r := s.Units[unit].Request
+	return specFor(s, s.Units[unit].Request, domain)
+}
+
+func specFor(s Snapshot, r protocol.Request, domain int) resolverSpec {
 	session := hex.EncodeToString(s.Session[:])
 	capability := hex.EncodeToString(s.Capability[:])
 	endpoint := r.Resolvers[domain]
@@ -166,6 +169,70 @@ func resolverCurrent(store Store, state Snapshot, i, j int) bool {
 	s := spec(state, i, j)
 	ok, e := owned(p, s.public, state.Units[i].Files[j], s.contents, false)
 	return ok && e == nil
+}
+
+func retirePreviousResolvers(store Store, state *Snapshot, i int) error {
+	if state.Units[i].Previous == nil {
+		return nil
+	}
+	if state.Units[i].Phase != Active && state.Units[i].Phase != Removing {
+		return errUncertain
+	}
+	old, e := protocol.Decode(state.Units[i].Previous.Packet)
+	if e != nil {
+		return errUncertain
+	}
+	p, e := safeDirectory(darwin.State)
+	if e != nil {
+		return e
+	}
+	defer func() { _ = unix.Close(p) }()
+	q, e := safeDirectory(resolverDirectory)
+	if e != nil {
+		return e
+	}
+	defer func() { _ = unix.Close(q) }()
+	for j := range state.Units[i].Previous.Files {
+		r := state.Units[i].Previous.Files[j]
+		s := specFor(*state, old, j)
+		// A zero receipt records that the journaled unlink completed. Verify
+		// both names are still absent before dropping the previous-generation
+		// ownership evidence; a recreated path must keep the unit uncertain.
+		if e = unpublish(p, q, s, r); e != nil {
+			return e
+		}
+		if r == (Receipt{}) {
+			continue
+		}
+		if e = unix.Fsync(q); e != nil {
+			return e
+		}
+		if e = unix.Fsync(p); e != nil {
+			return e
+		}
+		next := state.Clone()
+		next.Revision++
+		next.Units[i].Previous.Files[j] = Receipt{}
+		if e = store.Save(next); e != nil {
+			return e
+		}
+		*state = next
+	}
+	if state.Units[i].Previous != nil {
+		for _, file := range state.Units[i].Previous.Files {
+			if file != (Receipt{}) {
+				return errUncertain
+			}
+		}
+		next := state.Clone()
+		next.Revision++
+		next.Units[i].Previous = nil
+		if e = store.Save(next); e != nil {
+			return e
+		}
+		*state = next
+	}
+	return nil
 }
 func unpublish(p, q int, s resolverSpec, r Receipt) error {
 	retired := s.private + ".retired"
@@ -345,6 +412,23 @@ func resolverConflict(store Store, state Snapshot, r protocol.Request) (returnEr
 					return errUncertain
 				}
 				ours = true
+			}
+			if u.Previous != nil {
+				previous, e := protocol.Decode(u.Previous.Packet)
+				if e != nil {
+					return errUncertain
+				}
+				for j, receipt := range u.Previous.Files {
+					old := specFor(state, previous, j)
+					if old.public != name {
+						continue
+					}
+					ok, e := owned(p, name, receipt, old.contents, false)
+					if e != nil || !ok || receipt == (Receipt{}) {
+						return errUncertain
+					}
+					ours = true
+				}
 			}
 		}
 		if ours {

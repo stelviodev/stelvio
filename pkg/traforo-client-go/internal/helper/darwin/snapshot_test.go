@@ -181,3 +181,225 @@ func TestSnapshotParentFence(t *testing.T) {
 		t.Fatal("parent identity changed within a lease")
 	}
 }
+
+func configurePacket(generation uint64, domains ...string) []byte {
+	var body bytes.Buffer
+	_ = binary.Write(&body, binary.BigEndian, uint32(7))
+	writeText := func(value string) {
+		body.WriteByte(byte(len(value)))
+		body.WriteString(value)
+	}
+	writeText("vpc-12345678")
+	body.WriteByte(1)
+	writeText("10.254.0.0/16")
+	body.WriteByte(byte(len(domains)))
+	for _, domain := range domains {
+		writeText(domain)
+		_ = binary.Write(&body, binary.BigEndian, uint16(5300))
+	}
+	packet := make([]byte, protocol.Header+body.Len())
+	copy(packet, "STLVTUN1")
+	packet[8] = protocol.Configure
+	binary.BigEndian.PutUint32(packet[12:], uint32(body.Len()))
+	packet[16] = 1
+	packet[32] = 2
+	binary.BigEndian.PutUint64(packet[48:], generation)
+	copy(packet[protocol.Header:], body.Bytes())
+	return packet
+}
+
+func TestRetainedUnitCanJournalHigherGenerationWithoutDroppingDNSClaims(t *testing.T) {
+	oldPacket := configurePacket(1, "db.internal")
+	oldRequest, err := protocol.Decode(oldPacket)
+	if err != nil {
+		t.Fatal("old request", err)
+	}
+	newPacket := configurePacket(3, "db.internal", "cache.internal")
+	newRequest, err := protocol.Decode(newPacket)
+	if err != nil {
+		t.Fatal("new request", err)
+	}
+	a, err := DecodeSnapshot(snapshotFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Revision = 10
+	a.Units = []Unit{{
+		Phase: Retained, KeepDNS: true, Generation: 2, Index: 4,
+		Packet: oldPacket, Request: oldRequest,
+		Files: []Receipt{{Phase: 2, Device: 22, Inode: 33}},
+	}}
+	if err = a.Validate(); err != nil {
+		t.Fatal("retained state", err)
+	}
+	b := a.Clone()
+	b.Revision++
+	b.Units[0] = Unit{
+		Phase: Preparing, Generation: 3, Index: 5, Packet: newPacket, Request: newRequest,
+		Files: make([]Receipt, len(newRequest.Resolvers)),
+		Previous: &ResolverHistory{
+			Packet: oldPacket,
+			Files:  []Receipt{{Phase: 2, Device: 22, Inode: 33}},
+		},
+	}
+	if err = b.Validate(); err != nil {
+		t.Fatal("reactivation state", err)
+	}
+	if !Successor(a, b) {
+		t.Fatal("retained unit refused higher-generation journal transition")
+	}
+	wire, err := EncodeSnapshot(b)
+	if err != nil || string(wire[:8]) != "STLVSNP5" {
+		t.Fatal("versioned snapshot", err)
+	}
+	decoded, err := DecodeSnapshot(wire)
+	if err != nil || !reflect.DeepEqual(decoded, b) {
+		t.Fatal("reactivation snapshot round trip", err)
+	}
+	for n := 0; n < len(wire); n++ {
+		if _, err := DecodeSnapshot(wire[:n]); err == nil {
+			t.Fatal("accepted truncated reactivation snapshot", n)
+		}
+	}
+	if _, err = DecodeSnapshot(append(append([]byte(nil), wire...), 0)); err == nil {
+		t.Fatal("accepted trailing reactivation data")
+	}
+	oldClaims := b.Clone()
+	oldClaims.Units[0].Packet = configurePacket(3, "cache.internal")
+	if oldClaims.Validate() == nil {
+		t.Fatal("new generation dropped a retained resolver claim")
+	}
+	changedPort := b.Clone()
+	changedPort.Units[0].Packet = configurePacketWithPorts(3, []protocol.Resolver{{Domain: "db.internal", Port: 5301}, {Domain: "cache.internal", Port: 5300}})
+	if changedPort.Validate() == nil {
+		t.Fatal("new generation changed a retained resolver port")
+	}
+	stale := b.Clone()
+	stale.Units[0].Generation = 2
+	if stale.Validate() == nil || Successor(a, stale) {
+		t.Fatal("stale generation accepted")
+	}
+
+	p1 := b.Clone()
+	p1.Revision++
+	p1.Units[0].Files[0] = Receipt{Phase: 1, Device: 44, Inode: 55}
+	if !Successor(b, p1) {
+		t.Fatal("staging first resolver rejected")
+	}
+	p2 := p1.Clone()
+	p2.Revision++
+	p2.Units[0].Files[0].Phase = 2
+	if !Successor(p1, p2) {
+		t.Fatal("publishing first resolver rejected")
+	}
+	p3 := p2.Clone()
+	p3.Revision++
+	p3.Units[0].Files[1] = Receipt{Phase: 1, Device: 44, Inode: 56}
+	if !Successor(p2, p3) {
+		t.Fatal("staging second resolver rejected")
+	}
+	p4 := p3.Clone()
+	p4.Revision++
+	p4.Units[0].Files[1].Phase = 2
+	if !Successor(p3, p4) {
+		t.Fatal("publishing second resolver rejected")
+	}
+	c := p4.Clone()
+	c.Revision++
+	c.Units[0].Phase = Active
+	if !Successor(p4, c) {
+		t.Fatal("completed new generation rejected")
+	}
+	d := c.Clone()
+	d.Revision++
+	d.Units[0].Previous.Files[0] = Receipt{}
+	if !Successor(c, d) {
+		t.Fatal("old resolver retirement journal rejected")
+	}
+	f := d.Clone()
+	f.Revision++
+	f.Units[0].Previous = nil
+	if !Successor(d, f) {
+		t.Fatal("completed resolver retirement rejected")
+	}
+}
+
+func TestReactivationJournalRecoveryClassification(t *testing.T) {
+	retained, err := DecodeSnapshot(snapshotFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPacket := configurePacket(1, "db.internal")
+	oldRequest, err := protocol.Decode(oldPacket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained.Revision = 10
+	retained.Units = []Unit{{
+		Phase: Retained, KeepDNS: true, Generation: 2, Index: 4, Packet: oldPacket,
+		Request: oldRequest, Files: []Receipt{{Phase: 2, Device: 22, Inode: 33}},
+	}}
+	reactivation := retained.Clone()
+	reactivation.Revision++
+	reactivationPacket := configurePacket(3, "db.internal", "cache.internal")
+	newRequest, err := protocol.Decode(reactivationPacket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reactivation.Units[0] = Unit{
+		Phase: Preparing, Generation: 3, Index: 5, Packet: reactivationPacket, Request: newRequest,
+		Files:    make([]Receipt, len(newRequest.Resolvers)),
+		Previous: &ResolverHistory{Packet: oldPacket, Files: []Receipt{{Phase: 2, Device: 22, Inode: 33}}},
+	}
+	frame := func(snapshot Snapshot) []byte {
+		t.Helper()
+		payload, err := EncodeSnapshot(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire := make([]byte, 16+len(payload))
+		copy(wire, "STLVJNL1")
+		binary.BigEndian.PutUint32(wire[8:], uint32(len(payload)))
+		binary.BigEndian.PutUint32(wire[12:], checksum(payload))
+		copy(wire[16:], payload)
+		return wire
+	}
+	old, next := frame(retained), frame(reactivation)
+	if !accepted(old, next) || classifyRecovery(old, next) != recoveryPromote {
+		t.Fatal("complete generation-advance journal was not recoverable")
+	}
+	if classifyRecovery(old, next[:len(next)-1]) != recoveryDiscard {
+		t.Fatal("interrupted generation-advance journal was not safely discarded")
+	}
+	corrupt := append([]byte(nil), next...)
+	corrupt[len(corrupt)-1] ^= 1
+	if classifyRecovery(old, corrupt) != recoveryUncertain {
+		t.Fatal("corrupt generation-advance journal did not retain uncertainty")
+	}
+}
+
+func configurePacketWithPorts(generation uint64, resolvers []protocol.Resolver) []byte {
+	var body bytes.Buffer
+	_ = binary.Write(&body, binary.BigEndian, uint32(7))
+	writeText := func(value string) {
+		body.WriteByte(byte(len(value)))
+		body.WriteString(value)
+	}
+	writeText("vpc-12345678")
+	body.WriteByte(1)
+	writeText("10.254.0.0/16")
+	body.WriteByte(byte(len(resolvers)))
+	for _, resolver := range resolvers {
+		writeText(resolver.Domain)
+		_ = binary.Write(&body, binary.BigEndian, resolver.Port)
+	}
+	packet := make([]byte, protocol.Header+body.Len())
+	copy(packet, "STLVTUN1")
+	packet[8] = protocol.Configure
+	binary.BigEndian.PutUint32(packet[12:], uint32(body.Len()))
+	packet[16] = 1
+	packet[32] = 2
+	binary.BigEndian.PutUint64(packet[48:], generation)
+	copy(packet[protocol.Header:], body.Bytes())
+	return packet
+}
