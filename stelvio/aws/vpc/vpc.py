@@ -5,11 +5,13 @@ from enum import StrEnum
 from functools import cached_property
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple, Required, TypedDict, final
 
-from pulumi_aws import get_availability_zones
+from pulumi import InvokeOutputOptions
+from pulumi_aws import get_availability_zones, get_caller_identity_output
 from pulumi_aws.ec2 import (
     DefaultSecurityGroup,
     Eip,
     EipArgs,
+    Instance,
     InternetGateway,
     InternetGatewayArgs,
     NatGateway,
@@ -29,9 +31,15 @@ from pulumi_aws.vpc import SecurityGroupEgressRule
 from stelvio import context
 from stelvio.component import Component, child_label, resource_name
 from stelvio.provider import ProviderStore, aws_region_of
+from stelvio.tunnel.bastion import create_bastion
+from stelvio.tunnel.manifest import OUTPUT_KEY, VERSION
+from stelvio.tunnel.policy import BastionPolicy, normalize_dns_domains
 
 if TYPE_CHECKING:
     from pulumi import Input
+    from pulumi_aws.ec2 import InstanceArgs, SecurityGroupArgs
+    from pulumi_aws.iam import InstanceProfileArgs, RoleArgs
+    from pulumi_aws.ssm import DocumentArgs
 
     from stelvio.customize import Customization
 
@@ -95,6 +103,40 @@ class NatConfigDict(TypedDict, total=False):
 
 @final
 @dataclass(frozen=True)
+class BastionConfig:
+    """Persistent dev access, with optional domains resolved through this VPC."""
+
+    dns_domains: tuple[str, ...] | list[str] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dns_domains", normalize_dns_domains(self.dns_domains))
+
+
+class BastionConfigDict(TypedDict, total=False):
+    dns_domains: tuple[str, ...] | list[str]
+
+
+def _normalize_bastion(
+    value: bool | BastionConfig | BastionConfigDict,
+) -> tuple[BastionPolicy, BastionConfig]:
+    if value is False:
+        return BastionPolicy.DISABLED, BastionConfig()
+    if value is True:
+        return BastionPolicy.PERSISTENT, BastionConfig()
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError("'bastion' dictionary keys must be strings")
+        unknown = value.keys() - {"dns_domains"}
+        if unknown:
+            raise ValueError("Unknown bastion configuration keys: " + ", ".join(sorted(unknown)))
+        value = BastionConfig(**value)
+    if isinstance(value, BastionConfig):
+        return BastionPolicy.PERSISTENT, value
+    raise TypeError("'bastion' must be a bool, a BastionConfig, or a dict")
+
+
+@final
+@dataclass(frozen=True)
 class VpcResources:
     """Pulumi resources created by a Vpc.
 
@@ -114,6 +156,8 @@ class VpcResources:
     isolated_route_tables: list[RouteTable]
     elastic_ips: list[Eip]
     nat_gateways: list[NatGateway]
+    bastion: Instance | None = None
+    bastion_security_group: SecurityGroup | None = None
 
 
 class VpcCustomizationDict(TypedDict, total=False):
@@ -130,6 +174,11 @@ class VpcCustomizationDict(TypedDict, total=False):
     isolated_route_table: Customization[RouteTableArgs]
     elastic_ip: Customization[EipArgs]
     nat_gateway: Customization[NatGatewayArgs]
+    bastion: Customization[InstanceArgs]
+    bastion_security_group: Customization[SecurityGroupArgs]
+    bastion_role: Customization[RoleArgs]
+    bastion_profile: Customization[InstanceProfileArgs]
+    bastion_identity_document: Customization[DocumentArgs]
 
 
 @final
@@ -148,14 +197,17 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
 
     _az: int | list[str]
     _nat_config: NatConfig | None
+    _bastion_policy: BastionPolicy
+    _bastion_config: BastionConfig
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - the existing VPC API plus its dev access policy
         self,
         name: str,
         /,
         az: int | list[str] = 2,
         nat: Literal["managed"] | NatConfig | NatConfigDict | None = None,
         *,
+        bastion: bool | BastionConfig | BastionConfigDict = False,
         tags: dict[str, str] | None = None,
         customize: VpcCustomizationDict | None = None,
     ):
@@ -165,6 +217,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         _validate_az(az)
         self._az = az
         self._nat_config = _normalize_nat(nat)
+        self._bastion_policy, self._bastion_config = _normalize_bastion(bastion)
         _validate_nat_config(self._nat_config, self._az)
 
     def _create_resources(self) -> VpcResources:
@@ -181,7 +234,9 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             tags={"Name": default_sg_name} | self.tags,
             opts=self._resource_opts(),
         )
-        subnets_dict, route_tables_dict = self._create_subnets_with_route_tables(vpc, igw, azs)
+        subnets_dict, route_tables_dict, route_associations_dict = (
+            self._create_subnets_with_route_tables(vpc, igw, azs)
+        )
 
         elastic_ips = []
         nat_gateways = []
@@ -190,7 +245,60 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
                 self._nat_config, igw, azs, subnets_dict, route_tables_dict
             )
 
-        self.register_outputs({})
+        bastion = None
+        access = None
+        if self._bastion_policy == BastionPolicy.PERSISTENT:
+            bastion = create_bastion(
+                name=self.name,
+                vpc_id=vpc.id,
+                subnet_id=subnets_dict[SubnetType.PUBLIC][0].id,
+                tags=self.tags,
+                opts=self._resource_opts(
+                    provider=self._provider,
+                    depends_on=[
+                        igw,
+                        *route_tables_dict[SubnetType.PUBLIC],
+                        *route_associations_dict[SubnetType.PUBLIC],
+                    ],
+                ),
+                customize=self._customizer,
+            )
+            access = {
+                "instance_id": bastion.instance.id,
+                "security_group_id": bastion.security_group.id,
+                "az": bastion.instance.availability_zone,
+                "identity_document": bastion.document.name,
+                "owner": self.urn,
+            }
+
+        # Private outputs are consumed after deployment, never rendered as user URLs.
+        self.register_outputs(
+            {
+                OUTPUT_KEY: {
+                    "version": VERSION,
+                    "kind": "vpc",
+                    "identity": self.urn,
+                    "account": get_caller_identity_output(
+                        opts=InvokeOutputOptions(provider=self._provider)
+                    ).account_id,
+                    "region": aws_region_of(self),
+                    "vpc_id": vpc.id,
+                    "provider": self._provider.urn,
+                    "cidrs": [vpc.cidr_block],
+                    "policy": self._bastion_policy.value,
+                    "dns_domains": list(self._bastion_config.dns_domains),
+                    "public_subnets": [
+                        {
+                            "id": subnet.id,
+                            "az": subnet.availability_zone,
+                            "cidr": subnet.cidr_block,
+                        }
+                        for subnet in subnets_dict[SubnetType.PUBLIC]
+                    ],
+                    "access": access,
+                }
+            }
+        )
         return VpcResources(
             vpc=vpc,
             internet_gateway=igw,
@@ -202,6 +310,8 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             isolated_route_tables=route_tables_dict[SubnetType.ISOLATED],
             elastic_ips=elastic_ips,
             nat_gateways=nat_gateways,
+            bastion=bastion.instance if bastion else None,
+            bastion_security_group=bastion.security_group if bastion else None,
         )
 
     @property
@@ -267,9 +377,14 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
 
     def _create_subnets_with_route_tables(
         self, vpc: PulumiVpc, igw: InternetGateway, azs: list[str]
-    ) -> tuple[dict[SubnetType, list[Subnet]], dict[SubnetType, list[RouteTable]]]:
+    ) -> tuple[
+        dict[SubnetType, list[Subnet]],
+        dict[SubnetType, list[RouteTable]],
+        dict[SubnetType, list[RouteTableAssociation]],
+    ]:
         subnets_dict = {t: [] for t in SubnetType}
         route_tables_dict = {t: [] for t in SubnetType}
+        route_associations_dict = {t: [] for t in SubnetType}
         for subnet_type in SUBNET_LAYOUTS:
             for az in azs:
                 # By the AZ letter, like the subnet's Pulumi name, never by the position in
@@ -278,13 +393,14 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
                 cidr_block = _calculate_cidr(_az_slot(az), SUBNET_LAYOUTS[subnet_type])
                 subnet, subnet_name = self._create_subnet(vpc, subnet_type, cidr_block, az)
 
-                route_table = self._create_and_associate_route_table(
+                route_table, route_association = self._create_and_associate_route_table(
                     vpc, igw, subnet, subnet_type, subnet_name
                 )
 
                 subnets_dict[subnet_type].append(subnet)
                 route_tables_dict[subnet_type].append(route_table)
-        return subnets_dict, route_tables_dict
+                route_associations_dict[subnet_type].append(route_association)
+        return subnets_dict, route_tables_dict, route_associations_dict
 
     def _create_subnet(
         self, vpc: PulumiVpc, subnet_type: SubnetType, cidr_block: str, az: str
@@ -309,7 +425,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         subnet: Subnet,
         subnet_type: SubnetType,
         subnet_name: str,
-    ) -> RouteTable:
+    ) -> tuple[RouteTable, RouteTableAssociation]:
         default_props = {"vpc_id": vpc.id}
         # Public route table - has route to internet gateway others don't,
         if subnet_type == SubnetType.PUBLIC:
@@ -324,13 +440,13 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             f"{subnet_name}-rt", **customized_props, opts=self._resource_opts()
         )
 
-        RouteTableAssociation(
+        route_association = RouteTableAssociation(
             f"{subnet_name}-rta",
             subnet_id=subnet.id,
             route_table_id=route_table.id,
             opts=self._resource_opts(),
         )
-        return route_table
+        return route_table, route_association
 
     def _create_managed_nats(
         self,
