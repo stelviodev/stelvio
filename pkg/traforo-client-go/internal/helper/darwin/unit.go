@@ -137,8 +137,57 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 		}
 	}
 	*stage = 11
-	return savePhase(store, state, i, Active, u.Generation, false)
+	if e := savePhase(store, state, i, Active, u.Generation, false); e != nil {
+		return e
+	}
+	return retirePreviousResolvers(store, state, i)
 }
+
+func reactivateRetained(store Store, state *Snapshot, devices *[8]darwin.Device, i int, packet []byte, r protocol.Request, stage *byte) error {
+	old := state.Units[i]
+	if !old.KeepDNS || devices[i].FD != -1 || r.Generation <= old.Generation || r.Generation == math.MaxUint64 || r.VPC != old.Request.VPC || !sameRanges(r.Ranges, old.Request.Ranges) || !preservesResolvers(old.Request, r) {
+		return errUncertain
+	}
+	for j := range old.Files {
+		if !resolverCurrent(store, *state, i, j) {
+			return errUncertain
+		}
+	}
+	if e := resolverConflict(store, *state, r); e != nil {
+		return e
+	}
+	for _, prefix := range r.Ranges {
+		n, m := network(prefix)
+		if e := routeConflict(n, m, 0); e != nil {
+			return e
+		}
+	}
+	d, e := darwin.OpenDevice()
+	if e != nil {
+		return e
+	}
+	devices[i] = d
+	next := state.Clone()
+	next.Revision++
+	next.Units[i] = Unit{
+		Phase:      Preparing,
+		Generation: r.Generation,
+		Index:      d.Index,
+		Packet:     append([]byte(nil), packet...),
+		Request:    r,
+		Files:      make([]Receipt, len(r.Resolvers)),
+		Previous: &ResolverHistory{
+			Packet: append([]byte(nil), old.Packet...),
+			Files:  append([]Receipt(nil), old.Files...),
+		},
+	}
+	if e = store.Save(next); e != nil {
+		return errors.Join(e, devices[i].Close())
+	}
+	*state = next
+	return finishPrepare(store, state, devices, i, stage)
+}
+
 func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, packet []byte, stage *byte) error {
 	*stage = 1
 	r, e := protocol.Decode(packet)
@@ -151,6 +200,9 @@ func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, pack
 			i = j
 			break
 		}
+	}
+	if i < len(state.Units) && state.Units[i].Phase == Retained {
+		return reactivateRetained(store, state, devices, i, packet, r, stage)
 	}
 	if i < len(state.Units) && state.Units[i].Phase != Removed {
 		u := state.Units[i]
@@ -203,7 +255,7 @@ func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, pack
 				return errUncertain
 			}
 		}
-		return nil
+		return retirePreviousResolvers(store, state, i)
 	}
 	*stage = 19
 	if i >= 8 || devices[i].FD != -1 || i < len(state.Units) && r.Generation <= state.Units[i].Generation || resolverConflict(store, *state, r) != nil {
@@ -286,6 +338,12 @@ func removeUnit(store Store, state *Snapshot, devices *[8]darwin.Device, id uint
 		return errUncertain
 	}
 	u := state.Units[i]
+	if u.Previous != nil && u.Phase == Active {
+		if e := retirePreviousResolvers(store, state, i); e != nil {
+			return e
+		}
+		u = state.Units[i]
+	}
 	if u.Phase == Removed {
 		if generation == u.Generation && !keep && devices[i].FD == -1 {
 			return nil
@@ -352,6 +410,12 @@ func removeUnit(store Store, state *Snapshot, devices *[8]darwin.Device, id uint
 		} else if e := removeResolver(store, state, i, j); e != nil {
 			return e
 		}
+	}
+	if u.Previous != nil {
+		if e := retirePreviousResolvers(store, state, i); e != nil {
+			return e
+		}
+		u = state.Units[i]
 	}
 	phase := Removed
 	if keep {
