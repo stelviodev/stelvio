@@ -75,6 +75,8 @@ markers = [
     "integration_vpc: integration tests that create a Vpc (run with --integration-vpc, 4 workers max)",
     "integration_cf: integration tests with CloudFront distributions (slow teardown)",
     "integration_dns: integration tests that need a Route 53 domain configured",
+    "integration_macos_privileged: exclusive native macOS tests that can install helpers and mutate host networking",
+    "integration_tunnel: native tests that require deployed AWS tunnel resources",
 ]
 # A parametrize list built by a scan (docs pages, components) comes out empty when the scan
 # breaks; pytest's default skips that quietly.
