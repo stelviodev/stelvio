@@ -1,11 +1,12 @@
 # Contributing to Traforo Go
 
 Keep protocol validation bounded and independent of Darwin APIs. Keep native
-system calls behind the Darwin adapter. The Darwin-only helper owns authorization,
-session capabilities, route and resolver lifecycle, durable recovery, and
-installation receipts. Keep raw utun descriptors inside the helper. Treat a
-resource with uncertain ownership as evidence to retain, not as permission to
-delete it.
+system calls behind the Darwin adapter. The Darwin-only helper implementation
+lives in `internal/helper/darwin`; `internal/helper` is the portable dispatcher.
+The Darwin helper owns authorization, session capabilities, route and resolver
+lifecycle, durable recovery, and installation receipts. Keep raw utun descriptors
+inside the helper. Treat a resource with uncertain ownership as evidence to
+retain, not as permission to delete it.
 
 Do not add a forwarder command or public tunnel API before its assigned stack
 step. Package initialization must not install a service or change host networking.
