@@ -279,7 +279,7 @@ func TestServiceBusyAndStoppingRejectNewMutations(t *testing.T) {
 
 func TestFragmentedRequestsRejectBodyRightsAndShortEOF(t *testing.T) {
 	// Frozen independent CONFIGURE bytes, shared with the Python encoder test.
-	data, e := os.ReadFile("testdata/independent_vectors.json")
+	data, e := os.ReadFile("../testdata/independent_vectors.json")
 	if e != nil {
 		t.Fatal(e)
 	}
