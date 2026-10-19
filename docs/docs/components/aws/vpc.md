@@ -232,6 +232,36 @@ not add a network grant. So a Function that links a datastore must join the same
 Vpc with `vpc=`, or Stelvio raises `ValueError` when you create the Function. See
 [Linking a DocumentDB cluster](document-db.md#linking) for an example.
 
+## Bastion resources
+
+`bastion` controls whether deployment creates persistent access resources for
+this VPC. It does not change production Lambda VPC attachment. Bastion access
+is disabled by default.
+
+```python
+from stelvio.aws.vpc import BastionConfig, Vpc
+
+Vpc("main", bastion=True)
+Vpc("private", bastion=BastionConfig(dns_domains=("internal.example.com",)))
+```
+
+Omitting `bastion` or setting it to `False` creates no bastion. `True`, an empty
+dict, `BastionConfig()`, or a dict with `dns_domains` enables one. Explicit
+`None` and unknown dict keys are invalid. Domain names are normalized and
+validated. They describe private DNS suffixes; Stelvio does not create a DNS
+zone or change VPC DNS settings.
+
+When enabled, normal deployment creates a persistent EC2 instance, an IAM role
+and profile, an SSM identity document, and a security group. The instance runs
+in a public subnet for outbound AWS connectivity. Its security group has no
+inbound rules by default, and its SSH server listens on loopback. The instance and public
+IPv4 address have ongoing AWS costs while deployed. Destroy the VPC or disable
+`bastion` and deploy to remove these resources.
+
+The access resources are separate from Lambda production networking. A
+`Function(vpc=vpc)` still uses the VPC's private subnets and app security group.
+Dev mode access to VPC resources is not available yet.
+
 ## Cost
 
 The VPC itself — subnets, route tables, Internet Gateway — is free. NAT is what
@@ -275,6 +305,11 @@ Pulumi resource properties. For an overview of how customization works, see the
 | `isolated_route_table`  | [RouteTableArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/routetable/#inputs)                      | Isolated route tables (all AZs) |
 | `elastic_ip`            | [EipArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/eip/#inputs)                                    | NAT Elastic IPs                 |
 | `nat_gateway`           | [NatGatewayArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/natgateway/#inputs)                      | NAT Gateways                    |
+| `bastion`               | [InstanceArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/instance/#inputs)                           | Persistent access instance      |
+| `bastion_security_group` | [SecurityGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/securitygroup/#inputs)                 | Bastion security group           |
+| `bastion_role`          | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs)                                   | Bastion IAM role                 |
+| `bastion_profile`       | [InstanceProfileArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/instanceprofile/#inputs)             | Bastion IAM instance profile     |
+| `bastion_identity_document` | [DocumentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ssm/document/#inputs)                         | SSM identity document            |
 
 ### Example
 

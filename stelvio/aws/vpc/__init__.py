@@ -1,4 +1,6 @@
 from .vpc import (
+    BastionConfig,
+    BastionConfigDict,
     NatConfig,
     NatConfigDict,
     SubnetType,
@@ -10,6 +12,8 @@ from .vpc import (
 )
 
 __all__ = [
+    "BastionConfig",
+    "BastionConfigDict",
     "NatConfig",
     "NatConfigDict",
     "SubnetType",
