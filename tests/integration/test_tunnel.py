@@ -1,0 +1,110 @@
+"""Opt-in standalone CLI → deployed DocumentDB acceptance."""
+
+import hashlib
+import signal
+
+import pytest
+
+from stelvio.tunnel.helper_client import NativeHelper
+
+from .cli_session import STARTUP_TIMEOUT, StandaloneCliSession
+
+pytestmark = [pytest.mark.integration_tunnel, pytest.mark.integration_macos_privileged]
+
+
+@pytest.fixture
+def standalone_cli_session(tmp_path):
+    session = StandaloneCliSession(tmp_path / "standalone-proof")
+    try:
+        session.deploy()
+        yield session
+    finally:
+        session.destroy()
+
+
+def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session):  # noqa: PLR0915 - full session acceptance lifecycle
+    session = standalone_cli_session
+    baseline = NativeHelper().inspect()
+    assert not baseline.owned
+    assert not baseline.uncertain
+    assert not baseline.units
+    session.assert_state_unchanged()
+
+    session.start()
+    session.wait_ready()
+    assert len(session.manifest.resources) == 2
+    cluster_by_vpc = {
+        resource.vpc: resource.resource_id for resource in session.manifest.resources
+    }
+    first_vpc, second_vpc = session.manifest.enabled_vpcs
+    first_cluster = cluster_by_vpc[first_vpc.identity]
+    second_cluster = cluster_by_vpc[second_vpc.identity]
+
+    first_proof = session.check_database(first_cluster)
+    second_proof = session.check_database(second_cluster)
+    assert first_proof["tls"]
+    assert first_proof["read_write"]
+    assert len(first_proof["members"]) >= 2
+    assert second_proof["tls"]
+    assert second_proof["read_write"]
+
+    helper = NativeHelper()
+    first_unit_id = hashlib.sha256(first_vpc.identity.encode()).hexdigest()[:8]
+    first_unit = next(item for item in helper.inspect().units if item.unit == first_unit_id)
+    assert first_unit.status.name.lower() == "active"
+    initial_generation = first_unit.generation
+    ports_before = session.resolver_ports()
+    assert ports_before
+
+    ec2 = session.aws.client("ec2")
+    bastion_id = first_vpc.access.instance_id
+    ec2.stop_instances(InstanceIds=[bastion_id])
+    ec2.get_waiter("instance_stopped").wait(
+        InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
+    )
+    retained = session.wait_unit(first_vpc.identity, "retained", timeout=120)
+    assert retained.generation == initial_generation
+    ports_during_outage = session.resolver_ports()
+    assert all(ports_during_outage.get(domain) == port for domain, port in ports_before.items())
+
+    # A failed VPC does not stop its healthy peer from serving normal database traffic.
+    healthy = session.check_database(second_cluster)
+    assert healthy["read_write"]
+
+    ec2.start_instances(InstanceIds=[bastion_id])
+    ec2.get_waiter("instance_running").wait(
+        InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
+    )
+    recovered = session.wait_database(first_cluster)
+    assert recovered["tls"]
+    assert recovered["read_write"]
+    active = session.wait_unit(
+        first_vpc.identity, "active", after=initial_generation, timeout=STARTUP_TIMEOUT
+    )
+    assert active.generation > initial_generation
+    ports_after_reconnect = session.resolver_ports()
+    assert all(ports_after_reconnect.get(domain) == port for domain, port in ports_before.items())
+
+    # Generation-stale carrier/control rejection is independently covered by the Go
+    # interoperability suite; this live exercise proves the command recovers through it.
+    graceful_receipts = session.active_ssm_sessions()
+    assert len(graceful_receipts) == 2
+    assert session.terminate(signal.SIGINT) == 0
+    assert "Tunnel stopped." in session.log().splitlines()
+    session.wait_for_helper_cleanup()
+    session.assert_sessions_terminated(graceful_receipts)
+    assert not session.resolver_ports()
+    session.assert_bastions_running()
+    session.assert_state_unchanged()
+
+    session.start()
+    session.wait_ready()
+    assert session.check_database(first_cluster)["read_write"]
+    abrupt_receipts = session.active_ssm_sessions()
+    assert len(abrupt_receipts) == 2
+    assert session.terminate(signal.SIGKILL) == -signal.SIGKILL
+    session.wait_for_helper_cleanup(timeout=120)
+    session.assert_sessions_terminated(abrupt_receipts)
+    assert not session.resolver_ports()
+    session.assert_bastions_running()
+    session.assert_state_unchanged()

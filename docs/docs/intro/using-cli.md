@@ -327,6 +327,23 @@ it confirms that no active session owns host state. It uses the installed image 
 does not need a plugin download. If ownership is uncertain, the helper retains its
 ownership evidence for status checks; do not remove resolver files or helper state by hand.
 
+### Standalone access to deployed VPC resources
+
+After deploying an app with enabled VPC dependencies and installing the helper, start
+a foreground networking session without entering dev mode:
+
+```bash
+stlv tunnel start          # personal environment
+stlv tunnel start staging  # named environment
+```
+
+The command reads the existing deployment, then releases its state context before it
+waits for networking readiness. It does not deploy the app, start the AppSync bridge,
+or create a bastion. It uses the same per-VPC discovery, DNS, readiness, and cleanup
+rules as `stlv dev`. Press `Ctrl+C` to close the session; the deployment and its
+bastion remain in place. If the app has no enabled VPC dependencies, the command
+reports that networking is unnecessary and exits successfully.
+
 ### Route conflicts
 
 A helper configuration can contain 1–32 selected IPv4 destination ranges. The
