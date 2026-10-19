@@ -43,7 +43,7 @@ func TestServiceGenerationAndRetentionAdmission(t *testing.T) {
 		{name: "active dns extension", phase: Active, current: 3, requested: 3, configure: true, extend: true, want: true},
 		{name: "extension stale generation", phase: Active, current: 3, requested: 2, configure: true, extend: true},
 		{name: "preparing exact retry", phase: Preparing, current: 3, requested: 3, configure: true, exact: true, want: true},
-		{name: "retained configure", phase: Retained, current: 4, requested: 5, configure: true},
+		{name: "retained next configure", phase: Retained, current: 4, requested: 5, configure: true, oldKeep: true, want: true},
 		{name: "removed next configure", phase: Removed, current: 4, requested: 5, configure: true, want: true},
 		{name: "removed same configure", phase: Removed, current: 4, requested: 4, configure: true},
 		{name: "missing removal", requested: 4, absent: true},
@@ -91,6 +91,34 @@ func TestServiceGenerationAndRetentionAdmission(t *testing.T) {
 				t.Fatalf("accepted=%v want=%v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRetainedReactivationRequiresTheExistingDNSClaims(t *testing.T) {
+	s := serviceFixture()
+	u := &s.state.Units[0]
+	u.Phase = Retained
+	u.Generation = 4
+	u.KeepDNS = true
+	r := u.Request
+	r.Generation = 5
+	if !validChange(s.state, []byte("new generation"), r) {
+		t.Fatal("higher generation with stable claims was rejected")
+	}
+	dropped := r
+	dropped.Resolvers = nil
+	if validChange(s.state, []byte("dropped claim"), dropped) {
+		t.Fatal("reactivation dropped a retained DNS claim")
+	}
+	changedPort := r
+	changedPort.Resolvers = []protocol.Resolver{{Domain: "db.internal", Port: 5301}}
+	if validChange(s.state, []byte("changed listener"), changedPort) {
+		t.Fatal("reactivation changed the retained DNS listener port")
+	}
+	stale := r
+	stale.Generation = 4
+	if validChange(s.state, []byte("stale"), stale) {
+		t.Fatal("stale generation was accepted")
 	}
 }
 
