@@ -299,6 +299,33 @@ the executable. Stelvio accepts the pinned release version or its matching
 development snapshot version. An unsafe or incompatible override fails; Stelvio
 does not fall back to the release or change its pinned cache.
 
+### Native helper administration
+
+Managed networking uses a privileged macOS helper. Install it with:
+
+```bash
+stlv tunnel install
+```
+
+The command verifies the selected Traforo image and Session Manager plugin before
+it requests administrator authorization. It installs the helper and registers its
+LaunchDaemon. During a networking session, the helper owns temporary VPC routes,
+interfaces, and scoped resolver files.
+
+Use these commands to inspect or recover the helper:
+
+```bash
+stlv tunnel inspect
+stlv tunnel cleanup
+stlv tunnel uninstall
+```
+
+`inspect` reports helper ownership and VPC units. `cleanup` reconciles stale owned
+network state and leaves the helper installed. `uninstall` removes the helper after
+it confirms that no active session owns host state. It uses the installed image and
+does not need a plugin download. If ownership is uncertain, the helper retains its
+evidence for inspection; do not remove resolver files or helper state by hand.
+
 ### exit codes
 
 Stelvio currently uses these stable exit codes for automation:

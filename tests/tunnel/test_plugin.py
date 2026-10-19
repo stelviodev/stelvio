@@ -237,7 +237,7 @@ def test_new_plugin_pin_uses_new_private_path_without_replacing_previous_version
 
 def test_owned_nonexecutable_cache_is_repaired(plugin_world):
     path = plugin.ensure_plugin()
-    path.chmod(0o4755)
+    path.chmod(0o644)
     assert plugin.ensure_plugin() == path
     assert path.stat().st_mode & 0o777 == 0o755
     assert plugin_world.download.call_count == 2
