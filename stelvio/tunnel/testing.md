@@ -62,6 +62,35 @@ SSM byte stream. It checks successful authentication, persistent key reuse,
 key-change rejection by a new transport, and explicit trust reset. It restores
 its processes and temporary files. It does not establish live SSM acceptance.
 
+## Shared session and isolated runtime
+
+`test_supervisor.py` exercises independent VPC workers with deterministic
+transport, helper, DNS, and discovery adapters. It covers generation advancement
+after retained DNS cleanup, stable listener ports, stale control rejection,
+DNS rejection and recovery, terminal local-artifact failures, and retained helper
+evidence when transport cleanup is uncertain. Readiness checks require the VPC
+DNS path and resource addresses as well as a live SOCKS transport.
+
+`test_wire.py`, `test_runtime.py`, `test_dev_session.py`, and `test_evidence.py`
+cover bounded IPC framing, session metadata validation, captured environment
+isolation in a real child process, parent/lease death, bounded status and shutdown,
+admission freshness, no-op sessions, and durable SSM ownership receipts. The
+ordinary child-process tests use local fixtures only. They do not deploy AWS
+resources, install the helper, or mutate host networking. The optional
+`STLV_TEST_TRAFORO_IMAGE` lane is separate and exercises Python/Go interoperability
+with a previously verified image.
+
+Run the focused session suite with:
+
+```bash
+uv run pytest \
+  tests/tunnel/test_wire.py \
+  tests/tunnel/test_evidence.py \
+  tests/tunnel/test_supervisor.py \
+  tests/tunnel/test_runtime.py \
+  tests/tunnel/test_dev_session.py -q
+```
+
 ## Unit tests
 
 Run the Python tunnel suite with the normal repository checks:
