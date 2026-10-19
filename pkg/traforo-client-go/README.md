@@ -1,14 +1,23 @@
 # Traforo Go module
 
-This module contains Traforo's bounded protocol and its Darwin system adapter.
-The protocol package is independent of operating-system APIs. The Darwin package
-contains narrow cgo bindings for native identity, descriptor, route, and network
-configuration operations. This step does not include an executable or installable
-service.
+This module contains Traforo's bounded protocol, Darwin system adapter, and
+privileged helper. The protocol package is independent of operating-system APIs.
+The Darwin package contains narrow cgo bindings for native identity, descriptor,
+route, and network configuration operations. The helper authorizes sessions,
+owns raw utun descriptors, and journals route and scoped resolver changes so it
+can recover them after interruption.
 
-The protocol tests can run on any supported Go host. The Darwin package requires
-macOS, cgo, the Apple SDK, and Clang. Runtime support is limited to macOS 15 or
-newer on `arm64` and `amd64`.
+The executable supports `version` and the internal `helper serve`, `helper
+install`, and `helper uninstall` operations. Stelvio does not expose a Python
+client or a tunnel command in this step. The helper does not accept a
+nonprivileged request to install or remove arbitrary host resources. It changes
+only resources that its durable receipt and journal can certify as owned. It
+retains recovery evidence when ownership is uncertain.
+
+The protocol package can be tested independently on supported Go hosts with
+`go test ./internal/protocol`. The full module tests require macOS, cgo, the
+Apple SDK, and Clang. Runtime support is limited to macOS 15 or newer on
+`arm64` and `amd64`.
 
 Run checks from this directory:
 
@@ -18,12 +27,15 @@ make race
 make vet
 make lint
 make fuzz
+make fuzz-snapshot
 ```
 
 Run `make format` to apply the configured Go formatters. The Darwin tests compile
 small native boundary fixtures and use temporary files, sockets, and processes.
-They do not install a service or change host routes or DNS settings.
+They do not invoke helper installation or uninstallation and do not change host
+routes or DNS settings. Live installation and host recovery acceptance require a
+later, separately authorized test step.
 
 The independent vectors in `internal/helper/testdata/independent_vectors.json`
 are shared test data. Keep their encoded bytes stable so Go and Python tests can
-check the same protocol examples independently.
+check the same protocol and journal examples independently.
