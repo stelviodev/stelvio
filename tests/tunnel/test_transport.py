@@ -102,6 +102,7 @@ def test_verified_document_version_and_content_hash_are_bound_to_execution(trans
     transport.close()
 
 
+@mark.skipif(sys.platform != "darwin", reason="requires the supported macOS host")
 def test_actual_child_birth_registration_finishes_before_shutdown_fence(  # noqa: PLR0915 - full concurrent child lifecycle
     transport_world, monkeypatch
 ):
@@ -181,6 +182,7 @@ def test_actual_child_birth_registration_finishes_before_shutdown_fence(  # noqa
         transport.close()
 
 
+@mark.skipif(sys.platform != "darwin", reason="requires the supported macOS host")
 def test_birth_identity_mismatch_refuses_to_signal_actual_child(transport_world, monkeypatch):
     transport = transport_world[0]
     child = subprocess.Popen(  # noqa: S603 - fixed owned child fixture
@@ -207,6 +209,7 @@ def test_birth_identity_mismatch_refuses_to_signal_actual_child(transport_world,
             transport.stop_local()
 
 
+@mark.skipif(sys.platform != "darwin", reason="requires the supported macOS host")
 def test_exited_leader_does_not_leave_its_term_ignoring_descendant(transport_world):
     transport = transport_world[0]
     script = """import subprocess,sys,time
