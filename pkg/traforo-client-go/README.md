@@ -7,11 +7,52 @@ route, and network configuration operations. The privileged helper implementatio
 lives in `internal/helper/darwin`; `internal/helper` provides a portable command
 dispatcher. The helper authorizes sessions, owns raw utun descriptors, and journals
 route and scoped resolver changes so it can recover them after interruption.
+The module uses the Apache License 2.0. Its code of conduct is maintained in the
+main Stelvio repository.
 
 Stelvio pins the Traforo `v0.0.7` release for macOS `arm64` and `x86_64`. It checks
 the artifact digest, Mach-O architecture, executable metadata, and reported version
 before it uses the image. The AWS Session Manager plugin is pinned at `1.2.835.0`
 and uses a separate private cache.
+
+## Local builds
+
+The module uses one GoReleaser configuration for local builds and tagged releases.
+It builds Darwin `arm64` and `amd64` images with cgo and a macOS 15 minimum.
+The GoReleaser version and release Go toolchain are pinned in the module release
+workflow. Stelvio's asset pin remains the source of the local snapshot base version.
+
+The `make build` target is for this module inside Stelvio's monorepo, where the
+builder can read Stelvio's release pin and use its existing helper installation
+transaction. A standalone split checkout contains only the Go module and cannot
+run that target; use a Stelvio checkout for local development builds. The target
+checks for the monorepo files and prints this requirement if they are absent.
+
+From the Stelvio checkout, install the pinned Go and GoReleaser versions, then
+build and validate both images:
+
+```bash
+cd pkg/traforo-client-go
+make build
+```
+
+This target is build-only. It checks GoReleaser metadata, both Mach-O architectures,
+the injected snapshot version, and linked system libraries. It writes an atomic
+bundle with `build.json` provenance under `build/` and prints the host image's
+`STLV_TRAFORO_DEV_BINARY` export. It does not install the helper or publish a release.
+
+To build and install the host image through the existing authorized helper
+transaction, run this from the Stelvio checkout root:
+
+```bash
+uv run python pkg/traforo-client-go/scripts/build.py
+```
+
+The builder captures and fingerprints source and settings before compilation. It
+refuses source changes during the build and preserves prior bundles when a build or
+validation fails. On Apple Silicon, it executes the Intel image through Rosetta
+when available. On Intel, native arm64 execution remains pending until Apple
+Silicon validation is available.
 
 For local Traforo development, set `STLV_TRAFORO_DEV_BINARY` to an absolute path to
 the executable. Stelvio accepts `v0.0.7` or `v0.0.7-dev+g<hex>` only through this
@@ -39,8 +80,9 @@ validates carrier generations and destination CIDRs, and opens TCP destinations
 through that VPC's loopback SOCKS proxy. UDP forwarding is rejected. Each unit
 uses bounded packet and stream queues, and shutdown closes its active streams
 and stack before returning. The helper retains raw utun descriptors and all
-host networking state. Stelvio does not expose a Python client or a tunnel
-command in this step.
+host networking state. Stelvio provides `stlv tunnel install`, `inspect`, `cleanup`,
+and `uninstall` for helper administration. Local builds use the verified
+`STLV_TRAFORO_DEV_BINARY` selection; they do not alter release pins or cache entries.
 
 Packet units retain 1–32 selected resource subnet ranges without expanding them
 to whole VPC blocks. The same ranges gate inbound packets, return packets, SOCKS
