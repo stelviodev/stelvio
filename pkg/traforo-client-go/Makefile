@@ -1,7 +1,14 @@
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 
-.PHONY: test race vet lint format fuzz fuzz-snapshot fuzz-dns fuzz-control
+.PHONY: build test race vet lint format fuzz fuzz-snapshot fuzz-dns fuzz-control
+
+build:
+	@test -f ../../pyproject.toml && test -f ../../stelvio/tunnel/assets.py || { \
+		echo "make build requires the Stelvio monorepo; use its tagged release workflow from a standalone split checkout" >&2; \
+		exit 2; \
+	}
+	cd ../.. && uv run python pkg/traforo-client-go/scripts/build.py --build-only
 
 test:
 	$(GO) test -mod=readonly ./...

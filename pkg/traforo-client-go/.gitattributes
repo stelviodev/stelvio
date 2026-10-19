@@ -1,0 +1,12 @@
+# Normalize text files to LF in the repository.
+* text=auto eol=lf
+
+# Keep Windows scripts with CRLF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat generated binaries as binary.
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
