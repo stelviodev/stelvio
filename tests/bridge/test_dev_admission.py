@@ -6,6 +6,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+from stelvio.bridge._chunking import split_message
 from stelvio.bridge.local import listener
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.tunnel.session import VpcUnavailableError
@@ -97,6 +98,86 @@ def test_expired_invocation_is_rejected_before_admission_or_handler(monkeypatch)
     admission.assert_not_called()
     handler.handle_bridge_event.assert_not_awaited()
     assert isinstance(_result_from_publish(publish).error_result, TimeoutError)
+
+
+def test_admission_exception_fails_closed_without_dispatch(monkeypatch):
+    admission_error = RuntimeError("network status could not be read")
+    admission = Mock(side_effect=admission_error)
+    handler = SimpleNamespace(handle_bridge_event=AsyncMock())
+    publish = AsyncMock()
+    monkeypatch.setattr(listener.WebsocketHandlers, "all", lambda: [handler])
+    monkeypatch.setattr(listener, "publish", publish)
+    monkeypatch.setattr(listener, "log_invocation", lambda _result: None)
+
+    _run(listener._handle_data_message(_event(), None, "key", "app", "dev", admission))
+
+    admission.assert_called_once_with("endpoint-vpc")
+    handler.handle_bridge_event.assert_not_awaited()
+    result = _result_from_publish(publish)
+    assert result.error_result is admission_error
+    assert result.success_result is None
+
+
+def test_chunked_invocation_runs_admission_once_after_reassembly(monkeypatch):
+    monkeypatch.setattr(listener, "_request_chunk_buffers", {})
+    endpoint = "endpoint-vpc"
+    complete_event = {
+        "invoke_id": "invoke-large",
+        "endpointId": endpoint,
+        "event": {"path": "/"},
+        "context": {"epoch_deadline_time_in_ms": 0},
+        "large": "x" * 250_000,
+    }
+    chunks = split_message(complete_event, "invoke-large")
+    assert len(chunks) > 1
+    admission_error = RuntimeError("network status could not be read")
+
+    def fail_after_reassembly(received_endpoint):
+        assert received_endpoint == endpoint
+        assert not listener._request_chunk_buffers
+        raise admission_error
+
+    admission = Mock(side_effect=fail_after_reassembly)
+    handler = SimpleNamespace(handle_bridge_event=AsyncMock())
+    publish = AsyncMock()
+    monkeypatch.setattr(listener.WebsocketHandlers, "all", lambda: [handler])
+    monkeypatch.setattr(listener, "publish", publish)
+    monkeypatch.setattr(listener, "log_invocation", lambda _result: None)
+
+    for chunk in chunks[:-1]:
+        _run(
+            listener._handle_data_message(
+                {"type": "data", "event": json.dumps(chunk)},
+                None,
+                "key",
+                "app",
+                "dev",
+                admission,
+            )
+        )
+        admission.assert_not_called()
+        handler.handle_bridge_event.assert_not_awaited()
+
+    _run(
+        listener._handle_data_message(
+            {"type": "data", "event": json.dumps(chunks[-1])},
+            None,
+            "key",
+            "app",
+            "dev",
+            admission,
+        )
+    )
+
+    admission.assert_called_once_with(endpoint)
+    handler.handle_bridge_event.assert_not_awaited()
+    assert publish.await_count == 1
+    result = _result_from_publish(publish)
+    assert result.error_result is admission_error
+    assert result.success_result is None
+    published_event = json.loads(publish.await_args.args[3]["event"])
+    assert published_event["invoke_id"] == "invoke-large"
+    assert published_event["large"] == complete_event["large"]
 
 
 def test_non_vpc_invocation_keeps_ordinary_dispatch(monkeypatch):
