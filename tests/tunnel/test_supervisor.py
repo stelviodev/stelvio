@@ -46,7 +46,7 @@ def _worker_world(  # noqa: C901 - models a cross-adapter VPC lifecycle in one f
         unit = None
         uncertain_once = configure_uncertain
 
-        def inspect(self):
+        def status(self):
             return SimpleNamespace(
                 owned=True,
                 uncertain=False,
@@ -381,7 +381,7 @@ def test_successful_socks_probe_cannot_mask_failed_direct_path():
         return {}
 
     worker._dns = dns
-    worker.lease = SimpleNamespace(inspect=lambda: (_ for _ in ()).throw(AssertionError()))
+    worker.lease = SimpleNamespace(status=lambda: (_ for _ in ()).throw(AssertionError()))
     with raises(ConnectionError, match="host path unavailable"):
         worker._probe(7)
     assert calls == [("probe", {}), ("probe", {"direct": True})]

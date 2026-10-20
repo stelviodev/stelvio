@@ -209,7 +209,7 @@ def factory(**kwargs):
 credentials.boto3.Session=factory
 class Helper:
     def __init__(self,**kwargs): pass
-    def inspect(self): return SimpleNamespace(owned=False,uncertain=False,units=())
+    def status(self): return SimpleNamespace(owned=False,uncertain=False,units=())
     def acquire(self,session):
         carrier,peer=socket.socketpair(socket.AF_UNIX,socket.SOCK_DGRAM)
         lease=SimpleNamespace(carrier=carrier,connection=peer,closed=False)

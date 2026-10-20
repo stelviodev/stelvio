@@ -386,11 +386,11 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                 fence()
                 raise RuntimeError("Networking cleanup incomplete; retain recovery ownership")
             deadline = time.monotonic() + 30
-            inspector = NativeHelper(timeout=1)
+            helper = NativeHelper(timeout=1)
             while True:
                 try:
-                    inventory = inspector.inspect()
-                    if not inventory.owned and not inventory.uncertain and not inventory.units:
+                    state = helper.status()
+                    if not state.owned and not state.uncertain and not state.units:
                         break
                 except (OSError, RuntimeError):
                     pass
