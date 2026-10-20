@@ -29,7 +29,7 @@ def test_python_encoder_matches_independent_wire_fixture(operation):
         HelperOperation.RELEASE,
     }
     scoped = operation in {HelperOperation.CONFIGURE, HelperOperation.REMOVE}
-    anonymous = operation in {HelperOperation.INSPECT, HelperOperation.RECONCILE}
+    anonymous = operation in {HelperOperation.STATUS, HelperOperation.RECONCILE}
     configure = operation == HelperOperation.CONFIGURE
     actual = HelperRequest(
         operation,
