@@ -232,6 +232,14 @@ rm -rf .stelvio/lambda_dependencies
 
 `Expected AppSync connection_ack, received 'connection_error'` is followed by AppSync's error details. The connection was rejected immediately. If the errors include `UnauthorizedException`, check the AppSync API key.
 
+`stlv dev` starts managed networking before it starts the bridge. If the output says
+that a VPC is unavailable, only Functions that depend on that VPC are blocked. Check
+the reported phase and cause, then verify the selected AWS profile, bastion state,
+SSM access, and DocumentDB membership. A local image or plugin error is terminal;
+repair it with `stlv tunnel install` and restart dev. If cleanup is uncertain, retain
+the helper evidence and run `stlv tunnel inspect`, then `stlv tunnel cleanup` after
+dev has stopped.
+
 ## Getting Help
 
 If you're still stuck:

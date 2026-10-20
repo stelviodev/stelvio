@@ -118,6 +118,48 @@ Per-identity lock files remain in place. Unit tests cover pin ownership, foreign
 instance refusal, command uncertainty, and cleanup ordering. Live AWS acceptance
 is pending until this explicitly enabled lane is run.
 
+`tests/test_cli_dev.py` and `tests/bridge/test_dev_admission.py` verify that `stlv dev`
+captures the session before deployment cleanup, starts networking before AppSync,
+closes ownership after bridge exit, and rejects expired or unavailable dependent
+invocations before handler dispatch. Function tests verify that rejection happens
+before importing user code. Non-VPC dispatch remains available.
+
+Run the focused dev integration checks with:
+
+```bash
+uv run pytest \
+  tests/test_cli_dev.py \
+  tests/bridge/test_dev_admission.py \
+  tests/aws/function/test_function_dev_mode.py \
+  tests/tunnel/test_dev_session.py -q
+```
+
+## Dev mode AWS acceptance
+
+The opt-in dev scenario uses public Function URLs to reach local handlers. The
+handlers verify DocumentDB TLS, member discovery, and writes followed by reads. The
+test stops one bastion, checks that only its dependent handler is blocked before
+import, confirms a second VPC remains usable, then verifies generation and DNS-port
+recovery. It also checks helper cleanup, SSM termination, retained bastions, and
+unchanged deployment state after `stlv dev` exits.
+
+This lane deploys a two-VPC proof app and changes host networking. It requires an
+authorized AWS profile and expected account, macOS 15 or later, an installed helper,
+an idle host, and no parallel test workers:
+
+```bash
+STLV_TEST_AWS_PROFILE=<authorized-profile> \
+STLV_TEST_TUNNEL_AWS_ACCOUNT=<expected-account-id> \
+uv run pytest \
+  tests/integration/test_tunnel.py::test_dev_function_url_gates_and_recovers_documentdb \
+  --integration-macos-privileged --integration-tunnel -n 0 -q
+```
+
+The test checks the account before it deploys. Its fixture destroys the proof app
+only after helper cleanup is certified. This lane is separate from
+`tests/integration/run_all.sh` and remains pending until explicitly authorized and
+run.
+
 ## Unit tests
 
 Run the Python tunnel suite with the normal repository checks:
