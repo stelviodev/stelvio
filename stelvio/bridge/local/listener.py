@@ -5,9 +5,10 @@ import datetime
 import json
 import signal
 import threading
+import time
 import traceback
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import asdict
 from types import FrameType
 
@@ -229,8 +230,13 @@ def log_invocation(result: BridgeInvocationResult) -> None:
         )
 
 
-async def _handle_data_message(
-    data: dict, ws: object, api_key: str, app_name: str, env: str
+async def _handle_data_message(  # noqa: PLR0913 - bridge dispatch context plus admission boundary
+    data: dict,
+    ws: object,
+    api_key: str,
+    app_name: str,
+    env: str,
+    admission: Callable[[str], BaseException | None] | None = None,
 ) -> None:
     event_data = json.loads(data["event"])
 
@@ -239,6 +245,36 @@ async def _handle_data_message(
         if not is_complete:
             return
         data = {"type": "data", "event": json.dumps(complete_msg)}
+        event_data = complete_msg
+
+    if admission is not None:
+        context_data = event_data.get("context") or {}
+        deadline = context_data.get("epoch_deadline_time_in_ms")
+        if type(deadline) is int and deadline > 0 and time.time() * 1000 >= deadline:
+            error: BaseException | None = TimeoutError(
+                "Invocation deadline expired before local dispatch"
+            )
+        else:
+            endpoint_id = event_data.get("endpointId")
+            try:
+                error = admission(endpoint_id if isinstance(endpoint_id, str) else "")
+            except Exception as admission_error:
+                # Fail closed if the status boundary itself cannot produce a decision.
+                error = admission_error
+        if error is not None:
+            request = event_data.get("event")
+            request = request if isinstance(request, dict) else {}
+            result = BridgeInvocationResult(
+                success_result=None,
+                error_result=error,
+                request_path=request.get("rawPath") or request.get("path") or "N/A",
+                request_method=request.get("httpMethod") or "N/A",
+                process_time_local=0.0,
+                status_code=-1,
+            )
+            await publish(result, ws, api_key, data, app_name, env)
+            log_invocation(result)
+            return
 
     for handler in WebsocketHandlers.all():
         result = await handler.handle_bridge_event(data)
@@ -247,7 +283,13 @@ async def _handle_data_message(
             log_invocation(result)
 
 
-async def main(region: str, profile: str, app_name: str, env: str) -> None:
+async def main(
+    region: str,
+    profile: str,
+    app_name: str,
+    env: str,
+    admission: Callable[[str], BaseException | None] | None = None,
+) -> None:
     """Main loop."""
 
     # Discover AppSync API
@@ -298,7 +340,7 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                     continue
                 # Data message (Lambda invocation)
                 case "data":
-                    await _handle_data_message(data, ws, config.api_key, app_name, env)
+                    await _handle_data_message(data, ws, config.api_key, app_name, env, admission)
                 case _:
                     pass
     except BaseException:
@@ -344,11 +386,19 @@ def _cancel_on_sigint(loop: asyncio.AbstractEventLoop, task: asyncio.Task[None])
             signal.signal(signal.SIGINT, previous_handler)
 
 
-def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
+def run_bridge_server(
+    region: str,
+    profile: str,
+    app_name: str,
+    env: str,
+    admission: Callable[[str], BaseException | None] | None = None,
+) -> None:
     """Run the main loop without joining an uncooperative handler thread on exit."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    task = loop.create_task(main(region=region, profile=profile, app_name=app_name, env=env))
+    task = loop.create_task(
+        main(region=region, profile=profile, app_name=app_name, env=env, admission=admission)
+    )
     with _cancel_on_sigint(loop, task):
         try:
             loop.run_until_complete(task)
