@@ -35,7 +35,6 @@ def network_state():
                             "instance_id": f"i-1234567{index}",
                             "security_group_id": f"sg-1234567{index}",
                             "az": "us-east-1a",
-                            "identity_document": f"identity-{index}",
                             "owner": identity,
                         },
                         "dns_domains": [],
@@ -358,5 +357,44 @@ def test_private_plugin_failure_is_reported_before_runtime_launch(
             "Network artifact unavailable: Private AWS plugin is missing",
             "Repair the pinned Traforo image or Session Manager plugin with stlv tunnel install.",
         ]
+    finally:
+        session.close()
+
+
+def test_host_key_failure_blocks_dependencies_and_reports_recovery(world, network_state):
+    detail = (
+        "SSH host key changed for aws/123456789012/us-east-1/i-12345678: "
+        "expected SHA256:old, presented SHA256:new."
+    )
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: session.admit("both") is None)
+        world.statuses[0].update(
+            state="failed", cause="ssh-host-key", detail=detail, dns_retained=True
+        )
+        wait_for(lambda: isinstance(session.admit("both"), VpcUnavailableError))
+        assert session.admit("healthy") is None
+        assert session.admit("plain") is None
+        wait_for(lambda: "  " + detail in world.messages)
+        assert any("Host-key changes are not retried" in message for message in world.messages)
+        assert any("stlv tunnel trust reset" in message for message in world.messages)
+        with raises(RuntimeError, match="VPC access failed: vpc-0"):
+            session.wait()
+    finally:
+        session.close()
+
+
+@mark.parametrize("invalid", ["x" * 1025, "line\nbreak", "\x1b[31m", 123, ""])
+def test_invalid_host_key_diagnostics_fail_closed(world, network_state, invalid):
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: session.admit("both") is None)
+        world.statuses[0].update(state="failed", cause="ssh-host-key", detail=invalid)
+        wait_for(lambda: session._runtime_error is not None)
+        assert isinstance(session.admit("both"), VpcUnavailableError)
+        assert session.admit("plain") is None
+        assert not any(str(invalid) in message for message in world.messages if invalid)
     finally:
         session.close()

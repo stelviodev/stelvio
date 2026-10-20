@@ -25,6 +25,7 @@ from stelvio.tunnel.helper_client import (
 )
 from stelvio.tunnel.helper_protocol import MAX_DOMAINS, ResolverEndpoint
 from stelvio.tunnel.transport import (
+    ServerIdentityError,
     SshTransport,
     TransportArtifactError,
     TransportAuthorizationError,
@@ -32,6 +33,7 @@ from stelvio.tunnel.transport import (
     TransportRetryError,
     classify_aws,
 )
+from stelvio.tunnel.wire import MAX_STATUS_DETAIL_LENGTH
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -58,6 +60,7 @@ class VpcStatus:
     dns_retained: bool = False
     resource_probe: str = "unverified"
     phase: str = "pending"
+    detail: str | None = None
 
 
 class VpcWorker:
@@ -112,6 +115,7 @@ class VpcWorker:
         self._attempt = 0
         self._ever_ready = False
         self._phase = "pending"
+        self._identity_detail: str | None = None
 
     @property
     def status(self) -> VpcStatus:
@@ -130,6 +134,7 @@ class VpcWorker:
                 retained,
                 "tcp" if state == "ready" and self._resources() else "unverified",
                 self._phase,
+                self._identity_detail if cause == "ssh-host-key" else None,
             )
 
     def start(self) -> None:
@@ -447,6 +452,11 @@ class VpcWorker:
                     classified = classify_aws(error)
                     if isinstance(classified, TransportAuthorizationError):
                         terminal = "aws-authorization"
+                except ServerIdentityError as error:
+                    terminal = "ssh-host-key"
+                    # This exception contains only the validated target, fingerprints
+                    # and fixed recovery instructions, never raw AWS/plugin output.
+                    self._identity_detail = " ".join(str(error).split())[:MAX_STATUS_DETAIL_LENGTH]
                 except TransportArtifactError:
                     terminal = "local-artifact"
                 except (TransportAuthorizationError, DiscoveryError, ValueError) as error:

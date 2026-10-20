@@ -67,9 +67,15 @@ its processes and temporary files. It does not establish live SSM acceptance.
 `test_supervisor.py` exercises independent VPC workers with deterministic
 transport, helper, DNS, and discovery adapters. It covers generation advancement
 after retained DNS cleanup, stable listener ports, stale control rejection,
-DNS rejection and recovery, terminal local-artifact failures, and retained helper
+DNS rejection and recovery, terminal local-artifact and SSH host-key failures, and retained helper
 evidence when transport cleanup is uncertain. Readiness checks require the VPC
 DNS path and resource addresses as well as a live SOCKS transport.
+
+Host-key regressions cover refusal before forwarding and after an established
+connection fails. They require no further retries, retained DNS rejection, and
+blocked dependent invocations while unrelated endpoints remain available. Status
+diagnostics are bounded and reject control characters. A fresh Python process
+must reuse the persisted host pin and cannot replace it with another key.
 
 `test_wire.py`, `test_runtime.py`, `test_dev_session.py`, and `test_evidence.py`
 cover bounded IPC framing, session metadata validation, captured environment

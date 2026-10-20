@@ -17,6 +17,7 @@ from stelvio.tunnel.manifest import SessionDescription
 from stelvio.tunnel.plugin import PluginAssetError
 from stelvio.tunnel.policy import BastionPolicy
 from stelvio.tunnel.runtime import NetworkRuntime
+from stelvio.tunnel.wire import MAX_STATUS_DETAIL_LENGTH
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -177,6 +178,17 @@ class NetworkSession:
                                 or len(s["cause"]) > MAX_STATUS_CAUSE_LENGTH
                             )
                         )
+                        or (
+                            s.get("detail") is not None
+                            and (
+                                s.get("cause") != "ssh-host-key"
+                                or s.get("state") != "failed"
+                                or not isinstance(s["detail"], str)
+                                or not 0 < len(s["detail"]) <= MAX_STATUS_DETAIL_LENGTH
+                                or not s["detail"].isascii()
+                                or not s["detail"].isprintable()
+                            )
+                        )
                         or s.get("resource_probe", "unverified")
                         not in {"unverified", "verified", "not-required", "tcp"}
                         or s.get("phase", "pending")
@@ -203,28 +215,15 @@ class NetworkSession:
                         s.get("attempt"),
                         s.get("cause"),
                         s.get("dns_retained"),
+                        s.get("detail"),
                     )
                     for s in values
                 )
                 if signature != previous:
                     overall = "READY" if all(s["state"] == "ready" for s in values) else "DEGRADED"
                     self.report("Network " + overall)
-                    for s in values:
-                        self.report(
-                            f"  {s['identity']}: {s['state']} "
-                            f"attempt={s.get('attempt', 0)} cause={s.get('cause') or '-'} "
-                            f"retained_dns={s.get('dns_retained', False)}"
-                        )
-                        if s.get("cause") == "local-artifact":
-                            self.report(
-                                "  Repair the pinned Traforo image or Session Manager plugin "
-                                "with stlv tunnel install, then restart dev."
-                            )
-                        elif s.get("cause") == "cleanup-incomplete":
-                            self.report(
-                                "  Cleanup could not be certified; run stlv tunnel status, "
-                                "then stlv tunnel cleanup."
-                            )
+                    for status in values:
+                        self._report_vpc_status(status)
                     previous = signature
             except Exception as error:
                 with self._lock:
@@ -235,6 +234,31 @@ class NetworkSession:
                     self.report("Network DEGRADED: runtime status unavailable.")
                     previous = "unavailable"
             self._stop.wait(1)
+
+    def _report_vpc_status(self, status: dict) -> None:
+        self.report(
+            f"  {status['identity']}: {status['state']} "
+            f"attempt={status.get('attempt', 0)} cause={status.get('cause') or '-'} "
+            f"retained_dns={status.get('dns_retained', False)}"
+        )
+        if status.get("cause") == "ssh-host-key":
+            if status.get("detail"):
+                self.report("  " + status["detail"])
+            self.report(
+                "  Host-key changes are not retried. Restore the original key, "
+                "or stop this instance's tunnels and use "
+                "stlv tunnel trust reset, then restart the command."
+            )
+        elif status.get("cause") == "local-artifact":
+            self.report(
+                "  Repair the pinned Traforo image or Session Manager plugin "
+                "with stlv tunnel install, then restart dev."
+            )
+        elif status.get("cause") == "cleanup-incomplete":
+            self.report(
+                "  Cleanup could not be certified; run stlv tunnel status, "
+                "then stlv tunnel cleanup."
+            )
 
     def wait(self) -> None:
         """Keep a standalone session alive; terminal failures produce a nonzero exit."""
