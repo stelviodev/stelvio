@@ -29,9 +29,7 @@ def _description():
         BastionPolicy.PERSISTENT,
         ("private.example",),
         (SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),),
-        AccessDescriptor(
-            "i-12345678", "sg-12345678", "us-east-1a", "identity-document", "vpc-owner"
-        ),
+        AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
     )
     manifest = NetworkManifest(
         (network,), (), (EndpointNetwork("function", "function", ("vpc-owner",)),)
