@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import platform
+import re
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -134,6 +136,73 @@ def network_processes(text):
     }
 
 
+def _acl_free(path):
+    output = run("/bin/ls", "-lde", str(path)).stdout
+    first = output.splitlines()[0].split(maxsplit=1)[0]
+    return not first.endswith("+")
+
+
+def inspect_administration_artifacts(directory=None, *, root_owner=None, acl_free=None):
+    """Validate the permanent admin lock and report known transaction remnants.
+
+    The lock is intentionally persistent: unlinking it could let concurrent
+    administrators lock different inodes. The callbacks keep ownership and ACL
+    checks testable without root in ordinary unit tests.
+    """
+    directory = Path(directory or installation.ADMIN_LOCK.parent)
+    if not directory.exists() and not directory.is_symlink():
+        return ()
+    owner_check = root_owner or (lambda info: info.st_uid == 0)
+    acl_check = acl_free or _acl_free
+    try:
+        directory_info = directory.lstat()
+    except OSError as error:
+        raise AssertionError(
+            f"Cannot inspect Traforo administration directory: {directory}"
+        ) from error
+    if (
+        not stat.S_ISDIR(directory_info.st_mode)
+        or not owner_check(directory_info)
+        or directory_info.st_mode & 0o022
+        or not acl_check(directory)
+    ):
+        raise AssertionError("Traforo administration directory is unsafe")
+
+    def validate_file(path, *, mode=None, links=(1,)):
+        try:
+            info = path.lstat()
+        except OSError as error:
+            raise AssertionError(
+                f"Cannot inspect Traforo administration artifact: {path}"
+            ) from error
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or not owner_check(info)
+            or (mode is not None and stat.S_IMODE(info.st_mode) != mode)
+            or (mode is None and info.st_mode & 0o022)
+            or info.st_nlink not in links
+            or not acl_check(path)
+        ):
+            raise AssertionError(f"Traforo administration artifact is unsafe: {path.name}")
+
+    names = sorted(
+        entry.name for entry in directory.iterdir() if entry.name.startswith(".stelvio-traforo.")
+    )
+    remnants = []
+    for name in names:
+        path = directory / name
+        if name == installation.ADMIN_LOCK.name:
+            validate_file(path, mode=0o600)
+        elif name == ".stelvio-traforo.retired" or re.fullmatch(
+            r"\.stelvio-traforo\.bootstrap\.[0-9a-f]{64}", name
+        ):
+            validate_file(path, links=(1, 2))
+            remnants.append(path)
+        else:
+            raise AssertionError(f"Unknown Traforo administration artifact: {name}")
+    return tuple(remnants)
+
+
 class MacOSHost:
     def __init__(self, directory):
         self.directory = directory
@@ -142,6 +211,28 @@ class MacOSHost:
         self.baseline = None
         self.lock = None
         self.selection = None
+        self.admin_lock_identity = None
+
+    def assert_admin_lock_stable(self, *, allow_transaction_remnants=False):
+        artifacts = inspect_administration_artifacts()
+        if not allow_transaction_remnants:
+            assert not artifacts, (
+                "Retain and recover interrupted administration before testing: "
+                + ", ".join(path.name for path in artifacts)
+            )
+        lock = installation.ADMIN_LOCK
+        if not lock.exists() and not lock.is_symlink():
+            assert self.admin_lock_identity is None, "Persistent Traforo admin lock disappeared"
+            return None
+        info = lock.lstat()
+        identity = info.st_dev, info.st_ino
+        if self.admin_lock_identity is None:
+            self.admin_lock_identity = identity
+        else:
+            assert identity == self.admin_lock_identity, (
+                "Persistent Traforo admin lock inode changed"
+            )
+        return identity
 
     def prepare(self):
         import fcntl
@@ -154,9 +245,9 @@ class MacOSHost:
         assert info.st_uid == 0
         assert not info.st_mode & 0o022
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert not list(Path("/Library/PrivilegedHelperTools").glob(".stelvio-traforo.*")), (
-            "Retain and recover interrupted administration before testing"
-        )
+        remnants = inspect_administration_artifacts()
+        assert not remnants, "Retain and recover interrupted administration before testing"
+        self.assert_admin_lock_stable()
         if installation.INSTALLED_HELPER.exists():
             installation._installed_digest()  # Validate ownership before preserving anything.
             wait_empty(timeout=1)
@@ -179,13 +270,17 @@ class MacOSHost:
         self.save("baseline", self.baseline)
         self.selection = select_traforo(os.environ)
         installation.install_helper()
+        self.assert_admin_lock_stable()
         wait_empty()
 
     def save(self, name, value):
         (self.directory / f"{name}.json").write_text(json.dumps(value, indent=2))
 
     def admin(self, script):
-        installation._authorize(script)
+        try:
+            installation._authorize(script)
+        finally:
+            self.assert_admin_lock_stable(allow_transaction_remnants=True)
 
     def install(self, image):
         digest = hashlib.sha256(image.read_bytes()).hexdigest()
@@ -195,6 +290,7 @@ class MacOSHost:
         assert installation._installed_digest() == digest
 
     def assert_restored(self, name):
+        self.assert_admin_lock_stable()
         if installation.INSTALLED_HELPER.exists():
             wait_empty()
         else:
@@ -225,6 +321,7 @@ class MacOSHost:
         self.assert_restored("before-restoring-installation")
         if self.original is None:
             installation.uninstall_helper()
+            self.assert_admin_lock_stable()
             assert not installation.INSTALLED_HELPER.exists()
             assert not Path("/Library/Application Support/Stelvio/tunnel").exists()
             assert not Path("/Library/LaunchDaemons/dev.stelvio.tunnel.plist").exists()
@@ -233,6 +330,7 @@ class MacOSHost:
                 self.install(self.original)
             assert installation._installed_digest() == self.original_digest
         final = inventory()
+        self.assert_admin_lock_stable()
         self.save("final", final)
         assert final["service"] == self.baseline["service"]
         assert stable_routes(final["routes"]) == stable_routes(self.baseline["routes"])

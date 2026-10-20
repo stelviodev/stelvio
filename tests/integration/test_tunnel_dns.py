@@ -6,6 +6,7 @@ import subprocess
 import sys
 from contextlib import ExitStack
 from ipaddress import IPv4Network
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -15,7 +16,12 @@ from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
 from stelvio.tunnel.helper_client import HelperError, NativeHelper
 from stelvio.tunnel.helper_protocol import ResolverEndpoint
 
-from .tunnel_dns_fixture import SocksDnsFixture
+from .tunnel_dns_fixture import (
+    SocksDnsFixture,
+    dns_exchange,
+    dns_query_wire,
+    dns_response,
+)
 
 pytestmark = mark.integration_macos_privileged
 
@@ -40,6 +46,18 @@ def _os_lookup(name: str) -> set[str]:
     return set(json.loads(result.stdout))
 
 
+def _scoped_resolver(domain: str, port: int) -> tuple[Path, int]:
+    expected = {f"domain {domain}", "nameserver 127.0.0.1", f"port {port}"}
+    matches = []
+    resolver_directory = Path("/etc/resolver")
+    for path in resolver_directory.glob("stelvio.*"):
+        lines = set(path.read_text().splitlines())
+        if expected <= lines:
+            matches.append((path, path.lstat().st_ino))
+    assert len(matches) == 1, f"Expected one scoped resolver for {domain} at 127.0.0.1:{port}"
+    return matches[0]
+
+
 def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_path):  # noqa: PLR0915 - complete host DNS acceptance
     assert platform.system() == "Darwin"
     assert int(platform.mac_ver()[0].split(".")[0]) >= 15
@@ -47,15 +65,16 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
     baseline = helper.inspect()
     assert not baseline.owned
     assert not baseline.uncertain
+    assert not baseline.units
     domain = "1.1.1.1.nip.io"
     assert _os_lookup(uuid4().hex + "." + domain) == {"1.1.1.1"}
-    private_domain = f"p6-native-{uuid4().hex}.internal"
+    owner = str(uuid4())
+    private_domain = f"p6-native-{owner.replace('-', '')}.internal"
     scope = ExitStack()
     proxy = SocksDnsFixture()
     scope.callback(proxy.close)
-    owner = str(uuid4())
     lease = None
-    evidence = {"session": owner, "domain": domain}
+    evidence = {"session": owner, "domains": [domain, private_domain]}
     try:
         lease = helper.acquire(owner)
         binary = scope.enter_context(packaged_forwarder())
@@ -79,18 +98,41 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
         assert _os_lookup(uuid4().hex + "." + domain) == {"10.254.9.19"}
         assert _os_lookup("alias." + private_domain) == {"10.254.9.19"}
         evidence["private_cname_resolved"] = True
+
+        observed = f"observed-{uuid4().hex}.{private_domain}"
+        forwarding.dns("arm", "00000019", 1, 1, 1, name=observed)
+        assert _os_lookup(observed) == {"10.254.9.19"}
+        assert forwarding.dns("check", "00000019", 1, 1, 1, name=observed)["observed"]
+        assert forwarding.dns("release", "00000019", 1, 1, 1, name=observed)["observed"]
+
+        resolver_identity = _scoped_resolver(private_domain, port)
+        upstream_before_outage = tuple(proxy.server.queries)
         forwarding.dns("reject", "00000019", 1, 1, 1)
-        failed = uuid4().hex + "." + domain
-        forwarding.dns("arm", "00000019", 1, 1, 1, name=failed)
-        try:
-            assert _os_lookup(failed) == set()
-            assert forwarding.dns("check", "00000019", 1, 1, 1, name=failed)["observed"]
-        finally:
-            forwarding.dns("release", "00000019", 1, 1, 1, name=failed)
-        assert failed not in proxy.server.queries
-        evidence["outage_query_received"] = True
+
+        outage_name = f"outage-{uuid4().hex}.{private_domain}"
+        for index, transport in enumerate(("udp", "tcp"), start=1):
+            wire = dns_query_wire(outage_name, 0x4B30 + index)
+            response = dns_exchange("127.0.0.1", port, wire, transport)
+            assert dns_response(wire, response) == (2, 0)
+        assert _os_lookup(f"os-outage-{uuid4().hex}.{private_domain}") == set()
+        assert _os_lookup(f"outage-{uuid4().hex}.{domain}") == set()
+        assert _scoped_resolver(private_domain, port) == resolver_identity
+        assert tuple(proxy.server.queries) == upstream_before_outage
+        evidence["outage"] = {
+            "udp_servfail": True,
+            "tcp_servfail": True,
+            "scoped_resolver_retained": True,
+            "macos_lookup_failed": True,
+            "upstream_queries_unchanged": True,
+        }
+
         assert forwarding.configure_dns("00000019", 1, 1, 2, network, ()) == port
-        assert _os_lookup(uuid4().hex + "." + domain) == {"10.254.9.19"}
+        assert _scoped_resolver(private_domain, port) == resolver_identity
+        recovered = f"recovered-{uuid4().hex}.{private_domain}"
+        forwarding.dns("arm", "00000019", 1, 1, 2, name=recovered)
+        assert _os_lookup(recovered) == {"10.254.9.19"}
+        assert forwarding.dns("check", "00000019", 1, 1, 2, name=recovered)["observed"]
+        assert forwarding.dns("release", "00000019", 1, 1, 2, name=recovered)["observed"]
         assert _os_lookup("aws.amazon.com")
     finally:
         try:
