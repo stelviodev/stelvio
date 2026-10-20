@@ -11,6 +11,39 @@ from botocore.exceptions import ClientError
 from . import assert_tunnel, cli_session
 
 
+def _write_cli_session_project(tmp_path, *, no_vpc: bool = False) -> str:
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session.project = tmp_path
+    session.no_vpc = no_vpc
+    session.app = "proof-app"
+    session.profile = "proof-profile"
+    session.region = "us-east-1"
+    session.environment_name = "tunnel-proof"
+    session.invocation_path = tmp_path / "imports.jsonl"
+    session._write_project()
+    source = (tmp_path / "stlv_app.py").read_text()
+    compile(source, str(tmp_path / "stlv_app.py"), "exec")
+    return source
+
+
+def test_mixed_dev_proof_project_covers_enabled_disabled_and_plain_functions(tmp_path):
+    source = _write_cli_session_project(tmp_path)
+
+    assert "((1, 252, True), (2, 253, {}))" in source
+    assert "bastion=False" in source
+    assert "disabled-client" in source
+    assert "plain_function = Function('plain'" in source
+    assert "export_output('function3_url'" in source
+    assert "export_output('function4_url'" in source
+
+
+def test_non_vpc_proof_project_has_no_vpc_resource(tmp_path):
+    source = _write_cli_session_project(tmp_path, no_vpc=True)
+
+    assert "Function('plain', handler='handlers/plain.handler'" in source
+    assert "Vpc(" not in source
+
+
 class _Paginator:
     def __init__(self, client: _Client, operation: str) -> None:
         self.client = client
