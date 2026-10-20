@@ -20,6 +20,12 @@ from stelvio.stack_outputs import read_network_manifest
 from stelvio.tunnel.helper_client import NativeHelper
 from stelvio.tunnel.installation import INSTALLED_HELPER
 
+from .assert_tunnel import (
+    AbsenceAuditOptions,
+    assert_application_absent,
+    capture_bastion_volume_ids,
+)
+
 STARTUP_TIMEOUT = 900
 STOP_TIMEOUT = 90
 _SSM_REASON = re.compile(r"stelvio/[0-9a-f]{16}/[0-9a-f]{32}\Z")
@@ -374,31 +380,29 @@ finally:
                 f"Retaining proof deployment {self.app}/{self.environment_name}: "
                 "native helper cleanup is not certified; preserve evidence and recover first"
             )
+        volume_capture_error = None
+        try:
+            bastion_ids = [self._outputs[f"bastion{number}_id"] for number in (1, 2)]
+            self._bastion_volume_ids = capture_bastion_volume_ids(
+                sdk=self.aws, instance_ids=bastion_ids
+            )
+        except Exception as error:
+            # Missing outputs or an inventory error must not prevent cleanup of
+            # a partially deployed proof app. The post-destroy audit still checks
+            # all tagged and name-owned resources, then reports the volume gap.
+            self._bastion_volume_ids = ()
+            volume_capture_error = error
         self.command("destroy", self.environment_name, "--yes", timeout=STARTUP_TIMEOUT)
-        if self._outputs:
-            self._assert_aws_resources_absent()
+        self._assert_aws_resources_absent()
+        if volume_capture_error is not None:
+            raise RuntimeError(
+                "AWS cleanup completed, but bastion block-device absence could not be certified"
+            ) from volume_capture_error
 
     def _assert_aws_resources_absent(self) -> None:
-        ec2 = self.aws.client("ec2")
-        instance_ids = [self._outputs[f"bastion{number}_id"] for number in (1, 2)]
-        reservations = ec2.describe_instances(
-            Filters=[{"Name": "instance-id", "Values": instance_ids}]
-        )["Reservations"]
-        assert not any(reservation["Instances"] for reservation in reservations)
-        for number in (1, 2):
-            cluster_id = self._outputs[f"cluster{number}_id"]
-            try:
-                self.aws.client("docdb").describe_db_clusters(DBClusterIdentifier=cluster_id)
-            except self.aws.client("docdb").exceptions.DBClusterNotFoundFault:
-                pass
-            else:
-                raise AssertionError(f"Proof DocumentDB cluster remains: {cluster_id}")
-            function_name = self._outputs[f"function{number}_name"]
-            try:
-                self.aws.client("lambda").get_function(FunctionName=function_name)
-            except self.aws.client("lambda").exceptions.ResourceNotFoundException:
-                pass
-            else:
-                raise AssertionError(f"Proof Lambda remains: {function_name}")
-            vpc_id = self._outputs[f"vpc{number}_id"]
-            assert not ec2.describe_vpcs(VpcIds=[vpc_id])["Vpcs"]
+        assert_application_absent(
+            self.app,
+            self.environment_name,
+            sdk=self.aws,
+            options=AbsenceAuditOptions(volume_ids=getattr(self, "_bastion_volume_ids", ())),
+        )
