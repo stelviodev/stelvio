@@ -72,12 +72,13 @@ def test_resolver_requires_unprivileged_integral_port(port):
         configure(resolvers=(ResolverEndpoint("db.internal", port),)).encode()
 
 
-def test_inspection_requests_are_anonymous_and_configuration_is_bounded():
-    request = HelperRequest(HelperOperation.INSPECT)
+def test_status_requests_are_anonymous_and_configuration_is_bounded():
+    request = HelperRequest(HelperOperation.STATUS)
     assert HEADER.size == 56
     assert len(request.encode()) == HEADER.size
+    assert request.encode()[8] == 1
     with pytest.raises(ValueError, match="accepts no session capability"):
-        HelperRequest(HelperOperation.INSPECT, session=str(uuid4())).encode()
+        HelperRequest(HelperOperation.STATUS, session=str(uuid4())).encode()
     endpoints = tuple(ResolverEndpoint(f"{index}.db.internal", 53053) for index in range(65))
     oversized = configure(resolvers=endpoints)
     with pytest.raises(ValueError, match="domain limit"):
