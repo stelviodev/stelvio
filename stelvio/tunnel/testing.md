@@ -124,6 +124,14 @@ closes ownership after bridge exit, and rejects expired or unavailable dependent
 invocations before handler dispatch. Function tests verify that rejection happens
 before importing user code. Non-VPC dispatch remains available.
 
+The dev-command scenario in `test_standalone.py` first pins a key through
+standalone mode, then runs fresh dev commands through the real shared session,
+SSH transport, and bridge admission code with controlled external boundaries.
+It checks that changed keys block dependent handler dispatch across restarts,
+ordinary handlers still run, diagnostics include fingerprints and reset guidance,
+and the original key works again in a fresh session. It does not contact AWS or
+start AppSync.
+
 Run the focused dev integration checks with:
 
 ```bash
@@ -143,9 +151,12 @@ using distinct markers that are checked against both databases. The test stops o
 bastion, requires the structured `VpcUnavailableError` before handler import,
 confirms the peer and independent endpoints remain usable, then waits for both the
 advanced helper generation and a fresh network-ready report before retrying. It also
-rotates the proof-owned bastion SSH host key, checks terminal admission failure and
-DNS `SERVFAIL`, restores the original key, and starts a new session to verify
-recovery. SIGINT and SIGKILL cleanup, restart, SSM termination, retained bastions,
+rotates the proof-owned bastion SSH host key, checks terminal `ssh-host-key`
+admission failure and DNS `SERVFAIL`, and restarts dev mode while the changed key
+is still present. The new command must reject the same key and retain the original
+pin while independent endpoints remain usable. The test restores the original key
+and starts a fresh session to verify recovery. SIGINT and SIGKILL cleanup,
+restart, SSM termination, retained bastions,
 stable resolver ports, and unchanged deployment state are checked as well.
 
 A separate opt-in case invokes a real non-VPC Function URL while the helper is
@@ -165,8 +176,10 @@ uv run pytest \
   --integration-macos-privileged --integration-tunnel -n 0 -q
 ```
 
-The fixtures check the account before deployment. The dev acceptance mutates only
-the proof bastion's SSH host key and restores it in `finally`; the non-VPC case
+The fixtures check the account before deployment. Dev and standalone acceptance
+share the guarded, nonce-owned host-key rotation fixture described above. Unknown
+Run Command outcomes stop further fault commands and require proof teardown;
+they do not trigger a racing restoration. The non-VPC case
 temporarily uninstalls the helper and lets `macos_host` restore the original bytes.
 The AWS fixture destroys each proof app only after helper cleanup is certified.
 These tests are separate from `tests/integration/run_all.sh` and remain pending
