@@ -588,7 +588,10 @@ def test_host_key_fault_restores_on_body_failure_but_not_uncertain_setup():
 
 
 @pytest.mark.parametrize("audit_fails", [False, True])
-def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch, audit_fails):
+@pytest.mark.parametrize("helper_present", [False, True])
+def test_destroy_resets_proof_pins_only_after_certified_aws_absence(
+    monkeypatch, audit_fails, helper_present
+):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
     session.no_vpc = False
@@ -608,13 +611,20 @@ def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch,
     session._assert_aws_resources_absent = audit
     monkeypatch.setattr(cli_session, "capture_bastion_volume_ids", lambda **kwargs: ())
     monkeypatch.setattr(
+        cli_session, "INSTALLED_HELPER", SimpleNamespace(exists=lambda: helper_present)
+    )
+    monkeypatch.setattr(
         cli_session,
         "NativeHelper",
         lambda: SimpleNamespace(
             status=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
         ),
     )
-    if audit_fails:
+    if not helper_present:
+        with pytest.raises(RuntimeError, match="helper is unavailable"):
+            session.destroy()
+        assert operations == []
+    elif audit_fails:
         with pytest.raises(AssertionError, match="uncertain"):
             session.destroy()
         assert operations == ["destroy", "audit"]
