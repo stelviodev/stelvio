@@ -223,7 +223,7 @@ def test_unverifiable_status_revokes_admission(world, network_state, bad_snapsho
     ("cause", "guidance"),
     [
         ("local-artifact", "Repair the pinned Traforo image"),
-        ("cleanup-incomplete", "run stlv tunnel inspect"),
+        ("cleanup-incomplete", "run stlv tunnel status"),
     ],
 )
 def test_terminal_vpc_failure_blocks_only_its_dependents_and_reports_guidance(
