@@ -7,6 +7,7 @@ import os
 import py_compile
 import re
 import sys
+import time
 from pathlib import Path
 
 import pulumi
@@ -15,7 +16,9 @@ from pytest import mark, param
 from stelvio.aws.api_gateway import RestApi
 from stelvio.aws.api_gateway.rest_api.config import CorsConfig
 from stelvio.aws.function import Function
+from stelvio.bridge.local import listener
 from stelvio.link import Link
+from stelvio.tunnel.session import VpcUnavailableError
 
 pytestmark = mark.usefixtures("project_cwd", "pulumi_mocks", "dev_mode_context")
 
@@ -76,6 +79,60 @@ def test_dev_mode_handler_receives_lambda_context(project_cwd):
 
     async def check():
         assert await invoke_ok(fn) == {"id": "invoke-1", "remaining": 0, "identity": None}
+
+    return check()
+
+
+@pulumi.runtime.test
+def test_network_admission_rejects_before_handler_import(project_cwd, monkeypatch):
+    marker = project_cwd / "network-handler-imported"
+    write_files(
+        project_cwd,
+        {
+            "functions/gated.py": (
+                f"from pathlib import Path\nPath({str(marker)!r}).write_text('imported')\n"
+                "def main(event, context):\n    return {'statusCode': 200}\n"
+            )
+        },
+    )
+    fn = Function("gated", handler="functions/gated.main")
+    _ = fn.resources
+
+    async def check():
+        published = []
+
+        async def capture(result, *_args):
+            published.append(result)
+
+        monkeypatch.setattr(listener, "publish", capture)
+        monkeypatch.setattr(listener, "log_invocation", lambda _result: None)
+        message = {
+            "type": "data",
+            "event": json.dumps(
+                {
+                    "invoke_id": "network-gate",
+                    "endpointId": fn._dev_endpoint_id,
+                    "event": {"path": "/", "httpMethod": "GET"},
+                    "context": {
+                        **LAMBDA_CONTEXT,
+                        "epoch_deadline_time_in_ms": int(time.time() * 1000) + 15000,
+                    },
+                }
+            ),
+        }
+        error = VpcUnavailableError("VPC access unavailable for this invocation: vpc-1")
+        await listener._handle_data_message(
+            message,
+            None,
+            "key",
+            "app",
+            "dev",
+            lambda endpoint: error if endpoint == fn._dev_endpoint_id else None,
+        )
+
+        assert not marker.exists()
+        assert len(published) == 1
+        assert published[0].error_result is error
 
     return check()
 

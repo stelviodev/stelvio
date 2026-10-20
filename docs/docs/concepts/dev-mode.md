@@ -15,7 +15,8 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 
 - Your Lambdas get replaced with a small stub Lambda.
 - The stub forwards each invocation over an AppSync Events channel.
-- The `stlv dev` process runs a local dev server, executes your real handler, then sends the result back to AWS.
+- The `stlv dev` process captures deployed networking state, starts managed VPC access when a handler needs it, then starts the AppSync bridge.
+- The bridge admits each invocation after its enabled VPC dependencies are ready. It executes the local handler and sends the result back to AWS.
 - The bridge checks AppSync connection and subscription acknowledgements before it accepts invocations.
 
 Your public entrypoint (API Gateway URL / Function URL) stays the same — you hit it like normal.
@@ -123,6 +124,12 @@ not used. A working SOCKS proxy by itself
 does not make a VPC ready. New invocations that depend on an unready VPC are
 rejected before handler execution; unrelated VPCs and handlers without a VPC can
 continue.
+
+The bridge checks current session status for each invocation. It rejects an expired
+invocation or one whose required VPC is starting, reconnecting, failed, or has stale
+status. It performs this check before importing the handler module. An artifact
+failure stops dev startup with repair instructions; a failure in one VPC does not
+block Functions that use a healthy VPC or no enabled VPC.
 
 With no enabled VPC dependencies, Stelvio skips helper activation. A VPC whose
 bastion policy is disabled is reported and left to the developer's local network.

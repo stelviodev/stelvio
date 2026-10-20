@@ -230,6 +230,14 @@ rm -rf .stelvio/lambda_dependencies
 
 The bridge waits up to 10 seconds for each AppSync connection or subscription acknowledgement. If it times out, check network access and the AppSync API key, then restart `stlv dev`.
 
+`stlv dev` starts managed networking before it starts the bridge. If the output says
+that a VPC is unavailable, only Functions that depend on that VPC are blocked. Check
+the reported phase and cause, then verify the selected AWS profile, bastion state,
+SSM access, and DocumentDB membership. A local image or plugin error is terminal;
+repair it with `stlv tunnel install` and restart dev. If cleanup is uncertain, retain
+the helper evidence and run `stlv tunnel inspect`, then `stlv tunnel cleanup` after
+dev has stopped.
+
 ## Getting Help
 
 If you're still stuck:
