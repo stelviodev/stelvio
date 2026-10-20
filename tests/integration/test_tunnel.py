@@ -24,7 +24,7 @@ def standalone_cli_session(tmp_path):
 
 def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session):  # noqa: PLR0915 - full session acceptance lifecycle
     session = standalone_cli_session
-    baseline = NativeHelper().inspect()
+    baseline = NativeHelper().status()
     assert not baseline.owned
     assert not baseline.uncertain
     assert not baseline.units
@@ -50,7 +50,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
 
     helper = NativeHelper()
     first_unit_id = hashlib.sha256(first_vpc.identity.encode()).hexdigest()[:8]
-    first_unit = next(item for item in helper.inspect().units if item.unit == first_unit_id)
+    first_unit = next(item for item in helper.status().units if item.unit == first_unit_id)
     assert first_unit.status.name.lower() == "active"
     initial_generation = first_unit.generation
     ports_before = session.resolver_ports()
