@@ -54,7 +54,7 @@ class StandaloneCliSession:
             )
         if not INSTALLED_HELPER.is_file():
             pytest.skip("Install the approved native helper before standalone acceptance")
-        baseline = NativeHelper().inspect()
+        baseline = NativeHelper().status()
         if baseline.owned or baseline.uncertain or baseline.mutating or baseline.units:
             pytest.skip("Standalone acceptance requires an idle native helper and host")
         if importlib.util.find_spec("pymongo") is None:
@@ -262,8 +262,8 @@ finally:
         unit_id = hashlib.sha256(identity.encode()).hexdigest()[:8]
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            inspection = NativeHelper().inspect()
-            unit = next((item for item in inspection.units if item.unit == unit_id), None)
+            state = NativeHelper().status()
+            unit = next((item for item in state.units if item.unit == unit_id), None)
             if (
                 unit is not None
                 and unit.status.name.lower() == status_name
@@ -350,7 +350,7 @@ finally:
         helper = NativeHelper()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            state = helper.inspect()
+            state = helper.status()
             if not state.owned and not state.uncertain and not state.mutating and not state.units:
                 return
             time.sleep(1)
@@ -374,7 +374,7 @@ finally:
             return
         if self.process is not None and self.process.poll() is None:
             self.terminate()
-        state = NativeHelper().inspect()
+        state = NativeHelper().status()
         if state.owned or state.uncertain or state.mutating or state.units:
             raise RuntimeError(
                 f"Retaining proof deployment {self.app}/{self.environment_name}: "
