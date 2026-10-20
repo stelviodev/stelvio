@@ -19,10 +19,10 @@ from ipaddress import IPv4Network
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
-from uuid import uuid4
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 import boto3
 import pytest
