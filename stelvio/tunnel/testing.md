@@ -97,11 +97,26 @@ uv run pytest \
   tests/tunnel/test_dev_session.py -q
 ```
 
-`test_standalone.py` exercises `stlv tunnel start` using captured state and a fake
-session. It verifies the state context is released before networking waits, the
-no-dependency path does not wait, and interruption, readiness failure, and uncertain
-cleanup produce the expected CLI result. The distribution acceptance also checks
-that the installed CLI exposes `start`.
+`test_standalone.py` checks the standalone command lifecycle. Its trust scenarios
+use the real CLI, shared session, and SSH transport with deterministic AWS/SSH
+boundaries. Each run creates a new session and transport. The tests verify pin
+reuse, repeated changed-key refusal, actionable diagnostics, original-key
+restoration, and explicit reset with confirmation. Shared fixtures live in
+`tests/tunnel/conftest.py`; the separate OpenSSH test checks the real SSH behavior.
+
+The opt-in AWS standalone scenario also compares pins across normal exit,
+restart, and SIGKILL. It rotates a proof-owned bastion key, requires two fresh
+commands to reject it, restores the original key, and checks database access.
+Fault commands require test-only Run Command access to `AWS-RunShellScript`.
+Production tunneling does not need this permission. The fault helper checks
+instance ownership before each command and retains uncertainty if execution
+cannot be certified; it does not race a restoration command against unknown work.
+
+The fixture refuses pre-existing pins for proof instances. After independent AWS
+absence is certified, it removes only pins claimed for the proof deployment.
+Per-identity lock files remain in place. Unit tests cover pin ownership, foreign
+instance refusal, command uncertainty, and cleanup ordering. Live AWS acceptance
+is pending until this explicitly enabled lane is run.
 
 ## Unit tests
 
