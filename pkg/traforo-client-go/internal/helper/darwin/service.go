@@ -370,7 +370,7 @@ func (s *service) validChange(c client, r protocol.Request) bool {
 }
 func (s *service) handle(c *client, r protocol.Request) {
 	reject := func(status uint16) { replyClose(c.fd, status); c.fd = -1 }
-	if r.Operation == protocol.Inspect {
+	if r.Operation == protocol.Status {
 		body := make([]byte, 21)
 		copy(body, "STLVHLP1")
 		binary.BigEndian.PutUint32(body[8:], 1)

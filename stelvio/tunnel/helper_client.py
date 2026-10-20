@@ -31,7 +31,7 @@ MAX_REPLY = 256
 CONFIGURE_DIAGNOSTIC = b"CF\x01"
 MAX_CONFIGURE_STAGE = 23
 SOCKET_MODE = 0o666
-_INSPECTION = struct.Struct("!8sIII")
+_STATUS_RESPONSE = struct.Struct("!8sIII")
 _ACQUISITION = struct.Struct("!16sI")
 _UNIT = struct.Struct("!IQB")
 MAX_UNITS = 8
@@ -81,7 +81,7 @@ class HelperUnitState:
 
 
 @dataclass(frozen=True)
-class HelperInspection:
+class HelperOwnershipState:
     owned: bool
     uncertain: bool
     mutating: bool
@@ -249,19 +249,19 @@ class NativeHelper:
                 raise HelperError("Only acquisition may return a packet descriptor")
             return payload
 
-    def inspect(self) -> HelperInspection:
-        payload = self.request(HelperRequest(HelperOperation.INSPECT))
-        if len(payload) <= _INSPECTION.size:
-            raise HelperError("The helper returned an incompatible inspection")
-        magic, abi, carrier, flags = _INSPECTION.unpack(payload[: _INSPECTION.size])
+    def status(self) -> HelperOwnershipState:
+        payload = self.request(HelperRequest(HelperOperation.STATUS))
+        if len(payload) <= _STATUS_RESPONSE.size:
+            raise HelperError("The helper returned an incompatible status response")
+        magic, abi, carrier, flags = _STATUS_RESPONSE.unpack(payload[: _STATUS_RESPONSE.size])
         if magic != b"STLVHLP1" or abi != HELPER_ABI or carrier != CARRIER_VERSION or flags & ~7:
             raise HelperError("The installed helper is incompatible with this package")
-        count = payload[_INSPECTION.size]
-        if count > MAX_UNITS or len(payload) != _INSPECTION.size + 1 + count * _UNIT.size:
+        count = payload[_STATUS_RESPONSE.size]
+        if count > MAX_UNITS or len(payload) != _STATUS_RESPONSE.size + 1 + count * _UNIT.size:
             raise HelperError("The helper returned an invalid unit inventory")
         units = []
         seen = set()
-        for offset in range(_INSPECTION.size + 1, len(payload), _UNIT.size):
+        for offset in range(_STATUS_RESPONSE.size + 1, len(payload), _UNIT.size):
             identity, generation, status = _UNIT.unpack_from(payload, offset)
             if not identity or not generation or identity in seen:
                 raise HelperError("The helper returned an invalid unit identity")
@@ -271,7 +271,9 @@ class NativeHelper:
                 raise HelperError("The helper returned an invalid unit status") from error
             units.append(HelperUnitState(f"{identity:08x}", generation, value))
             seen.add(identity)
-        return HelperInspection(bool(flags & 1), bool(flags & 2), bool(flags & 4), tuple(units))
+        return HelperOwnershipState(
+            bool(flags & 1), bool(flags & 2), bool(flags & 4), tuple(units)
+        )
 
     def reconcile(self) -> None:
         self.request(HelperRequest(HelperOperation.RECONCILE))
@@ -344,11 +346,11 @@ class NativeLease:
     def remove(self, *, unit: str, generation: int, keep_dns: bool = False) -> None:
         self._request(HelperOperation.REMOVE, unit=unit, generation=generation, keep_dns=keep_dns)
 
-    def inspect(self) -> HelperInspection:
+    def status(self) -> HelperOwnershipState:
         with self._mutations:
             if self.closed or os.getpid() != self.pid:
                 raise HelperError("The native lease belongs to another or closed process")
-            return self.helper.inspect()
+            return self.helper.status()
 
     def close(self) -> None:
         if self.closed:

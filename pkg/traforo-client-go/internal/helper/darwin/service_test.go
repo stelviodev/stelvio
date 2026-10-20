@@ -159,6 +159,32 @@ func assertReply(t *testing.T, fd int, status uint16) {
 	}
 }
 
+func TestStatusOperationDispatchesOwnershipResponse(t *testing.T) {
+	s := serviceFixture()
+	s.uncertain = true
+	s.working = true
+	control := servicePair(t, unix.SOCK_STREAM)
+	c := client{fd: control[0], peer: s.peer}
+	s.handle(&c, protocol.Request{Operation: protocol.Status})
+
+	poll := []unix.PollFd{{Fd: int32(control[1]), Events: unix.POLLIN}}
+	if n, err := unix.Poll(poll, 2000); err != nil || n != 1 {
+		t.Fatalf("status response missing: n=%d err=%v", n, err)
+	}
+	data := make([]byte, 64)
+	n, oob, flags, _, err := unix.Recvmsg(control[1], data, nil, 0)
+	if err != nil || oob != 0 || flags&unix.MSG_CTRUNC != 0 || n != 37 {
+		t.Fatalf("status response size=%d controls=%d flags=%d err=%v", n, oob, flags, err)
+	}
+	if string(data[:8]) != "STLVREP1" || binary.BigEndian.Uint16(data[8:]) != OK || binary.BigEndian.Uint32(data[12:]) != 21 {
+		t.Fatalf("status reply header=%x", data[:16])
+	}
+	body := data[16:n]
+	if string(body[:8]) != "STLVHLP1" || binary.BigEndian.Uint32(body[8:]) != 1 || binary.BigEndian.Uint32(body[12:]) != 1 || binary.BigEndian.Uint32(body[16:]) != 7 || body[20] != 0 {
+		t.Fatalf("status response body=%x", body)
+	}
+}
+
 func TestServiceRejectsUnauthorizedRequestsWithoutMutatingLease(t *testing.T) {
 	for _, operation := range []byte{protocol.Configure, protocol.Remove, protocol.Release} {
 		for _, violation := range []string{"peer", "birth", "session", "capability", "revoked", "unowned", "unleased"} {

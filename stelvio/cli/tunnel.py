@@ -36,12 +36,12 @@ def install() -> None:
     click.echo("Native VPC helper ready.")
 
 
-@tunnel.command("inspect")
-def inspect() -> None:
-    """Inspect the installed helper and its owned host units."""
+@tunnel.command("status")
+def status() -> None:
+    """Show the helper's owned networking state."""
 
     def show() -> None:
-        value = NativeHelper().inspect()
+        value = NativeHelper().status()
         click.echo(f"owned={value.owned} uncertain={value.uncertain} mutating={value.mutating}")
         for unit in value.units:
             click.echo(f"{unit.unit} generation={unit.generation} {unit.status.name.lower()}")
