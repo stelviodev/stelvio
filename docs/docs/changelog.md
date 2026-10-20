@@ -9,6 +9,12 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Dev Mode
+
+- **`stlv dev` starts managed networking for private handler dependencies.** It captures deployed VPC metadata, starts the shared session before the AppSync bridge, and rejects expired or unready dependent invocations before handler import. A failure in one VPC does not block independent Functions.
+
+    → [Dev Mode Guide](concepts/dev-mode.md#managed-vpc-transport)
+
 ### Bug Fixes
 
 - **Dev mode handles AppSync acknowledgements and interruption safely.** It ignores keepalives during acknowledgement waits, rejects mismatched subscription responses, and closes the local connection on shutdown. The Lambda stub disables background WebSocket pings so a warm connection can survive runtime freeze and thaw.
