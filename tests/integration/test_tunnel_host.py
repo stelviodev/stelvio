@@ -24,7 +24,13 @@ from stelvio.tunnel.helper_client import HelperError, NativeHelper
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, ResolverEndpoint
 from stelvio.tunnel.processes import identity as process_identity
 
-from .macos_host import HOLDER, cleanup_when_idle, run, wait_empty
+from .macos_host import (
+    HOLDER,
+    cleanup_when_idle,
+    inspect_administration_artifacts,
+    run,
+    wait_empty,
+)
 from .test_tunnel_dns import _os_lookup
 from .tunnel_dns_fixture import SocksDnsFixture
 
@@ -122,6 +128,20 @@ def test_helper_restart_revokes_old_capability_and_recovers_journal(macos_host):
         lease.revoke()
     # A new authenticated lease succeeds after restart recovery.
     NativeHelper().acquire(str(uuid4())).close()
+
+
+def test_administration_lock_is_persistent_across_repeated_operations(macos_host):
+    before = macos_host.assert_admin_lock_stable()
+    macos_host.admin(":")
+    first = macos_host.assert_admin_lock_stable()
+    macos_host.admin(":")
+    second = macos_host.assert_admin_lock_stable()
+
+    assert first is not None
+    assert second == first
+    if before is not None:
+        assert first == before
+    assert not inspect_administration_artifacts()
 
 
 def test_live_lease_and_descriptor_privilege_boundaries(macos_host, tmp_path):
@@ -326,10 +346,13 @@ def test_changed_image_refusal_idle_upgrade_and_interrupted_replacement(macos_ho
             assert not installation.INSTALLED_HELPER.exists()
         else:
             assert installation._installed_digest() == digest
-        assert list(installation.INSTALLED_HELPER.parent.glob(".stelvio-traforo.bootstrap.*"))
+        remnants = inspect_administration_artifacts()
+        assert remnants
+        assert any(path.name.startswith(".stelvio-traforo.bootstrap.") for path in remnants)
         macos_host.install(changed)
         assert installation._installed_digest() == digest
-        assert not list(installation.INSTALLED_HELPER.parent.glob(".stelvio-traforo.*"))
+        assert not inspect_administration_artifacts()
+        macos_host.assert_admin_lock_stable()
     finally:
         macos_host.install(original)
 

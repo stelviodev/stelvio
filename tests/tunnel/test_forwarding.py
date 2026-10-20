@@ -171,3 +171,59 @@ def test_verified_nonroot_forwarder_exchanges_private_dns_when_opted_in():
         carrier.close()
         peer.close()
         socks.close()
+
+
+@mark.skipif(sys.platform != "darwin", reason="pinned Traforo releases target macOS")
+def test_verified_nonroot_forwarder_dns_reject_servfail_and_reconfigure_when_opted_in():
+    import os
+
+    if os.environ.get("STLV_TEST_TRAFORO_FORWARDER") != "1":
+        skip("set STLV_TEST_TRAFORO_FORWARDER=1 to run the verified native forwarder")
+
+    from stelvio.tunnel.forwarding import packaged_forwarder
+    from tests.integration.tunnel_dns_fixture import (
+        SocksDnsFixture,
+        dns_exchange,
+        dns_query_wire,
+        dns_response,
+    )
+
+    network = SimpleNamespace(
+        cidrs=(IPv4Network("10.254.0.0/16"),), dns_domains=("forwarder.test",)
+    )
+    socks = SocksDnsFixture()
+    carrier, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    forwarding = None
+    try:
+        with packaged_forwarder() as binary:
+            forwarding = Forwarding(binary, carrier)
+            forwarding.add("00000001", 7, 12, network, socks.port)
+            port = forwarding.configure_dns("00000001", 7, 12, 19, network, ())
+
+            for transport in ("udp", "tcp"):
+                wire = dns_query_wire(f"before-{transport}.forwarder.test", 0x4A40)
+                response = dns_exchange("127.0.0.1", port, wire, transport)
+                assert dns_response(wire, response)[0] == 0
+
+            forwarding.dns("reject", "00000001", 7, 12, 19)
+            upstream_before = tuple(socks.server.queries)
+            for index, transport in enumerate(("udp", "tcp"), start=1):
+                wire = dns_query_wire(f"outage-{transport}.forwarder.test", 0x4A40 + index)
+                response = dns_exchange("127.0.0.1", port, wire, transport)
+                assert dns_response(wire, response) == (2, 0)
+            assert tuple(socks.server.queries) == upstream_before
+
+            recovered_port = forwarding.configure_dns("00000001", 7, 12, 20, network, ())
+            assert recovered_port == port
+            for index, transport in enumerate(("udp", "tcp"), start=1):
+                name = f"recovered-{transport}.forwarder.test"
+                wire = dns_query_wire(name, 0x4A50 + index)
+                response = dns_exchange("127.0.0.1", port, wire, transport)
+                assert dns_response(wire, response) == (0, 1)
+                assert name in socks.server.queries
+    finally:
+        if forwarding is not None:
+            forwarding.close()
+        carrier.close()
+        peer.close()
+        socks.close()
