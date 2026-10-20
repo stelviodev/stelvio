@@ -78,6 +78,38 @@ it. Supplying either capacity argument constructs a complete range with the
 other bound's default and takes precedence over app-wide dictionary defaults.
 Callable and component-level customizations can override it and are unvalidated.
 
+Prefer `instance="serverless"`, `min_capacity`, and `max_capacity` for ordinary
+serverless configuration. The automatic range follows the constructor's
+`instance`, before instance customization runs. If the constructor selects a
+provisioned class and app-wide or component-level customization changes it to
+`db.serverless`, also supply the cluster range. AWS rejects a serverless instance
+on a cluster without that range:
+
+```python
+from stelvio.aws.document_db import DocumentDb
+from stelvio.aws.vpc import Vpc
+
+vpc = Vpc("main")
+db = DocumentDb(
+    "todos",
+    vpc=vpc,
+    instance="t3.medium",
+    customize={
+        "cluster": {
+            "serverless_v2_scaling_configuration": {
+                "min_capacity": 0.5,
+                "max_capacity": 4,
+            },
+        },
+        "instance": {"instance_class": "db.serverless"},
+    },
+)
+```
+
+Conversely, omitting `instance` while customizing the class to a provisioned
+instance leaves the default range configured. It has no effect on provisioned
+instances.
+
 Switching to a provisioned `instance` leaves the old capacity range on the
 cluster: AWS cannot remove it, and it has no effect on provisioned instances.
 
@@ -150,6 +182,25 @@ instance.
 The writer endpoint is `host`. Read-only traffic can use `reader_host`, which
 load-balances across replicas. With one instance, `reader_host` still exists
 but points at that same instance.
+
+Stelvio leaves `promotion_tier` unset, so AWS uses its default of **1**.
+Serverless readers in tiers 0 or 1 cannot scale below the writer's current
+capacity, even when the readers are idle. Readers in tiers 2–15 scale
+independently within the cluster's range and can idle at its minimum:
+
+```python
+db = DocumentDb(
+    "todos",
+    vpc=vpc,
+    replicas=1,
+    customize={"instance": {"promotion_tier": 2}},
+)
+```
+
+This customization applies to every instance. Independently scaling readers
+can cost less when idle, but may need to scale up to handle the writer's workload
+after failover. Tiers 0/1 keep readers ready with at least the writer's capacity.
+See [AWS's promotion-tier guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-managing.html).
 
 ## Engine version
 
@@ -357,6 +408,18 @@ using 730 hours/month, before storage, I/O, backup, networking, and CPU credits:
 | Default serverless idle floor (0.5 DCU) | $0.0411 | $30.00 |
 | Default serverless ceiling (4 DCUs) | $0.3288 | $240.02 |
 | Fixed `t3.medium` (`instance="t3.medium"`) | $0.078 | $56.94 |
+
+The idle floor also determines available resources: at **0.5 DCU**, each
+instance has approximately **1 GiB of memory**, **250 total connections**,
+**39 active connections**, **6 cursors**, and **12 open transactions**.
+These limits depend on the instance's current capacity; see
+[AWS's serverless instance limits](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-instance-limits.html).
+Choose a higher minimum if the limits at the floor are insufficient for your
+workload. AWS recommends `min_capacity` of at least **1.5 DCUs** when you need
+to avoid the lower eventual caps on active connections, cursors, and open
+transactions that apply when the minimum is 1 DCU or less. This does not raise
+the listed limits at 4 DCUs, where both tables have the same values. See
+[AWS's minimum-capacity guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-scaling-config.html).
 
 Serverless costs $0.0822 per DCU-hour. A replica is a full instance billed like
 the primary; multiply compute estimates by **`1 + replicas`**. Actual serverless
