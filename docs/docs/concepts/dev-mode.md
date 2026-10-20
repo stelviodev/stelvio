@@ -29,9 +29,19 @@ and hostnames to be enabled before using private DNS. Handler changes to AWS
 environment variables cannot redirect the captured AWS session.
 
 The access path uses Systems Manager and EC2 Instance Connect; it does not open
-inbound SSH. Stelvio verifies the deployed identity document's content, version,
-and hash, reads the bastion's SSH host key through that document, and pins the key
-for the session. OpenSSH then uses the verified Session Manager plugin at its
+inbound SSH. OpenSSH learns the bastion's Ed25519 host key through the verified
+SSM connection on first use. After SSH authentication succeeds, Stelvio stores
+that key by AWS partition, account, region, and instance ID. It requires the same
+key on reconnect and across command restarts. A changed key stops the connection;
+it is never accepted by automatic recovery.
+
+Pins are private, per-user records under Stelvio's binary cache in
+`ssh-host-trust`. Session cleanup and helper uninstall leave these records intact.
+An instance replacement gets a new identity and a new pin. Intentional key rotation
+on the same instance requires an explicit trust reset; see
+[host-key recovery](../intro/troubleshooting.md#managed-vpc-transport-identity-and-authorization).
+
+OpenSSH uses the verified Session Manager plugin at its
 private cache path. A missing or unsafe plugin is a local artifact error; repair
 it with `stlv tunnel install` rather than retrying the AWS connection.
 
