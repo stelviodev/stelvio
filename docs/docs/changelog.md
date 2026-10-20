@@ -8,6 +8,12 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Dev Mode
+
+- **`stlv dev` starts managed networking for private handler dependencies.** It captures deployed VPC metadata, starts the shared session before the AppSync bridge, and rejects expired or unready dependent invocations before handler import. A failure in one VPC does not block independent Functions.
+
+    → [Dev Mode Guide](concepts/dev-mode.md#managed-vpc-transport)
+
 ### Bug Fixes
 
 - **`Ctrl+C` stops `stlv dev` even while a handler is running.** Before, it could hang for up to 5 minutes.

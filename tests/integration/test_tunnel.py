@@ -1,6 +1,7 @@
 """Opt-in standalone CLI → deployed DocumentDB acceptance."""
 
 import signal
+import time
 
 import pytest
 
@@ -142,5 +143,82 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     assert session.check_database(first_cluster)["read_write"]
     assert session.terminate(signal.SIGINT) == 0
     session.wait_for_helper_cleanup()
+    session.assert_bastions_running()
+    session.assert_state_unchanged()
+
+
+def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):  # noqa: PLR0915 - complete dev networking acceptance
+    session = standalone_cli_session
+    session.start_dev()
+    session.wait_ready()
+    # Dev mode deploys its stub bridge. Compare state from that point through session exit.
+    session._state_hash = hashlib.sha256(session.state()).hexdigest()
+    first_vpc, _second_vpc = session.manifest.enabled_vpcs
+
+    def assert_database(number: int) -> dict:
+        status, response = session.invoke_function(number)
+        assert status == 200, response
+        assert isinstance(response, dict), response
+        assert response["tls"] is True
+        assert response["read_write"] is True
+        assert response["members"]
+        return response
+
+    first = assert_database(1)
+    second = assert_database(2)
+    assert len(first["members"]) >= 2
+    assert first["expected_host"] != second["expected_host"]
+    first_unit = session.wait_unit(first_vpc.identity, "active", timeout=STARTUP_TIMEOUT)
+    ports_before = session.resolver_ports()
+    assert ports_before
+
+    ec2 = session.aws.client("ec2")
+    bastion_id = first_vpc.access.instance_id
+    ec2.stop_instances(InstanceIds=[bastion_id])
+    ec2.get_waiter("instance_stopped").wait(
+        InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
+    )
+    retained = session.wait_unit(first_vpc.identity, "retained", timeout=120)
+    assert retained.generation == first_unit.generation + 1
+    ports_during_outage = session.resolver_ports()
+    assert all(ports_during_outage.get(domain) == port for domain, port in ports_before.items())
+
+    # Wait until the dependent endpoint is rejected before handler import. The other
+    # VPC endpoint remains able to perform a real DocumentDB TLS read/write.
+    deadline = time.monotonic() + 120
+    while True:
+        imported_before = len(session.invocations())
+        status, _response = session.invoke_function(1, timeout=20)
+        imported_after = len(session.invocations())
+        if status == 500 and imported_after == imported_before:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("Unavailable VPC endpoint did not close handler admission")
+        time.sleep(1)
+    healthy = assert_database(2)
+    assert healthy["expected_host"] == second["expected_host"]
+
+    ec2.start_instances(InstanceIds=[bastion_id])
+    ec2.get_waiter("instance_running").wait(
+        InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
+    )
+    active = session.wait_unit(
+        first_vpc.identity,
+        "active",
+        after=retained.generation,
+        timeout=STARTUP_TIMEOUT,
+    )
+    assert active.generation == retained.generation + 1
+    recovered = assert_database(1)
+    assert recovered["expected_host"] == first["expected_host"]
+    ports_after_reconnect = session.resolver_ports()
+    assert all(ports_after_reconnect.get(domain) == port for domain, port in ports_before.items())
+
+    receipts = session.active_ssm_sessions()
+    assert len(receipts) == 2
+    session.terminate(signal.SIGINT)
+    session.wait_for_helper_cleanup()
+    session.assert_sessions_terminated(receipts)
+    assert not session.resolver_ports()
     session.assert_bastions_running()
     session.assert_state_unchanged()
