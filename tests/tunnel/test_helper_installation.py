@@ -13,7 +13,13 @@ from click.testing import CliRunner
 
 from stelvio.cli.tunnel import tunnel
 from stelvio.tunnel import installation
-from stelvio.tunnel.helper_client import HelperBusyError, HelperError, HelperInspection
+from stelvio.tunnel.helper_client import (
+    HelperBusyError,
+    HelperError,
+    HelperOwnershipState,
+    HelperUnitState,
+    HelperUnitStatus,
+)
 from stelvio.tunnel.plugin import PluginAssetError
 
 
@@ -99,7 +105,7 @@ def test_healthy_matching_install_is_idempotent_without_elevation(setup, monkeyp
     monkeypatch.setattr(
         installation,
         "NativeHelper",
-        lambda: SimpleNamespace(inspect=lambda: HelperInspection(False, False, False)),
+        lambda: SimpleNamespace(status=lambda: HelperOwnershipState(False, False, False)),
     )
 
     def forbidden():
@@ -129,7 +135,7 @@ def test_uncertain_host_state_requires_recovery_before_install(setup, monkeypatc
     monkeypatch.setattr(
         installation,
         "NativeHelper",
-        lambda: SimpleNamespace(inspect=lambda: HelperInspection(False, True, False)),
+        lambda: SimpleNamespace(status=lambda: HelperOwnershipState(False, True, False)),
     )
     result = CliRunner().invoke(tunnel, ["install"])
     assert result.exit_code == 1
@@ -197,7 +203,7 @@ def test_plugin_install_failure_stops_before_helper_authorization_or_mutation(se
     monkeypatch.setattr(
         installation,
         "_installed_digest",
-        lambda: pytest.fail("helper state was inspected after plugin installation failed"),
+        lambda: pytest.fail("helper state was queried after plugin installation failed"),
     )
 
     result = CliRunner().invoke(tunnel, ["install"])
@@ -219,7 +225,7 @@ def test_matching_active_install_is_idempotent_without_elevation(setup, monkeypa
     def busy():
         raise HelperBusyError("Native helper request failed: busy")
 
-    monkeypatch.setattr(installation, "NativeHelper", lambda: SimpleNamespace(inspect=busy))
+    monkeypatch.setattr(installation, "NativeHelper", lambda: SimpleNamespace(status=busy))
 
     def forbidden():
         raise AssertionError("Matching installed helper attempted a cache/download")
@@ -271,26 +277,33 @@ def test_forwarder_validates_installed_pin_without_cache(monkeypatch, developer)
         raise AssertionError("Wrong forwarder yielded")
 
 
-def test_tunnel_help_lists_current_commands():
+def test_tunnel_help_lists_status_without_inspect_alias():
     result = CliRunner().invoke(tunnel, ["--help"])
     assert result.exit_code == 0
     commands = result.output.split("Commands:\n", 1)[1]
     assert {line.split()[0] for line in commands.splitlines() if line.strip()} == {
         "install",
-        "inspect",
+        "status",
         "cleanup",
         "uninstall",
     }
+    assert "Show the helper's owned networking state." in result.output
+    assert "inspect" not in result.output
 
 
-def test_inspect_and_cleanup_do_not_require_plugin_or_release_download(monkeypatch):
+def test_status_and_cleanup_do_not_require_plugin_or_release_download(monkeypatch):
     module = import_module("stelvio.cli.tunnel")
     calls = []
 
     class OfflineHelper:
-        def inspect(self):
-            calls.append("inspect")
-            return HelperInspection(False, False, False)
+        def status(self):
+            calls.append("status")
+            return HelperOwnershipState(
+                True,
+                False,
+                True,
+                (HelperUnitState("12345678", 42, HelperUnitStatus.ACTIVE),),
+            )
 
         def reconcile(self):
             calls.append("cleanup")
@@ -302,12 +315,32 @@ def test_inspect_and_cleanup_do_not_require_plugin_or_release_download(monkeypat
     monkeypatch.setattr(installation, "ensure_plugin", forbidden)
     monkeypatch.setattr(installation, "downloaded_helper", forbidden)
 
-    inspected_result = CliRunner().invoke(tunnel, ["inspect"])
+    status_result = CliRunner().invoke(tunnel, ["status"])
     cleanup_result = CliRunner().invoke(tunnel, ["cleanup"])
 
-    assert inspected_result.exit_code == 0, inspected_result.output
+    assert status_result.exit_code == 0, status_result.output
+    assert "owned=True uncertain=False mutating=True" in status_result.output
+    assert "12345678 generation=42 active" in status_result.output
     assert cleanup_result.exit_code == 0, cleanup_result.output
-    assert calls == ["inspect", "cleanup"]
+    assert calls == ["status", "cleanup"]
+
+
+def test_inspect_is_rejected_and_unavailable_helper_error_is_preserved(monkeypatch):
+    module = import_module("stelvio.cli.tunnel")
+
+    class UnavailableHelper:
+        def status(self):
+            raise HelperError("The helper socket is unavailable")
+
+    monkeypatch.setattr(module, "NativeHelper", UnavailableHelper)
+    unknown = CliRunner().invoke(tunnel, ["inspect"])
+    unavailable = CliRunner().invoke(tunnel, ["status"])
+
+    assert unknown.exit_code == 2
+    assert "No such command 'inspect'" in unknown.output
+    assert unavailable.exit_code == 1
+    assert "The helper socket is unavailable" in unavailable.output
+    assert "Traceback" not in unavailable.output
 
 
 def test_root_cli_registers_only_step_eight_tunnel_commands():
@@ -317,7 +350,8 @@ def test_root_cli_registers_only_step_eight_tunnel_commands():
 
     assert result.exit_code == 0, result.output
     assert "install" in result.output
-    assert "inspect" in result.output
+    assert "status" in result.output
+    assert "inspect" not in result.output
     assert "cleanup" in result.output
     assert "uninstall" in result.output
     assert "start" not in result.output

@@ -17,7 +17,7 @@ from stelvio.tunnel.helper_client import (
     NativeLease,
     _receive,
 )
-from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest
+from stelvio.tunnel.helper_protocol import HEADER, HelperOperation, HelperRequest
 
 CAPABILITY = b"opaque-lease-key"
 SESSION = "11111111-1111-4111-8111-111111111111"
@@ -49,9 +49,9 @@ def test_eof_revocation_bypasses_in_flight_mutation_and_refuses_future_grants():
             unit="00000001", generation=1, vpc_id="vpc-12345678", cidrs=("10.254.0.0/16",)
         )
     with raises(HelperError, match="closed process"):
-        lease.inspect()
+        lease.status()
     helper.request.assert_not_called()
-    helper.inspect.assert_not_called()
+    helper.status.assert_not_called()
 
 
 def _pair(kind=socket.SOCK_STREAM):
@@ -84,7 +84,7 @@ def test_configure_failure_reports_bounded_public_stage(monkeypatch, stage):
     with second:
         second.sendall(reply(b"CF\x01" + bytes([stage]), status=3))
         with raises(HelperError, match=f"uncertain \\(configure stage {stage}\\)") as caught:
-            helper.request(HelperRequest(HelperOperation.INSPECT))
+            helper.request(HelperRequest(HelperOperation.STATUS))
         assert caught.value.status == HelperStatus.UNCERTAIN
         assert caught.value.configure_stage == stage
 
@@ -97,7 +97,7 @@ def test_invalid_configure_diagnostic_is_refused(monkeypatch, body):
     with second:
         second.sendall(reply(body, status=3))
         with raises(HelperError, match="incompatible configure diagnostic"):
-            helper.request(HelperRequest(HelperOperation.INSPECT))
+            helper.request(HelperRequest(HelperOperation.STATUS))
 
 
 @mark.parametrize(
@@ -218,7 +218,7 @@ def test_incompatible_acquisition_does_not_retain_lease_or_carrier(
         assert sentinel.recv(32) == b"original-still-owned"
 
 
-def test_inspection_preserves_distinct_units_and_full_generations(monkeypatch):
+def test_status_preserves_distinct_units_and_full_generations(monkeypatch):
     helper = NativeHelper()
     payload = (
         b"STLVHLP1"
@@ -231,11 +231,13 @@ def test_inspection_preserves_distinct_units_and_full_generations(monkeypatch):
     with first, second:
         monkeypatch.setattr(helper, "connect", lambda: first)
         second.sendall(reply(payload))
-        inspection = helper.inspect()
-        assert inspection.owned
-        assert not inspection.uncertain
-        assert inspection.mutating
-        assert [(unit.unit, unit.generation, unit.status.name) for unit in inspection.units] == [
+        state = helper.status()
+        request_packet = second.recv(HEADER.size)
+        assert request_packet[8] == 1
+        assert state.owned
+        assert not state.uncertain
+        assert state.mutating
+        assert [(unit.unit, unit.generation, unit.status.name) for unit in state.units] == [
             ("12345678", 0x0102030405060708, "ACTIVE"),
             ("87654321", 0x1112131415161718, "FAILED"),
         ]
@@ -253,13 +255,13 @@ def test_inspection_preserves_distinct_units_and_full_generations(monkeypatch):
         (bytes([2]) + struct.pack("!IQB", 0x12345678, 3, 1) * 2, "invalid unit identity"),
     ],
 )
-def test_inconsistent_inspection_does_not_certify_unit_state(monkeypatch, suffix, error):
+def test_inconsistent_status_does_not_certify_unit_state(monkeypatch, suffix, error):
     helper = NativeHelper()
     monkeypatch.setattr(
         helper, "request", lambda _: b"STLVHLP1" + struct.pack("!III", 1, 1, 1) + suffix
     )
     with raises(HelperError, match=error):
-        helper.inspect()
+        helper.status()
 
 
 @mark.parametrize(
@@ -271,7 +273,7 @@ def test_inconsistent_inspection_does_not_certify_unit_state(monkeypatch, suffix
         (b"STLVHLP1", 1, 1, 8),
     ],
 )
-def test_inspection_compatibility_is_checked_with_valid_inventory(
+def test_status_compatibility_is_checked_with_valid_inventory(
     monkeypatch, magic, abi, carrier, flags
 ):
     helper = NativeHelper()
@@ -279,4 +281,4 @@ def test_inspection_compatibility_is_checked_with_valid_inventory(
         helper, "request", lambda _: magic + struct.pack("!III", abi, carrier, flags) + bytes([0])
     )
     with raises(HelperError, match="incompatible with this package"):
-        helper.inspect()
+        helper.status()

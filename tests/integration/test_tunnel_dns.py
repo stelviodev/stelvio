@@ -62,7 +62,7 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
     assert platform.system() == "Darwin"
     assert int(platform.mac_ver()[0].split(".")[0]) >= 15
     helper = NativeHelper()
-    baseline = helper.inspect()
+    baseline = helper.status()
     assert not baseline.owned
     assert not baseline.uncertain
     assert not baseline.units
@@ -141,7 +141,7 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
         finally:
             scope.close()
     assert _os_lookup(uuid4().hex + "." + domain) == {"1.1.1.1"}
-    final = helper.inspect()
+    final = helper.status()
     assert not final.owned
     assert not final.uncertain
     assert not final.units
@@ -159,7 +159,7 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
 
     assert platform.system() == "Darwin"
     helper = NativeHelper()
-    initial = helper.inspect()
+    initial = helper.status()
     assert not initial.owned
     assert not initial.uncertain
     assert not initial.units
@@ -246,7 +246,7 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
         with raises(ConnectionError, match="Forwarder rejected operation"):
             forwarding.dns("reject", unit, 1, 1, 1)
         assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == {address}
-    final = helper.inspect()
+    final = helper.status()
     assert not final.owned
     assert not final.uncertain
     assert not final.units

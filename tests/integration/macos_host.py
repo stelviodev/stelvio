@@ -29,7 +29,7 @@ def wait_empty(timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            state = NativeHelper().inspect()
+            state = NativeHelper().status()
         except HelperBusyError:
             time.sleep(0.1)
             continue
@@ -47,7 +47,7 @@ def wait_empty(timeout=60):
         if not (state.owned or state.uncertain or state.mutating or state.units):
             return
         time.sleep(0.1)
-    raise AssertionError(f"Host cleanup not certified: {NativeHelper().inspect()}")
+    raise AssertionError(f"Host cleanup not certified: {NativeHelper().status()}")
 
 
 def cleanup_when_idle(timeout=30):
@@ -355,7 +355,7 @@ try:
     for i,octet in enumerate((254,253),start=1):
         lease.configure(unit=f'{i:08x}',generation=1,vpc_id=f'vpc-{i:08x}',
             cidrs=(f'10.{octet}.0.0/16',),resolvers=(ResolverEndpoint(f'{owner.replace("-","")}-{i}.invalid',65130),))
-    assert len(NativeHelper().inspect().units)==2
+    assert len(NativeHelper().status().units)==2
     Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'owner':owner}))
     sys.stdin.read()
 finally:
