@@ -136,29 +136,41 @@ uv run pytest \
 
 ## Dev mode AWS acceptance
 
-The opt-in dev scenario uses public Function URLs to reach local handlers. The
-handlers verify DocumentDB TLS, member discovery, and writes followed by reads. The
-test stops one bastion, checks that only its dependent handler is blocked before
-import, confirms a second VPC remains usable, then verifies generation and DNS-port
-recovery. It also checks helper cleanup, SSM termination, retained bastions, and
-unchanged deployment state after `stlv dev` exits.
+The opt-in dev scenario uses public Function URLs to reach local handlers. Its proof
+app combines `bastion=True`, `bastion={}`, a disabled-bastion VPC, and a non-VPC
+Function. The DocumentDB handlers verify TLS, member discovery, and reads/writes
+using distinct markers that are checked against both databases. The test stops one
+bastion, requires the structured `VpcUnavailableError` before handler import,
+confirms the peer and independent endpoints remain usable, then waits for both the
+advanced helper generation and a fresh network-ready report before retrying. It also
+rotates the proof-owned bastion SSH host key, checks terminal admission failure and
+DNS `SERVFAIL`, restores the original key, and starts a new session to verify
+recovery. SIGINT and SIGKILL cleanup, restart, SSM termination, retained bastions,
+stable resolver ports, and unchanged deployment state are checked as well.
 
-This lane deploys a two-VPC proof app and changes host networking. It requires an
-authorized AWS profile and expected account, macOS 15 or later, an installed helper,
-an idle host, and no parallel test workers:
+A separate opt-in case invokes a real non-VPC Function URL while the helper is
+uninstalled. The exclusive `macos_host` fixture restores the exact helper image
+captured before the run.
+
+This lane deploys a three-VPC proof app (two bastion-enabled VPCs and one disabled
+VPC) and changes host networking. It requires an authorized AWS profile and
+expected account, macOS 15 or later, an installed helper, an idle host, and no
+parallel test workers:
 
 ```bash
 STLV_TEST_AWS_PROFILE=<authorized-profile> \
 STLV_TEST_TUNNEL_AWS_ACCOUNT=<expected-account-id> \
 uv run pytest \
-  tests/integration/test_tunnel.py::test_dev_function_url_gates_and_recovers_documentdb \
+  tests/integration/test_tunnel.py \
   --integration-macos-privileged --integration-tunnel -n 0 -q
 ```
 
-The test checks the account before it deploys. Its fixture destroys the proof app
-only after helper cleanup is certified. This lane is separate from
-`tests/integration/run_all.sh` and remains pending until explicitly authorized and
-run.
+The fixtures check the account before deployment. The dev acceptance mutates only
+the proof bastion's SSH host key and restores it in `finally`; the non-VPC case
+temporarily uninstalls the helper and lets `macos_host` restore the original bytes.
+The AWS fixture destroys each proof app only after helper cleanup is certified.
+These tests are separate from `tests/integration/run_all.sh` and remain pending
+until explicitly authorized and run.
 
 ## Unit tests
 
