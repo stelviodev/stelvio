@@ -1,10 +1,10 @@
-"""Authenticated, nonroot SSH-over-SSM/EIC with a session-long server pin."""
+"""Nonroot SSH over SSM/EIC with persistent first-connect host-key trust."""
 
 from __future__ import annotations
 
-import base64
 import json
 import os
+import re
 import shlex
 import signal
 import socket
@@ -15,14 +15,21 @@ import time
 from contextlib import suppress
 from hashlib import sha256
 from pathlib import Path
-from threading import RLock
+from threading import RLock, Thread
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
 
-from stelvio.tunnel.bastion import SSH_USER, identity_document
+from stelvio.tunnel.bastion import SSH_USER
 from stelvio.tunnel.credentials import AWS_IO
+from stelvio.tunnel.host_trust import (
+    HostIdentity,
+    HostTrustError,
+    fingerprint,
+    locked_host_trust,
+    parse_host_key,
+)
 from stelvio.tunnel.plugin import PluginAssetError, installed_plugin
 from stelvio.tunnel.processes import identity, process_group_empty, unreaped_child
 from stelvio.tunnel.socks import SocksConnector, TransportInterruptedError
@@ -30,18 +37,17 @@ from stelvio.tunnel.socks import SocksConnector, TransportInterruptedError
 if TYPE_CHECKING:
     from collections.abc import Callable
     from threading import Event
+    from typing import BinaryIO
 
     import boto3
     from botocore.client import BaseClient
 
+    from stelvio.tunnel.host_trust import LockedHostTrust
     from stelvio.tunnel.manifest import VpcNetwork
 
-HOST_KEY_BYTES = 51
-HOST_KEY_PREFIX = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20"
 SSH_PORT = 22
 ONLINE_SECONDS = 300
-COMMAND_SECONDS = 120
-HASH_LENGTH = 64
+MAX_SSH_ERROR_BYTES = 65536
 ZOMBIE = 5
 
 
@@ -62,7 +68,7 @@ class TransportCleanupError(RuntimeError):
 
 
 class ServerIdentityError(TransportAuthorizationError):
-    """An authenticated bootstrap returned a different host key."""
+    """The SSM target presented a different SSH key than its persistent pin."""
 
 
 def classify_aws(error: ClientError) -> Exception:
@@ -80,32 +86,12 @@ def classify_aws(error: ClientError) -> Exception:
     if code in {
         "InvalidInstanceID.NotFound",
         "InvalidGroup.NotFound",
-        "InvalidDocument",
-        "InvalidDocumentVersion",
-        "InvalidDocumentType",
         "DBClusterNotFoundFault",
         "DBInstanceNotFoundFault",
         "DBSubnetGroupNotFoundFault",
     }:
         return TransportAuthorizationError("VPC owned resource is missing; redeploy before dev")
     return TransportRetryError("VPC transport AWS operation is temporarily unavailable")
-
-
-def parse_host_key(output: str) -> str:
-    try:
-        key, ready = output.strip().splitlines()
-        kind, encoded, *_ = key.split()
-        wire = base64.b64decode(encoded, validate=True)
-    except (ValueError, TypeError) as error:
-        raise ServerIdentityError("SSM returned a malformed server identity") from error
-    if (
-        ready != "stelvio-tunnel-ready"
-        or kind != "ssh-ed25519"
-        or len(wire) != HOST_KEY_BYTES
-        or not wire.startswith(HOST_KEY_PREFIX)
-    ):
-        raise ServerIdentityError("SSM did not return the owned ready Ed25519 server")
-    return f"{kind} {encoded}"
 
 
 def terminate_owned_session(
@@ -158,8 +144,8 @@ class SshTransport:
         self.pin: str | None = None
         self.process: subprocess.Popen | None = None
         self._process_identity = None
-        self._document_version: str | None = None
-        self._document_hash: str | None = None
+        self._stderr_thread: Thread | None = None
+        self._stderr = bytearray()
         self._stopping = RLock()
         self.session_id: str | None = None
         self._terminated = False
@@ -227,31 +213,8 @@ class SshTransport:
                     raise TransportAuthorizationError(
                         "VPC access admits inbound SSH; redeploy before dev"
                     )
-        document = self.ssm.get_document(Name=access.identity_document, DocumentVersion="$DEFAULT")
-        tags = {
-            tag["Key"]: tag["Value"]
-            for tag in self.ssm.list_tags_for_resource(
-                ResourceType="Document", ResourceId=access.identity_document
-            )["TagList"]
-        }
-        if json.loads(document["Content"]) != json.loads(identity_document()) or not self._owned(
-            tags
-        ):
-            raise TransportAuthorizationError("VPC identity document ownership/content changed")
-        version = document["DocumentVersion"]
-        verified = self.ssm.describe_document(
-            Name=access.identity_document, DocumentVersion=version
-        )["Document"]
-        if (
-            verified.get("DocumentVersion") != version
-            or verified.get("HashType") != "Sha256"
-            or len(verified.get("Hash", "")) != HASH_LENGTH
-            or sha256(document["Content"].encode()).hexdigest() != verified.get("Hash")
-        ):
-            raise TransportAuthorizationError("VPC identity document version/hash is unavailable")
-        self._document_version, self._document_hash = version, verified["Hash"]
 
-    def _bootstrap(self) -> str:
+    def _bootstrap(self) -> None:
         self.validate_owner()
         access = self.network.access
         deadline = time.monotonic() + ONLINE_SECONDS
@@ -265,30 +228,6 @@ class SshTransport:
             self._pause(1)
         else:
             raise TransportRetryError("VPC access SSM agent did not become online")
-        command = self.ssm.send_command(
-            InstanceIds=[access.instance_id],
-            DocumentName=access.identity_document,
-            DocumentVersion=self._document_version,
-            DocumentHash=self._document_hash,
-            DocumentHashType="Sha256",
-            TimeoutSeconds=90,
-        )["Command"]["CommandId"]
-        deadline = time.monotonic() + COMMAND_SECONDS
-        while time.monotonic() < deadline:
-            self._pause(0)
-            try:
-                result = self.ssm.get_command_invocation(
-                    CommandId=command, InstanceId=access.instance_id
-                )
-            except self.ssm.exceptions.InvocationDoesNotExist:
-                self._pause(1)
-                continue
-            if result["Status"] == "Success":
-                return parse_host_key(result["StandardOutputContent"])
-            if result["Status"] not in ("Pending", "InProgress", "Delayed"):
-                raise TransportRetryError("VPC host bootstrap command did not succeed")
-            self._pause(1)
-        raise TransportRetryError("VPC host bootstrap exceeded its budget")
 
     def start(self) -> SocksConnector:
         if not os.geteuid() or os.getuid() != os.geteuid():
@@ -301,6 +240,7 @@ class SshTransport:
             or self.session_id is not None
             or self._reason is not None
             or self._temporary is not None
+            or self._stderr_thread is not None
         ):
             raise RuntimeError("Dispose the previous VPC transport before reconnecting")
         try:
@@ -312,19 +252,34 @@ class SshTransport:
                 raise TransportCleanupError(
                     "VPC transport startup failed and owned cleanup could not be certified"
                 ) from cleanup_error
+            if isinstance(error, HostTrustError):
+                raise TransportAuthorizationError(str(error)) from error
             if isinstance(error, ClientError):
                 raise classify_aws(error) from None
             raise
 
-    def _start(self) -> SocksConnector:  # noqa: C901, PLR0915 - authenticated bootstrap and staged ownership
-        pin = self._bootstrap()
-        if self.pin is not None and self.pin != pin:
-            raise ServerIdentityError("VPC SSH server identity changed; reconnect refused")
-        self.pin = pin
+    def _start(self) -> SocksConnector:
+        self._bootstrap()
         try:
             plugin = installed_plugin()
         except PluginAssetError as error:
             raise TransportArtifactError(str(error)) from None
+        access = self.network.access
+        target = HostIdentity(
+            self.session.get_partition_for_region(self.network.region),
+            self.network.account,
+            self.network.region,
+            access.instance_id,
+        )
+        with locked_host_trust(target, self.stop) as trust:
+            if self.pin is not None and trust.key != self.pin:
+                raise ServerIdentityError(
+                    f"SSH host trust changed for {target.label}; "
+                    "restart after explicit trust reset"
+                )
+            return self._connect(plugin, trust)
+
+    def _connect(self, plugin: Path, trust: LockedHostTrust) -> SocksConnector:  # noqa: C901, PLR0915 - staged SSM and owned SSH startup
         self._temporary = tempfile.TemporaryDirectory(prefix="stelvio-ssh-")
         directory = Path(self._temporary.name)
         key = directory / "client"
@@ -337,7 +292,7 @@ class SshTransport:
         )
         access = self.network.access
         hosts = directory / "known_hosts"
-        hosts.write_text(f"{access.instance_id} {pin}\n")
+        hosts.write_text(f"{trust.identity.alias} {trust.key}\n" if trust.key else "")
         hosts.chmod(0o600)
         with socket.socket() as reserve:
             reserve.bind(("127.0.0.1", 0))
@@ -366,6 +321,7 @@ class SshTransport:
         environment = {
             key: value for key, value in os.environ.items() if not key.startswith("AWS_")
         }
+        environment["LC_ALL"] = "C"
         environment.update(
             STLV_SSM_SESSION=json.dumps(result),
             STLV_SSM_PLUGIN=str(plugin),
@@ -383,8 +339,12 @@ class SshTransport:
             raise TransportAuthorizationError("EC2 Instance Connect rejected the client key")
         options = {
             "ProxyCommand": shlex.join([sys.executable, "-I", "-m", "stelvio.tunnel.ssm_proxy"]),
-            "HostKeyAlias": access.instance_id,
-            "StrictHostKeyChecking": "yes",
+            "HostKeyAlias": trust.identity.alias,
+            "StrictHostKeyChecking": "yes" if trust.key else "accept-new",
+            "CheckHostIP": "no",
+            "UpdateHostKeys": "no",
+            "VerifyHostKeyDNS": "no",
+            "KnownHostsCommand": "none",
             "UserKnownHostsFile": str(hosts),
             "GlobalKnownHostsFile": os.devnull,
             "IdentitiesOnly": "yes",
@@ -428,9 +388,14 @@ class SshTransport:
                 env=environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 start_new_session=True,
             )
+            self._stderr.clear()
+            self._stderr_thread = Thread(
+                target=self._read_ssh_errors, args=(self.process.stderr,), daemon=True
+            )
+            self._stderr_thread.start()
             self._process_identity = identity(self.process.pid)
             if (
                 self._process_identity is None
@@ -442,7 +407,7 @@ class SshTransport:
         while time.monotonic() < deadline:
             self._pause(0)
             if not self.healthy():
-                raise TransportRetryError("Pinned SSH exited before authentication completed")
+                self._raise_ssh_failure(trust)
             if control.exists():
                 checked = subprocess.run(  # noqa: S603 - owned SSH master control socket
                     [
@@ -461,9 +426,39 @@ class SshTransport:
                     check=False,
                 )
                 if checked.returncode == 0 and self.healthy():
+                    entries = hosts.read_text().splitlines()
+                    if len(entries) != 1 or not entries[0].startswith(trust.identity.alias + " "):
+                        raise HostTrustError("SSH did not return one verified target host key")
+                    key = parse_host_key(entries[0][len(trust.identity.alias) + 1 :])
+                    self._pause(0)
+                    trust.accept(key)
+                    self.pin = key
                     return SocksConnector(port, self.network.cidrs, self.stop)
             self._pause(0.1)
         raise TransportRetryError("Pinned SSH authentication exceeded its budget")
+
+    def _read_ssh_errors(self, stream: BinaryIO) -> None:
+        with stream:
+            while chunk := stream.read(4096):
+                remaining = MAX_SSH_ERROR_BYTES - len(self._stderr)
+                self._stderr.extend(chunk[: max(0, remaining)])
+
+    def _raise_ssh_failure(self, trust: LockedHostTrust) -> None:
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=1)
+        output = bytes(self._stderr)
+        if b"REMOTE HOST IDENTIFICATION HAS CHANGED" in output or b"REVOKED HOST KEY" in output:
+            observed = re.search(rb"SHA256:[A-Za-z0-9+/]{43}", output)
+            expected = fingerprint(trust.key) if trust.key else "none"
+            presented = observed.group().decode() if observed else "unavailable"
+            raise ServerIdentityError(
+                f"SSH host key changed for {trust.identity.label}: expected {expected}, "
+                f"presented {presented}. Connection refused. Restore the original key or stop "
+                "all tunnels and use stlv tunnel trust reset for this instance."
+            )
+        raise TransportRetryError(
+            "SSH exited before authentication completed; check bastion startup and access"
+        )
 
     def healthy(self) -> bool:
         if self.process is None or self._process_identity is None:
@@ -513,6 +508,14 @@ class SshTransport:
             self.process.wait(timeout=3)
             self.process = None
             self._process_identity = None
+        self._join_ssh_errors()
+
+    def _join_ssh_errors(self) -> None:
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=2)
+            if self._stderr_thread.is_alive():
+                raise TransportCleanupError("SSH error stream did not close after process cleanup")
+            self._stderr_thread = None
 
     def _recover_session_id(self) -> str:
         pages = self.ssm.get_paginator("describe_sessions").paginate(

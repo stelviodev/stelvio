@@ -8,7 +8,7 @@ The Go module owns the forwarder and helper implementations.
 
 The transport tests use deterministic AWS SDK responses and local loopback SOCKS
 peers. They verify captured credential isolation, deployed VPC and bastion
-ownership, SSM identity document version and hash, pinned SSH host identity,
+ownership, persistent first-connect SSH host identity,
 DocumentDB cluster/member discovery, error classification, and cleanup of partial
 SSM/SSH startup. They do not deploy AWS resources or change host routes, resolver
 files, or helper state.
@@ -21,13 +21,32 @@ uv run pytest \
   tests/tunnel/test_credentials.py \
   tests/tunnel/test_discovery.py \
   tests/tunnel/test_socks.py \
-  tests/tunnel/test_transport.py -q
+  tests/tunnel/test_transport.py \
+  tests/tunnel/test_host_trust.py -q
 ```
 
 The Session Manager plugin must already be available through the verified private
 cache for a live connection. Tests stub its selected path and never download or
 run the plugin. A missing or unsafe plugin is a terminal local artifact error;
 repair it through the existing installation command before retrying AWS transport.
+
+The host-trust tests use isolated temporary caches. They cover independent AWS
+identities, persistence, concurrent first connections, rejected key changes,
+unsafe files, failed atomic publication, bounded locking, and explicit reset.
+Transport tests verify that failed authentication does not publish a pin and that
+new transport objects reuse it. No custom SSM Command document or Run Command
+permission is required. The Session Manager plugin remains required.
+
+Run real OpenSSH interoperability on macOS without AWS or privileged host changes:
+
+```bash
+STLV_TEST_SSH_INTEROP=1 uv run pytest tests/tunnel/test_transport.py -k actual_openssh -q
+```
+
+The test starts a temporary loopback-only sshd and a test-owned replacement for the
+SSM byte stream. It checks successful authentication, persistent key reuse,
+key-change rejection by a new transport, and explicit trust reset. It restores
+its processes and temporary files. It does not establish live SSM acceptance.
 
 ## Unit tests
 
