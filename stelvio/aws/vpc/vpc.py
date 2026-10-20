@@ -284,14 +284,18 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
                     "cidrs": [vpc.cidr_block],
                     "policy": self._bastion_policy.value,
                     "dns_domains": list(self._bastion_config.dns_domains),
-                    "public_subnets": [
-                        {
-                            "id": subnet.id,
-                            "az": subnet.availability_zone,
-                            "cidr": subnet.cidr_block,
-                        }
-                        for subnet in subnets_dict[SubnetType.PUBLIC]
-                    ],
+                    # Named tiers encode classification without duplicating subnet records.
+                    **{
+                        f"{tier.value}_subnets": [
+                            {
+                                "id": subnet.id,
+                                "az": subnet.availability_zone,
+                                "cidr": subnet.cidr_block,
+                            }
+                            for subnet in subnets_dict[tier]
+                        ]
+                        for tier in SubnetType
+                    },
                     "access": access,
                 }
             }
