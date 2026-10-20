@@ -385,3 +385,68 @@ def test_successful_socks_probe_cannot_mask_failed_direct_path():
     with raises(ConnectionError, match="host path unavailable"):
         worker._probe(7)
     assert calls == [("probe", {}), ("probe", {"direct": True})]
+
+
+def test_changed_ssh_key_is_terminal_before_forwarding(monkeypatch):
+    from stelvio.tunnel.transport import ServerIdentityError
+
+    world = _worker_world(monkeypatch)
+    detail = (
+        "SSH host key changed for aws/123456789012/us-east-1/i-12345678: "
+        "expected SHA256:old, presented SHA256:new."
+    )
+
+    def changed():
+        world.events.append(("changed-host-key",))
+        raise ServerIdentityError(detail)
+
+    world.transport.start = changed
+    world.worker.start()
+    world.worker._thread.join(5)
+    assert not world.worker._thread.is_alive()
+    world.worker.close()
+    assert world.worker.status.state == "failed"
+    assert world.worker.status.cause == "ssh-host-key"
+    assert world.worker.status.detail == detail
+    assert world.events.count(("changed-host-key",)) == 1
+    assert not any(event[0] == "forward-add" for event in world.events)
+    assert not any(event[0] == "host-configure" for event in world.events)
+
+
+def test_key_change_during_reconnect_retains_dns_and_stops_retry(monkeypatch):
+    from stelvio.tunnel.transport import ServerIdentityError
+
+    world = _worker_world(monkeypatch, fail_first=True)
+    original_start = world.transport.start
+    published = []
+    original_publish = world.worker._publish
+
+    def start():
+        connector = original_start()
+        if world.transport.attempt == 2:
+            assert world.dns_state["rejected"]
+            raise ServerIdentityError("SSH host key changed for i-12345678; trust reset required")
+        return connector
+
+    def publish(state, cause=None, **options):
+        original_publish(state, cause, **options)
+        published.append(world.worker.status)
+
+    monkeypatch.setattr(world.transport, "start", start)
+    monkeypatch.setattr(world.worker, "_publish", publish)
+    world.worker.start()
+    world.worker._thread.join(5)
+    assert not world.worker._thread.is_alive()
+    world.worker.close()
+    assert world.transport.attempt == 2
+    assert any(status.state == "ready" and status.attempt == 1 for status in published)
+    assert not any(status.state == "ready" and status.attempt > 1 for status in published)
+    assert world.worker.status.cause == "ssh-host-key"
+    assert world.worker.status.dns_retained
+    assert world.dns_state["rejected"]
+    assert world.lease.unit["status"] == HelperUnitStatus.RETAINED
+    assert [event[1:3] for event in world.events if event[0] == "forward-add"] == [(1, 1)]
+    assert world.forwarding.port == world.worker._dns_port
+    rejection = next(i for i, event in enumerate(world.events) if event[0] == "dns-reject")
+    removal = next(i for i, event in enumerate(world.events) if event[0] == "forward-remove")
+    assert rejection < removal

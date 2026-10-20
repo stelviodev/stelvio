@@ -279,9 +279,7 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
         BastionPolicy.PERSISTENT,
         (),
         (SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),),
-        AccessDescriptor(
-            "i-12345678", "sg-12345678", "us-east-1a", "identity-document", "vpc-owner"
-        ),
+        AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
     )
     description = SessionDescription(
         "11111111-1111-4111-8111-111111111111",
@@ -329,6 +327,7 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
                 "dns_retained": False,
                 "resource_probe": "unverified",
                 "phase": "pending",
+                "detail": None,
             }
         ]
         if owner_death:
@@ -456,3 +455,50 @@ def test_runtime_status_ipc_is_bounded_and_rejects_malformed_snapshots():
     finally:
         control.close()
         peer.close()
+
+
+@mark.parametrize("changed", [False, True])
+def test_restarted_process_cannot_replace_a_persisted_host_key(tmp_path, monkeypatch, changed):
+    import base64
+    from threading import Event
+
+    from stelvio.tunnel import host_trust
+    from stelvio.tunnel.host_trust import HOST_KEY_PREFIX, HostIdentity, locked_host_trust
+
+    cache = tmp_path.resolve() / "cache"
+    cache.mkdir(mode=0o700)
+    monkeypatch.setattr(host_trust, "get_bin_path", lambda: cache)
+    if sys.platform != "darwin":
+        monkeypatch.setattr("stelvio.tunnel.assets._no_acl", lambda *args: None)
+    target = HostIdentity("aws", "123456789012", "us-east-1", "i-12345678")
+    key = "ssh-ed25519 " + base64.b64encode(HOST_KEY_PREFIX + bytes(range(32))).decode()
+    other = (
+        "ssh-ed25519 " + base64.b64encode(HOST_KEY_PREFIX + bytes(reversed(range(32)))).decode()
+    )
+    with locked_host_trust(target, Event()) as entry:
+        entry.accept(key)
+    script = """import sys
+from pathlib import Path
+from threading import Event
+from stelvio.tunnel import host_trust, assets
+from stelvio.tunnel.host_trust import HostIdentity, HostTrustError, locked_host_trust
+host_trust.get_bin_path=lambda:Path(sys.argv[1])
+if sys.platform!='darwin': assets._no_acl=lambda *args:None
+try:
+    target=HostIdentity('aws','123456789012','us-east-1','i-12345678')
+    with locked_host_trust(target,Event()) as entry:
+        entry.accept(sys.argv[2])
+except HostTrustError:
+    sys.exit(17)
+"""
+    result = subprocess.run(  # noqa: S603 - fixed isolated test process and public host key
+        [sys.executable, "-I", "-c", script, str(cache), other if changed else key],
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == (17 if changed else 0), result.stderr.decode()
+    assert result.stdout == b""
+    with locked_host_trust(target, Event()) as entry:
+        assert entry.key == key
