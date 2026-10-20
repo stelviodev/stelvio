@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import socket
 
 MAX_MESSAGE = 1024 * 1024
+MAX_STATUS_DETAIL_LENGTH = 1024
 
 
 def send(connection: socket.socket, value: dict) -> None:
