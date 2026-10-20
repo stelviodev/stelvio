@@ -262,6 +262,13 @@ The access resources are separate from Lambda production networking. A
 `Function(vpc=vpc)` still uses the VPC's private subnets and app security group.
 Dev mode access to VPC resources is not available yet.
 
+The private deployment metadata records each subnet's ID, availability zone,
+and CIDR in a public, private, or isolated tier. Private and isolated subnet
+CIDRs define eligible tunnel destinations. Public subnets describe bastion
+placement; they are excluded from that destination list. The VPC CIDRs remain
+the boundary for AWS ownership validation. These outputs prepare the tunnel
+contract; this deployment step does not install local routes.
+
 ## Cost
 
 The VPC itself — subnets, route tables, Internet Gateway — is free. NAT is what
