@@ -23,31 +23,6 @@ AMI_PARAMETER = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-
 _READY = "/run/stelvio-tunnel/ready"
 
 
-def identity_document() -> str:
-    # Fixed read-only command; callers cannot substitute shell code during bootstrap.
-    command = f"""i=0
-while [ ! -f {_READY} ] && [ "$i" -lt 60 ]; do
-    sleep 1
-    i=$((i + 1))
-done
-test -f {_READY} || exit 1
-cat /etc/ssh/ssh_host_ed25519_key.pub
-cat {_READY}"""
-    return json.dumps(
-        {
-            "schemaVersion": "2.2",
-            "description": "Read Stelvio tunnel host identity",
-            "mainSteps": [
-                {
-                    "action": "aws:runShellScript",
-                    "name": "identity",
-                    "inputs": {"timeoutSeconds": "90", "runCommand": [command]},
-                }
-            ],
-        }
-    )
-
-
 def user_data() -> str:
     # Cloud-init runs this once; /run is recreated at boot. The enabled service
     # revalidates provisioning and republishes the receipt after every reboot.
@@ -152,7 +127,6 @@ def assume_role_policy() -> str:
 class BastionResources:
     instance: aws.ec2.Instance
     security_group: aws.ec2.SecurityGroup
-    document: aws.ssm.Document
 
 
 def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network inputs
@@ -208,15 +182,6 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
         **customize("bastion_profile", {"role": role.name}, inject_tags=True),
         opts=opts,
     )
-    document = aws.ssm.Document(
-        label("-bastion-identity", 128),
-        **customize(
-            "bastion_identity_document",
-            {"document_type": "Command", "content": identity_document()},
-            inject_tags=True,
-        ),
-        opts=opts,
-    )
     if ami is None:
         ami = aws.ssm.get_parameter_output(
             name=AMI_PARAMETER, opts=pulumi.InvokeOutputOptions(provider=opts.provider)
@@ -249,4 +214,4 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
             opts, pulumi.ResourceOptions(depends_on=[policy, egress])
         ),
     )
-    return BastionResources(instance, group, document)
+    return BastionResources(instance, group)
