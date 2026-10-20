@@ -386,15 +386,26 @@ def test_bastion_capture_uses_single_attempt_io_timeouts_and_deadline_hook():
     assert client.meta.events.registered[0][0] == "before-call.ec2.*"
 
 
-def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypatch):
+def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypatch, tmp_path):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
     session.no_vpc = False
     session.process = None
-    session._outputs = {}
+    session._outputs = {
+        "bastion1_id": "i-bastion-1",
+        "bastion2_id": "i-bastion-2",
+    }
     session.app = "demo"
     session.environment_name = "test"
     session.aws = object()
+    helper_path = tmp_path / "stelvio-traforo"
+    helper_path.touch()
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", helper_path)
+
+    def fail_volume_capture(**_kwargs):
+        raise RuntimeError("volume inventory unavailable")
+
+    monkeypatch.setattr(cli_session, "capture_bastion_volume_ids", fail_volume_capture)
     operations = []
     monkeypatch.setattr(
         cli_session,
