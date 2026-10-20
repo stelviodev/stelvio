@@ -9,13 +9,13 @@ you need Mongo-compatible queries and always-on capacity. For key-value data
 billed per request, start with [`DynamoTable`](dynamo-db.md).
 
 By default, `DocumentDb` creates a private, TLS-required, encrypted cluster on
-engine `8.0` with an AWS-managed master password. The cluster sits in the
+engine `8.0` with one serverless instance and an AWS-managed master password. The cluster sits in the
 Vpc's isolated subnets and accepts traffic from that Vpc's shared app security
 group.
 
 !!! warning "DocumentDB costs money"
     Instances bill while they run, not per request. A default one-instance
-    cluster is about **$57/month**, see [Cost](#cost). Linked functions also
+    cluster starts at about **$30/month** and can reach **$240/month** at its default ceiling, see [Cost](#cost). Linked functions also
     need NAT, which has its own [cost](vpc.md#cost).
 
 ## Creating a DocumentDB cluster
@@ -32,12 +32,61 @@ That's a one-instance cluster on engine `8.0`. You need a `Vpc` with at least
 two availability zones. The default `Vpc` already has that. `Vpc(..., az=1)`
 raises `ValueError` when you construct `DocumentDb`.
 
+### Serverless capacity
+
+Serverless is the default: each instance scales between **0.5 and 4 DocumentDB
+capacity units (DCUs)**. `instance="serverless"` and `instance="db.serverless"`
+select it explicitly; `instance=None` also uses this default.
+
+```python
+db = DocumentDb("todos", vpc=vpc)
+db = DocumentDb("todos", vpc=vpc, max_capacity=16)
+db = DocumentDb("todos", vpc=vpc, replicas=1, min_capacity=1, max_capacity=8)
+```
+
+Supply either or both capacity bounds; omitted bounds use 0.5 and 4.
+`min_capacity` must be between 0.5 and 256; `max_capacity` must be between 1
+and 256. Both accept finite numbers in increments of 0.5, and the effective
+minimum must not exceed the maximum. Equal bounds hold capacity constant.
+For example, `min_capacity=8` alone is invalid because the default maximum is 4.
+Capacity arguments with a provisioned `instance` raise `ValueError` at construction.
+
+!!! warning "Capacity changes can require instance restarts"
+    The cluster receives the new range immediately, but instances need rebooting
+    after any `max_capacity` change, or when `min_capacity` crosses between 1 or
+    less and greater than 1. The new limits do not take effect on those instances
+    until rebooted. Stelvio does not perform these reboots during deployment.
+    Reboot readers first, waiting for each to become available, then the writer:
+    `aws docdb reboot-db-instance --db-instance-identifier <id>`.
+    With replicas, fail over to a rebooted reader before rebooting the old writer
+    to reduce writer unavailability. See
+    [AWS's restart guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-managing.html).
+
+The range applies to **each instance**: `replicas=1` creates two instances,
+so a maximum of 8 DCUs allows up to 16 DCUs together. Serverless retains active
+capacity at its minimum; it does not scale to zero or bill per request. Storage,
+I/O, Secrets Manager, and network charges still apply. See
+[AWS serverless scaling guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-scaling-config.html).
+
+Both engine `5.0` and `8.0` support serverless. Engine `5.0` requires a recent
+patch, and availability varies by region. Check
+[AWS requirements](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-limitations.html)
+before deployment. Stelvio does not query AWS availability during construction.
+
+The automatic range is a default: app-wide dictionary customization can replace
+it. Supplying either capacity argument constructs a complete range with the
+other bound's default and takes precedence over app-wide dictionary defaults.
+Callable and component-level customizations can override it and are unvalidated.
+
+Switching to a provisioned `instance` leaves the old capacity range on the
+cluster: AWS cannot remove it, and it has no effect on provisioned instances.
+
 ### Instance class capacity
 
 !!! warning "Capacity is per zone, and it changes"
     AWS does not offer every instance class in every availability zone, and
     which zones have room changes. If creating the instance fails, set a
-    different `instance_class` and deploy again, or try later. The zones named
+    different `instance` and deploy again, or try later. The zones named
     in the error are only right for that moment. Changing `az` on the Vpc is
     not the fix.
 
@@ -57,7 +106,7 @@ digits, and single hyphens, with no trailing hyphen. Invalid names raise
     care about, set `deletion_protection=True` and keep a snapshot through
     [Customization](#customization).
 
-Elastic clusters, serverless, global clusters, and snapshot restore are not
+Elastic clusters, global clusters, and snapshot restore are not
 supported. `stlv dev` access to the cluster is not supported yet.
 
 ### Configuration
@@ -69,10 +118,10 @@ from stelvio.aws.vpc import Vpc
 vpc = Vpc("main")
 
 # Keyword arguments
-db = DocumentDb("todos", vpc=vpc, instances=2)
+db = DocumentDb("todos", vpc=vpc, replicas=1)
 
 # Or using DocumentDbConfig
-db = DocumentDb("todos", config=DocumentDbConfig(vpc=vpc, instances=2))
+db = DocumentDb("todos", config=DocumentDbConfig(vpc=vpc, replicas=1))
 ```
 
 You can also pass a dict via `config=`. Don't mix kwargs and `config=` in the
@@ -83,8 +132,10 @@ Available configuration options:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `vpc` | (required) | Existing `Vpc`. The cluster uses its isolated subnets. |
-| `instances` | `1` | Number of cluster instances (1 to 16). Extra instances are replicas. |
-| `instance_class` | `None` | Instance size, with or without the `db.` prefix (`"t3.medium"` or `"db.t3.medium"`). `None` uses `t3.medium`. AWS does not offer every class in every availability zone. See [Instance class capacity](#instance-class-capacity). |
+| `replicas` | `0` | Read replicas beyond the primary (0 to 15); total instances = `1 + replicas`. |
+| `instance` | `None` | Provisioned instance size, with or without the `db.` prefix (`"t3.medium"` or `"db.t3.medium"`), or `"serverless"` / `"db.serverless"`. `None` uses serverless. See [Serverless capacity](#serverless-capacity) and [Instance class capacity](#instance-class-capacity). |
+| `min_capacity` | `None` | Minimum per-instance serverless DCUs; omitted uses 0.5. |
+| `max_capacity` | `None` | Maximum per-instance serverless DCUs; omitted uses 4. |
 | `engine` | `"8.0"` | Engine version: `"8.0"` (default) or `"5.0"`. |
 | `deletion_protection` | `False` | Block cluster deletion until you flip this off and redeploy. |
 | `backup_retention_period` | `7` | Automated backup retention in days (1–35). |
@@ -92,7 +143,7 @@ Available configuration options:
 
 ## Replicas
 
-`instances=1` is a single writer. `instances=2` (up to 16) adds replicas in the
+`replicas=0` is a single writer. `replicas=1` (up to 15) adds replicas in the
 same cluster, not a second cluster. Failover to a replica needs more than one
 instance.
 
@@ -116,11 +167,10 @@ Default is `"8.0"`. Pass `engine="5.0"` to opt in to 5.0.
 
     Resize first, in a separate deploy:
 
-    1. Change `instance_class` and deploy.
-    2. Wait until the resize has applied. By default it waits for the
-       maintenance window, and an upgrade before then still hits `t3.medium`.
-       Set `customize={"instance": {"apply_immediately": True}}` to resize
-       right away.
+    1. Change `instance` and deploy.
+    2. Wait until the resize has applied. Instance changes apply immediately by
+       default and restart the instance, including serverless ↔ provisioned changes.
+       Customize can override `apply_immediately` to defer changes.
     3. Only then change `engine` with
        `customize={"cluster": {"allow_major_version_upgrade": True}}`.
 
@@ -299,12 +349,24 @@ Stelvio uses Standard storage (pay-per-use I/O). Prices below are on-demand in
 and the [AWS Pricing Calculator](https://calculator.aws/#/createCalculator/DocumentDB)
 for your region.
 
-A default cluster bills:
+Compute estimates verified on **2026-10-20** for Standard storage in `us-east-1`,
+using 730 hours/month, before storage, I/O, backup, networking, and CPU credits:
 
-- Instance: one `t3.medium` at **$0.078/hour**, about **~$57/month**
-- Storage: **$0.10/GB-month**
-- I/O: **$0.20 per million requests**
-- Secrets Manager storage for the managed password: about **~$0.40/month**
+| Compute per instance | Hourly | Monthly (730 hours) |
+|----------------------|--------|---------------------|
+| Default serverless idle floor (0.5 DCU) | $0.0411 | $30.00 |
+| Default serverless ceiling (4 DCUs) | $0.3288 | $240.02 |
+| Fixed `t3.medium` (`instance="t3.medium"`) | $0.078 | $56.94 |
+
+Serverless costs $0.0822 per DCU-hour. A replica is a full instance billed like
+the primary; multiply compute estimates by **`1 + replicas`**. Actual serverless
+compute varies with usage within the range. Prices come from
+[AWS's serverless examples](https://aws.amazon.com/documentdb/pricing/) and the
+[AWS regional price list](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonDocDB/current/us-east-1/index.json).
+
+Additional charges include storage ($0.10/GB-month), I/O ($0.20 per million
+requests), and Secrets Manager storage for the managed password (about
+$0.40/month).
 
 The Function needs NAT or a Secrets Manager VPC endpoint to read the password.
 See [VPC cost](vpc.md#cost).
