@@ -94,3 +94,25 @@ def assert_document_db_ingress_from_bastion(
         assert permission.get("Ipv6Ranges", []) == []
         actual_sources.update(pair["GroupId"] for pair in permission.get("UserIdGroupPairs", []))
     assert actual_sources == {bastion_security_group_id, app_security_group_id}
+
+
+def assert_network_subnet_metadata(network) -> None:
+    """Compare every deployed subnet tier with EC2 inventory."""
+    actual_subnets = (
+        _boto3_session()
+        .client("ec2")
+        .describe_subnets(SubnetIds=[subnet.subnet_id for subnet in network.subnets])["Subnets"]
+    )
+    assert {
+        (subnet["SubnetId"], subnet["CidrBlock"], subnet["AvailabilityZone"], subnet["VpcId"])
+        for subnet in actual_subnets
+    } == {
+        (subnet.subnet_id, str(subnet.cidr), subnet.availability_zone, network.vpc_id)
+        for subnet in network.subnets
+    }
+    assert set(network.route_cidrs) == {
+        subnet.cidr for subnet in network.private_subnets + network.isolated_subnets
+    }
+    assert not set(network.route_cidrs).intersection(
+        subnet.cidr for subnet in network.public_subnets
+    )
