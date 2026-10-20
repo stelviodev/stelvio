@@ -79,6 +79,15 @@ for other VPCs running. The worker rejects that VPC's private DNS while its
 transport is down and keeps owned resolver claims and the DNS listener port stable
 while it reconnects to the existing bastion. It does not replace the bastion.
 
+A changed SSH host key is a terminal failure for that VPC. Status reports
+`cause=ssh-host-key`, the instance identity, and the expected and presented
+fingerprints. The worker stops reconnecting and keeps its existing DNS view
+rejecting queries. Dependent invocations remain blocked; other ready VPCs and
+unrelated handlers can continue. Restoring the original key requires a new
+network session. For intentional rotation, stop the affected tunnels, explicitly
+reset that instance's trust, and restart. A new runtime process reads the same
+persistent pin; restarting alone does not accept a changed key.
+
 `READY` means the scoped resolver answered through the VPC path, the helper's
 routes and resolver files are active, the transport and forwarder are healthy,
 and each discovered resource hostname resolved to an address in that VPC and
