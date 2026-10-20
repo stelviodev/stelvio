@@ -389,7 +389,7 @@ def test_bastion_capture_uses_single_attempt_io_timeouts_and_deadline_hook():
 def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypatch):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
-    session.environment_name = "test"
+    session.no_vpc = False
     session.process = None
     session._outputs = {}
     session.app = "demo"
@@ -582,6 +582,7 @@ def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch,
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
     session.app = "demo"
+    session.no_vpc = False
     session.environment_name = "test"
     session.process = None
     session._outputs = {"bastion1_id": "i-first", "bastion2_id": "i-second"}
