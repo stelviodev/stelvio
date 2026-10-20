@@ -31,6 +31,11 @@ Run it on macOS after `stlv tunnel install` has installed the image selected by
 `STLV_TRAFORO_DEV_BINARY` or the pinned release. The installed image must match the
 selected digest. The test never downloads or builds a binary.
 
+The `test_verified_nonroot_forwarder_dns_reject_servfail_and_reconfigure` case
+uses independent DNS wire queries over UDP and TCP. It verifies successful
+forwarding, `SERVFAIL` while the view is rejected, no rejected query reaching the
+upstream, recovery on a higher DNS revision, and a stable listener port.
+
 ## Privileged macOS acceptance
 
 This lane can install or replace the helper and changes routes, interfaces, and
@@ -49,6 +54,19 @@ uncertain state, and restores the original helper during teardown. It compares
 resolver files, DNS state, routes, interfaces, and networking processes. Stop if
 preflight or teardown cannot prove ownership and restoration. Do not delete retained
 helper journals or resolver files by hand.
+
+The native DNS outage case first resolves an observed test-owned name through the
+ordinary macOS resolver and releases that observation before rejecting the view.
+During rejection it checks direct UDP and TCP `SERVFAIL` responses from the retained
+relay, a failed fresh OS lookup, the unchanged scoped resolver endpoint, and no new
+upstream requests. Those checks prove the active resolver remains scoped while
+failing closed; they do not claim to observe the OS query itself. Recovery uses a
+fresh revision and verifies the same relay port and a successful observed OS lookup.
+
+The host fixture accepts only the validated persistent
+`/Library/PrivilegedHelperTools/.stelvio-traforo.admin.lock`. It checks that the
+lock remains the same inode across administration, and treats transaction files or
+unknown matching artifacts as a preflight or recovery failure.
 
 The distinct-candidate upgrade case needs a verified candidate supplied through
 `STLV_TRAFORO_DEV_BINARY`; Step 9 supplies the local builder. Cross-venv acceptance
