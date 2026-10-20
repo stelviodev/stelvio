@@ -22,6 +22,7 @@ from stelvio.cli.json_output import (
 )
 from stelvio.cli.state_rendering import format_state_tree_lines
 from stelvio.command_run import CommandRun, force_unlock
+from stelvio.exceptions import StelvioProjectError
 from stelvio.provider import ProviderStore
 from stelvio.pulumi import _show_simple_error, print_operation_header
 from stelvio.rich_deployment_handler import RichDeploymentHandler
@@ -297,45 +298,63 @@ def run_deploy(
 
 
 def run_dev(env: str, show_unchanged: bool = False) -> None:
-    with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
-        status.stop()
-        operation_str = f"Deploying {'' if run.has_deployed else 'NEW '}app in DEV MODE"
-        print_operation_header(operation_str, run.app_name, env)
-        display_handler = RichDeploymentHandler(
-            run.app_name, env, "deploy", show_unchanged=show_unchanged, dev_mode=True
-        )
-        error_exc: CommandError | None = None
-        run.start_partial_push()
+    network = None
+    try:
+        with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
+            status.stop()
+            operation_str = f"Deploying {'' if run.has_deployed else 'NEW '}app in DEV MODE"
+            print_operation_header(operation_str, run.app_name, env)
+            display_handler = RichDeploymentHandler(
+                run.app_name, env, "deploy", show_unchanged=show_unchanged, dev_mode=True
+            )
+            error_exc: CommandError | None = None
+            run.start_partial_push()
+            try:
+                run.stack.up(on_event=run.event_handler(display=display_handler))
+                _clean_stale_caches()
+            except CommandError as e:
+                error_exc = e
+                _show_simple_error(e, display_handler)
+            finally:
+                run.stop_partial_push()
+
+            run.push_state()
+            run.create_state_snapshot()
+            run.complete_update(errors=[str(error_exc)] if error_exc else None)
+
+            if error_exc:
+                _handle_error(error_exc)
+
+            grouped = group_outputs(run.load_state(), run.stack.outputs())
+            display_handler.show_completion(output_lines=format_outputs(grouped))
+            # Capture the deployed manifest and AWS provider context before CommandRun removes
+            # its temporary working directory. The session itself starts after that context exits.
+            network = run.capture_network_session(lambda message: console.print(escape(message)))
+            bridge_region = ProviderStore.region()
+            bridge_profile = context().aws.profile
+            bridge_app_name = run.app_name
+
+        # The state/workdir context is no longer needed. Start networking before AppSync can
+        # dispatch an invocation to a handler that depends on a private VPC resource.
+        console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
         try:
-            run.stack.up(on_event=run.event_handler(display=display_handler))
-            _clean_stale_caches()
-        except CommandError as e:
-            error_exc = e
-            _show_simple_error(e, display_handler)
-        finally:
-            run.stop_partial_push()
-
-        run.push_state()
-        run.create_state_snapshot()
-        run.complete_update(errors=[str(error_exc)] if error_exc else None)
-
-        if error_exc:
-            _handle_error(error_exc)
-
-        grouped = group_outputs(run.load_state(), run.stack.outputs())
-        display_handler.show_completion(output_lines=format_outputs(grouped))
-    # TODO: Here lock is released but maybe we could  find a way to keep lock until dev mode is
-    #       finished.
-
-    console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
-    console.print("Running local dev server now...")
-
-    run_bridge_server(
-        region=ProviderStore.region(),
-        profile=context().aws.profile,
-        app_name=context().name,
-        env=env,
-    )
+            network.start()
+        except Exception as error:
+            raise StelvioProjectError(str(error)) from error
+        console.print("Running local dev server now...")
+        run_bridge_server(
+            region=bridge_region,
+            profile=bridge_profile,
+            app_name=bridge_app_name,
+            env=env,
+            admission=network.admit,
+        )
+    finally:
+        if network is not None:
+            try:
+                network.close()
+            except Exception as error:
+                raise StelvioProjectError(str(error)) from error
 
 
 def run_refresh(env: str, *, json_output: bool = False) -> None:
