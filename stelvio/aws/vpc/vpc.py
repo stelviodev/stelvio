@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from pulumi import Input
     from pulumi_aws.ec2 import InstanceArgs, SecurityGroupArgs
     from pulumi_aws.iam import InstanceProfileArgs, RoleArgs
-    from pulumi_aws.ssm import DocumentArgs
 
     from stelvio.customize import Customization
 
@@ -178,7 +177,6 @@ class VpcCustomizationDict(TypedDict, total=False):
     bastion_security_group: Customization[SecurityGroupArgs]
     bastion_role: Customization[RoleArgs]
     bastion_profile: Customization[InstanceProfileArgs]
-    bastion_identity_document: Customization[DocumentArgs]
 
 
 @final
@@ -267,7 +265,6 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
                 "instance_id": bastion.instance.id,
                 "security_group_id": bastion.security_group.id,
                 "az": bastion.instance.availability_zone,
-                "identity_document": bastion.document.name,
                 "owner": self.urn,
             }
 
