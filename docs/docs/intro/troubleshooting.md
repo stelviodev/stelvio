@@ -235,7 +235,7 @@ that a VPC is unavailable, only Functions that depend on that VPC are blocked. C
 the reported phase and cause, then verify the selected AWS profile, bastion state,
 SSM access, and DocumentDB membership. A local image or plugin error is terminal;
 repair it with `stlv tunnel install` and restart dev. If cleanup is uncertain, retain
-the helper evidence and run `stlv tunnel inspect`, then `stlv tunnel cleanup` after
+the helper evidence and run `stlv tunnel status`, then `stlv tunnel cleanup` after
 dev has stopped.
 
 ## Getting Help
