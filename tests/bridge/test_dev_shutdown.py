@@ -2,8 +2,14 @@
 
 import asyncio
 import json
+import os
+import selectors
+import signal
+import subprocess
+import sys
 import time
 from threading import Event
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,6 +21,7 @@ class _WebSocket:
     def __init__(self, first_message: str | None):
         self.first_message = first_message
         self.close_called = False
+        self.transport = MagicMock(spec=asyncio.Transport)
 
     def __aiter__(self):
         return self
@@ -117,3 +124,101 @@ def test_websocket_close_is_bounded(monkeypatch):
         asyncio.get_event_loop().run_until_complete(
             listener.main("us-east-1", "default", "app", "dev")
         )
+    websocket.transport.abort.assert_called_once_with()
+
+
+def test_close_timeout_aborts_transport(monkeypatch, unresponsive_websocket):
+    monkeypatch.setattr(listener, "APPSYNC_CLOSE_TIMEOUT", 0.01)
+
+    async def check():
+        websocket = unresponsive_websocket()
+        with pytest.raises(TimeoutError):
+            await listener._close_connection(websocket)
+        websocket.transport.abort.assert_called_once_with()
+        await asyncio.sleep(0)
+        assert websocket.close_code is not None
+
+    asyncio.get_event_loop().run_until_complete(check())
+
+
+@pytest.mark.parametrize("error_type", [OSError, asyncio.CancelledError])
+def test_close_failure_aborts_transport(error_type):
+    websocket = _WebSocket(None)
+    failure = error_type("close failed")
+    websocket.close = AsyncMock(side_effect=failure)
+
+    with pytest.raises(error_type) as caught:
+        asyncio.get_event_loop().run_until_complete(listener._close_connection(websocket))
+
+    assert caught.value is failure
+    websocket.transport.abort.assert_called_once_with()
+
+
+@pytest.mark.parametrize("phase", ["subscribe", "handler"])
+@pytest.mark.parametrize("error_type", [ConnectionError, asyncio.CancelledError])
+def test_main_preserves_failure_when_close_times_out(monkeypatch, phase, error_type):
+    websocket = _WebSocket('{"type":"data"}')
+    failure = error_type("original failure")
+
+    async def slow_close():
+        await asyncio.Future()
+
+    websocket.close = slow_close
+    monkeypatch.setattr(listener, "APPSYNC_CLOSE_TIMEOUT", 0.01)
+    monkeypatch.setattr(
+        listener,
+        "discover_or_create_appsync",
+        lambda *_args: AppSyncResource(
+            api_id="api-id",
+            http_endpoint="https://example.com",
+            realtime_endpoint="realtime.example.com",
+            api_key="api-key",
+        ),
+    )
+    monkeypatch.setattr(listener, "connect_to_appsync", AsyncMock(return_value=websocket))
+    monkeypatch.setattr(
+        listener,
+        "subscribe_to_channel",
+        AsyncMock(side_effect=failure if phase == "subscribe" else None),
+    )
+    monkeypatch.setattr(listener, "_handle_data_message", AsyncMock(side_effect=failure))
+
+    with pytest.raises(error_type) as caught:
+        asyncio.get_event_loop().run_until_complete(
+            listener.main("us-east-1", "default", "app", "dev")
+        )
+
+    assert caught.value is failure
+    websocket.transport.abort.assert_called_once_with()
+
+
+def test_cli_interrupt_exits_with_blocked_handler():
+    # Exercise main's real os._exit path without deploying or contacting AWS.
+    with subprocess.Popen(  # noqa: S603
+        [sys.executable, "-u", "-m", "tests.bridge.shutdown_child"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        try:
+            output = b""
+            deadline = time.monotonic() + 15
+            with selectors.DefaultSelector() as selector:
+                selector.register(child.stdout, selectors.EVENT_READ)
+                while b"HANDLER_STARTED\n" not in output:
+                    remaining = deadline - time.monotonic()
+                    assert remaining > 0, "Child did not start its handler"
+                    assert selector.select(remaining), "Child did not start its handler"
+                    chunk = os.read(child.stdout.fileno(), 4096)
+                    assert chunk, "Child exited before starting its handler"
+                    output += chunk
+
+            child.send_signal(signal.SIGINT)
+            stdout, stderr = child.communicate(timeout=5)
+            output += stdout
+            assert child.returncode == 1, stderr.decode()
+            assert b"SOCKET_CLOSED\n" in output
+            assert b"HANDLER_FINISHED\n" not in output
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=5)
