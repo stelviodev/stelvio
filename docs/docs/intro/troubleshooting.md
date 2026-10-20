@@ -153,7 +153,7 @@ does not deploy or create a bastion. If a VPC is not ready, use its printed phas
 cause to check the AWS profile, deployed ownership, SSM agent, and DocumentDB
 membership. A missing or invalid local plugin is terminal; repair it with
 `stlv tunnel install`. If cleanup cannot be certified, keep the recovery evidence and
-run `stlv tunnel inspect`, then `stlv tunnel cleanup` after the session has stopped.
+run `stlv tunnel status`, then `stlv tunnel cleanup` after the session has stopped.
 
 ### Managed VPC transport identity and authorization
 
