@@ -222,7 +222,7 @@ class NetworkSession:
                             )
                         elif s.get("cause") == "cleanup-incomplete":
                             self.report(
-                                "  Cleanup could not be certified; run stlv tunnel inspect, "
+                                "  Cleanup could not be certified; run stlv tunnel status, "
                                 "then stlv tunnel cleanup."
                             )
                     previous = signature
@@ -282,7 +282,7 @@ class NetworkSession:
                     ) from error
 
     def _report_recovery(self) -> None:
-        self.report("Host cleanup incomplete: run stlv tunnel inspect, then stlv tunnel cleanup.")
+        self.report("Host cleanup incomplete: run stlv tunnel status, then stlv tunnel cleanup.")
 
 
 def _resources(state: dict | None) -> list[dict]:
