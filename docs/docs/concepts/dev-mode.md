@@ -104,6 +104,11 @@ network session. For intentional rotation, stop the affected tunnels, explicitly
 reset that instance's trust, and restart. A new runtime process reads the same
 persistent pin; restarting alone does not accept a changed key.
 
+The bridge remains available during this refusal. It returns
+`VpcUnavailableError` for Functions that need the affected VPC before importing
+their handlers. Other Functions can still run. `stlv dev` and `stlv tunnel start`
+use the same pins, so changing commands does not bypass host-key checks.
+
 `READY` means the scoped resolver answered through the VPC path, the helper's
 routes and resolver files are active, the transport and forwarder are healthy,
 and each discovered resource hostname resolved to an address inside the selected
