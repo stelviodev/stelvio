@@ -75,6 +75,25 @@ def test_vpc_policy_survives_deployment_state(  # noqa: PLR0913 - policy table a
         "10.0.0.0/24",
         "10.0.1.0/24",
     ]
+    assert [str(subnet.cidr) for subnet in network.private_subnets] == [
+        "10.0.20.0/22",
+        "10.0.24.0/22",
+    ]
+    assert [str(subnet.cidr) for subnet in network.isolated_subnets] == [
+        "10.0.60.0/24",
+        "10.0.61.0/24",
+    ]
+    assert {subnet.subnet_id for subnet in network.subnets} == {
+        tid(f"test-test-net-{tier}-subnet-{az}")
+        for tier in ("public", "private", "isolated")
+        for az in ("a", "b")
+    }
+    assert tuple(str(cidr) for cidr in network.route_cidrs) == (
+        "10.0.20.0/22",
+        "10.0.24.0/22",
+        "10.0.60.0/24",
+        "10.0.61.0/24",
+    )
     assert not manifest.used_vpcs
     assert not format_outputs(group_outputs(network_state))
     persistent = policy == BastionPolicy.PERSISTENT
