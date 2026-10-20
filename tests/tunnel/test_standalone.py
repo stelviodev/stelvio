@@ -283,12 +283,11 @@ def standalone_host_world(ssh_world, monkeypatch):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(NetworkSession, "wait", interrupt_when_ready)
-    _, events = _install_command_run(
-        monkeypatch,
-        capture=lambda report: NetworkSession(
-            state=state, app="app", env="staging", report=report
-        ),
-    )
+
+    def new_session(report):
+        return NetworkSession(state=state, app="app", env="staging", report=report)
+
+    _, events = _install_command_run(monkeypatch, capture=new_session)
     target = HostIdentity("aws", network.account, network.region, network.access.instance_id)
 
     def pinned():
@@ -304,6 +303,7 @@ def standalone_host_world(ssh_world, monkeypatch):
         events=events,
         target=target,
         sdk=original.session,
+        new_session=new_session,
     )
 
 
@@ -362,6 +362,105 @@ def test_standalone_key_rotation_requires_explicit_trust_reset(standalone_host_w
     assert world.pinned() is None
     assert world.run().exit_code == 0
     assert world.pinned() == world.server.changed_key
+    assert all(runtime.closed for runtime in world.runtimes)
+
+
+def test_dev_commands_share_pins_and_reject_changed_keys_before_dispatch(  # noqa: PLR0915 - exercise shared trust through complete command lifecycles
+    cli_commands, standalone_host_world, monkeypatch
+):
+    import asyncio
+    import json
+    import time
+    from unittest.mock import AsyncMock
+
+    from stelvio.bridge.local import listener
+    from stelvio.bridge.local.dtos import BridgeInvocationResult
+    from stelvio.tunnel.host_trust import fingerprint
+    from stelvio.tunnel.session import VpcUnavailableError
+    from tests.cli_test_helpers import FakeCommandRun
+
+    world = standalone_host_world
+    # Seed trust through standalone mode, then use separate dev commands.
+    assert world.run().exit_code == 0
+    captured = []
+
+    class Run(FakeCommandRun):
+        def capture_network_session(self, report):
+            network = world.new_session(report)
+            captured.append(network)
+            return network
+
+    cli_commands.CommandRun.side_effect = lambda *args, **kwargs: Run(
+        {"checkpoint": {"latest": {"resources": []}}}
+    )
+    monkeypatch.setattr(cli_commands.ProviderStore, "region", lambda: "us-east-1")
+    monkeypatch.setattr(cli_commands, "_clean_stale_caches", lambda: None)
+    handler = SimpleNamespace(
+        handle_bridge_event=AsyncMock(
+            return_value=BridgeInvocationResult(
+                success_result={"statusCode": 200},
+                error_result=None,
+                request_path="/",
+                request_method="GET",
+                process_time_local=1.0,
+                status_code=200,
+            )
+        )
+    )
+    publish = AsyncMock()
+    monkeypatch.setattr(listener.WebsocketHandlers, "all", lambda: [handler])
+    monkeypatch.setattr(listener, "publish", publish)
+    monkeypatch.setattr(listener, "log_invocation", lambda _result: None)
+    expected_failure = False
+
+    def bridge(*, admission, **_options):
+        deadline = time.monotonic() + 3
+        while not captured[-1]._observed:
+            assert time.monotonic() < deadline, "dev command never received network status"
+            time.sleep(0.01)
+        for endpoint in ("fn", "plain"):
+            before = handler.handle_bridge_event.await_count
+            event = {
+                "type": "data",
+                "event": json.dumps(
+                    {
+                        "invoke_id": "dev-invocation",
+                        "endpointId": endpoint,
+                        "event": {"path": "/", "httpMethod": "GET"},
+                        "context": {"epoch_deadline_time_in_ms": 0},
+                    }
+                ),
+            }
+            asyncio.get_event_loop().run_until_complete(
+                listener._handle_data_message(event, None, "key", "app", "staging", admission)
+            )
+            result = publish.await_args.args[0]
+            if expected_failure and endpoint == "fn":
+                assert isinstance(result.error_result, VpcUnavailableError)
+                assert handler.handle_bridge_event.await_count == before
+            else:
+                assert result.error_result is None
+                assert handler.handle_bridge_event.await_count == before + 1
+
+    monkeypatch.setattr(cli_commands, "run_bridge_server", bridge)
+    cli_commands.run_dev("staging")
+    assert world.pinned() == world.key
+    world.server.key = world.server.changed_key
+    expected_failure = True
+    for _ in range(2):
+        cli_commands.run_dev("staging")
+        assert world.pinned() == world.key
+    output = "\n".join(cli_commands.console.lines)
+    assert "cause=ssh-host-key" in output
+    assert world.target.instance_id in output
+    assert fingerprint(world.key) in output
+    assert fingerprint(world.server.key) in output
+    assert "stlv tunnel trust reset" in output
+    world.server.key = world.key
+    expected_failure = False
+    cli_commands.run_dev("staging")
+    assert world.pinned() == world.key
+    assert len({id(network.runtime.transport) for network in captured}) == 4
     assert all(runtime.closed for runtime in world.runtimes)
 
 
