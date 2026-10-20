@@ -79,7 +79,7 @@ def test_owner_lifecycle_cleans_without_python_request(tmp_path, mode):
         child_birth = None
         try:
             identity = _ready(ready, parent)
-            # Inspection is intentionally restricted to the authenticated owner.
+            # Status is intentionally restricted to the authenticated owner.
             assert identity["pid"] > 0
             if mode == "frozen-orphan":
                 child_pid = identity["pid"]
@@ -157,7 +157,7 @@ def test_live_lease_and_descriptor_privilege_boundaries(macos_host, tmp_path):
             installation.uninstall_helper()
         with helper.connect() as connection, Path("/dev/null").open("rb") as sentinel:
             connection.sendmsg(
-                [HelperRequest(HelperOperation.INSPECT).encode()],
+                [HelperRequest(HelperOperation.STATUS).encode()],
                 [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [sentinel.fileno()]))],
             )
             connection.settimeout(3)
@@ -172,7 +172,7 @@ def test_live_lease_and_descriptor_privilege_boundaries(macos_host, tmp_path):
             f'/bin/chmod 0644 {shlex.quote(str(result))}\n[ "$code" -ne 0 ]'
         )
         assert int(result.read_text()) != 0
-        assert len(helper.inspect().units) == 2
+        assert len(helper.status().units) == 2
     finally:
         lease.close()
 
@@ -234,7 +234,7 @@ def test_foreign_resolver_is_preserved_then_owned_cleanup_recovers(macos_host):
         assert foreign.st_ino != original.st_ino
         lease.revoke()
         deadline = time.monotonic() + 30
-        while not NativeHelper().inspect().uncertain:
+        while not NativeHelper().status().uncertain:
             assert time.monotonic() < deadline
             time.sleep(0.1)
         with raises(HelperError):
@@ -290,7 +290,7 @@ def test_fresh_install_cross_venv_cleanup_and_uninstall(macos_host, tmp_path):
             "import sys,stelvio; from pathlib import Path; "
             "assert Path(stelvio.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); "
             "from uuid import uuid4; from stelvio.tunnel.helper_client import NativeHelper; "
-            "h=NativeHelper(); assert not h.inspect().owned; h.acquire(str(uuid4())).close()",
+            "h=NativeHelper(); assert not h.status().owned; h.acquire(str(uuid4())).close()",
             cwd=tmp_path,
         )
         wait_empty()
@@ -320,7 +320,7 @@ def test_changed_image_refusal_idle_upgrade_and_interrupted_replacement(macos_ho
         with raises(HelperError):
             macos_host.install(changed)
         assert installation._installed_digest() == before
-        assert len(NativeHelper().inspect().units) == 2
+        assert len(NativeHelper().status().units) == 2
     finally:
         lease.close()
     wait_empty()
@@ -385,7 +385,7 @@ def test_pinned_release_to_local_candidate_upgrade(macos_host, pinned_traforo_re
                 }
             )
         assert installation._installed_digest() == release_digest
-        assert len(NativeHelper().inspect().units) == 2
+        assert len(NativeHelper().status().units) == 2
 
     assert_two_vpc_dns_and_packet_forwarding(
         during_session=refuse_candidate, release_digest=release_digest

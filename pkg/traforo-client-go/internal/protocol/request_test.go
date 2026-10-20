@@ -29,8 +29,11 @@ func configure() []byte {
 	return append(p, body...)
 }
 func TestIndependentWire(t *testing.T) {
-	p := request(Inspect)
-	if r, e := Decode(p); e != nil || r.Operation != Inspect {
+	p := request(Status)
+	if Status != 1 {
+		t.Fatal("status wire operation changed", Status)
+	}
+	if r, e := Decode(p); e != nil || r.Operation != Status {
 		t.Fatal(e)
 	}
 	for _, offset := range []int{0, 9, 10, 11, 15, 16, 32, 48} {
@@ -74,13 +77,13 @@ func TestRangesAndDomains(t *testing.T) {
 }
 
 func TestDecodeRejectsTrailingAndOversizedBodies(t *testing.T) {
-	withTrailing := append(request(Inspect), 0)
+	withTrailing := append(request(Status), 0)
 	binary.BigEndian.PutUint32(withTrailing[12:], 1)
 	if _, err := Decode(withTrailing); err != ErrInvalid {
 		t.Fatalf("trailing byte: got error %v", err)
 	}
 
-	oversized := request(Inspect)
+	oversized := request(Status)
 	oversized = append(oversized, make([]byte, MaxBody+1)...)
 	binary.BigEndian.PutUint32(oversized[12:], uint32(len(oversized)-Header))
 	if _, err := Decode(oversized); err != ErrInvalid {
@@ -133,14 +136,14 @@ func tcpPacket(source, destination uint32) []byte {
 }
 
 func FuzzRequest(f *testing.F) {
-	f.Add(request(Inspect))
+	f.Add(request(Status))
 	f.Add(configure())
 	f.Add(subnetRequest(subnetRanges(20), nil))
 	f.Add(subnetRequest(subnetRanges(32), nil))
 	f.Add(subnetRequest(subnetRanges(33), nil))
 	f.Fuzz(func(t *testing.T, p []byte) {
 		r, e := Decode(p)
-		if e == nil && (r.Operation < Inspect || r.Operation > Reconcile || len(p) > Header+MaxBody) {
+		if e == nil && (r.Operation < Status || r.Operation > Reconcile || len(p) > Header+MaxBody) {
 			t.Fatal("invalid accepted request")
 		}
 	})
