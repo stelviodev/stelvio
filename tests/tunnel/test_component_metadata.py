@@ -82,8 +82,8 @@ def test_vpc_policy_survives_deployment_state(  # noqa: PLR0913 - policy table a
         assert network.access.instance_id == tid("test-test-net-bastion")
         assert network.access.security_group_id == tid("test-test-net-bastion-sg")
         assert network.access.availability_zone == "us-east-1a"
-        assert network.access.identity_document == "test-test-net-bastion-identity-test-name"
         assert network.access.owner == network.identity
+        pulumi_mocks.assert_no_res(R.SSM_DOCUMENT)
         instance = pulumi_mocks.assert_res(
             "net-bastion",
             R.EC2_INSTANCE,
@@ -195,32 +195,6 @@ Match User stlv-tunnel
             R.INSTANCE_PROFILE,
             {"role": "test-test-net-bastion-role-test-name"},
         )
-        document = pulumi_mocks.assert_res(
-            "net-bastion-identity",
-            R.SSM_DOCUMENT,
-            {"documentType": "Command"},
-            partial=True,
-        )
-        assert json.loads(document.inputs["content"]) == {
-            "schemaVersion": "2.2",
-            "description": "Read Stelvio tunnel host identity",
-            "mainSteps": [
-                {
-                    "action": "aws:runShellScript",
-                    "name": "identity",
-                    "inputs": {
-                        "timeoutSeconds": "90",
-                        "runCommand": [
-                            "i=0\nwhile [ ! -f /run/stelvio-tunnel/ready ] "
-                            '&& [ "$i" -lt 60 ]; do\n'
-                            "    sleep 1\n    i=$((i + 1))\ndone\n"
-                            "test -f /run/stelvio-tunnel/ready || exit 1\n"
-                            "cat /etc/ssh/ssh_host_ed25519_key.pub\ncat /run/stelvio-tunnel/ready"
-                        ],
-                    },
-                }
-            ],
-        }
     else:
         assert network.access is None
     pulumi_mocks.assert_res_counts(
@@ -239,7 +213,6 @@ Match User stlv-tunnel
                     R.ROLE: 1,
                     R.ROLE_POLICY: 1,
                     R.INSTANCE_PROFILE: 1,
-                    R.SSM_DOCUMENT: 1,
                 }
                 if persistent
                 else {}
@@ -346,7 +319,6 @@ def test_function_and_documentdb_metadata_preserve_target_and_url(  # noqa: PLR0
                     R.EC2_INSTANCE: 1,
                     R.ROLE_POLICY: 1,
                     R.INSTANCE_PROFILE: 1,
-                    R.SSM_DOCUMENT: 1,
                 }
                 if bastion
                 else {}
@@ -434,7 +406,6 @@ def test_persistent_bastion_customization_and_tags(network_state, pulumi_mocks):
             customize={
                 "bastion": {"instance_type": "t4g.micro"},
                 "bastion_security_group": {"description": "Team dev access"},
-                "bastion_identity_document": {"tags": {"owner": "team"}},
             },
         )
         return network.resources
@@ -465,12 +436,6 @@ def test_persistent_bastion_customization_and_tags(network_state, pulumi_mocks):
         ("net-bastion-egress", R.SECURITY_GROUP_EGRESS_RULE),
     ):
         pulumi_mocks.assert_res(name, typ, {"tags": {"team": "platform"}}, partial=True)
-    pulumi_mocks.assert_res(
-        "net-bastion-identity",
-        R.SSM_DOCUMENT,
-        {"tags": {"owner": "team"}},
-        partial=True,
-    )
     pulumi_mocks.assert_res_counts(
         {
             R.VPC: 1,
@@ -485,7 +450,6 @@ def test_persistent_bastion_customization_and_tags(network_state, pulumi_mocks):
             R.ROLE: 1,
             R.ROLE_POLICY: 1,
             R.INSTANCE_PROFILE: 1,
-            R.SSM_DOCUMENT: 1,
         }
     )
 
@@ -562,7 +526,11 @@ def test_two_dev_endpoints_keep_exact_vpc_dependencies_and_bridge_ids(
             R.ROLE_POLICY_ATTACHMENT: 4,
             R.ROLE_POLICY: 2,
             R.INSTANCE_PROFILE: 2,
-            R.SSM_DOCUMENT: 2,
             R.EC2_INSTANCE: 2,
         }
     )
+
+
+def test_removed_identity_document_customization_is_rejected():
+    with raises(ValueError, match="bastion_identity_document"):
+        Vpc("net", bastion=True, customize={"bastion_identity_document": {}})

@@ -28,6 +28,10 @@ def test_deployed_bastion_document_db_and_network_metadata(stelvio_env, project_
     outputs = stelvio_env.deploy(infra)
     state = {"checkpoint": {"latest": {"resources": stelvio_env.export_resources()}}}
     manifest = read_network_manifest(state)
+    assert not any(
+        resource.get("type") == "aws:ssm/document:Document"
+        for resource in state["checkpoint"]["latest"]["resources"]
+    )
 
     assert len(manifest.vpcs) == 1
     vpc = manifest.vpcs[0]
@@ -59,7 +63,6 @@ def test_deployed_bastion_document_db_and_network_metadata(stelvio_env, project_
         vpc_id=outputs["vpc_net_id"],
         public_subnet_ids=[subnet.subnet_id for subnet in vpc.public_subnets],
         security_group_id=vpc.access.security_group_id,
-        identity_document=vpc.access.identity_document,
     )
 
     function_vpc = get_lambda_vpc_config(outputs["function_probe_arn"])

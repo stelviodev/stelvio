@@ -252,7 +252,7 @@ validated. They describe private DNS suffixes; Stelvio does not create a DNS
 zone or change VPC DNS settings.
 
 When enabled, normal deployment creates a persistent EC2 instance, an IAM role
-and profile, an SSM identity document, and a security group. The instance runs
+and instance profile, and a security group. The instance runs
 in a public subnet for outbound AWS connectivity. Its security group has no
 inbound rules by default, and its SSH server listens on loopback. The instance and public
 IPv4 address have ongoing AWS costs while deployed. Destroy the VPC or disable
@@ -309,7 +309,6 @@ Pulumi resource properties. For an overview of how customization works, see the
 | `bastion_security_group` | [SecurityGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/securitygroup/#inputs)                 | Bastion security group           |
 | `bastion_role`          | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs)                                   | Bastion IAM role                 |
 | `bastion_profile`       | [InstanceProfileArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/instanceprofile/#inputs)             | Bastion IAM instance profile     |
-| `bastion_identity_document` | [DocumentArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ssm/document/#inputs)                         | SSM identity document            |
 
 ### Example
 

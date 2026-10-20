@@ -35,7 +35,6 @@ def deployed_state():
                                     "instance_id": "i-12345678",
                                     "security_group_id": "sg-12345678",
                                     "az": "us-east-1a",
-                                    "identity_document": "identity",
                                     "owner": vpc,
                                 },
                                 "dns_domains": [],
@@ -115,7 +114,6 @@ def add_second_vpc(state, *, cidr="10.2.0.0/16", policy="persistent", domains=()
             "instance_id": "i-second123",
             "security_group_id": "sg-second123",
             "az": "us-east-1b",
-            "identity_document": "identity-second",
             "owner": second["urn"],
         }
     entries.append(second)
@@ -299,7 +297,6 @@ def test_access_descriptor_must_be_owned_by_its_vpc(deployed_state):
         "instance_id": "i-12345678",
         "security_group_id": "sg-12345678",
         "az": "us-east-1a",
-        "identity_document": "identity",
         "owner": "urn:other-vpc",
     }
     metadata["policy"] = "persistent"
@@ -316,7 +313,6 @@ def test_disabled_vpc_cannot_claim_bastion_access(deployed_state):
         "instance_id": "i-12345678",
         "security_group_id": "sg-12345678",
         "az": "us-east-1a",
-        "identity_document": "identity",
         "owner": metadata["identity"],
     }
     with raises(ValueError, match="must not contain access resources"):
@@ -352,4 +348,13 @@ def test_public_subnet_cannot_be_claimed_by_two_vpcs(deployed_state):
     second = add_second_vpc(deployed_state)
     second["public_subnets"][0]["id"] = first_subnet
     with raises(ValueError, match="subnet is claimed by different VPCs"):
+        read_network_manifest(deployed_state)
+
+
+def test_access_descriptor_rejects_removed_identity_document_field(deployed_state):
+    metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
+        "_stelvio_network"
+    ]
+    metadata["access"]["identity_document"] = "removed-document"
+    with raises(ValueError, match="fields"):
         read_network_manifest(deployed_state)

@@ -35,7 +35,6 @@ class AccessDescriptor:
     instance_id: str
     security_group_id: str
     availability_zone: str
-    identity_document: str
     owner: str
 
 
@@ -143,12 +142,9 @@ def _subnet(value: object) -> SubnetNetwork:
 def _access(value: object) -> AccessDescriptor | None:
     if value is None:
         return None
-    data = _fields(value, {"instance_id", "security_group_id", "az", "identity_document", "owner"})
+    data = _fields(value, {"instance_id", "security_group_id", "az", "owner"})
     return AccessDescriptor(
-        *(
-            _text(data[key], key)
-            for key in ("instance_id", "security_group_id", "az", "identity_document", "owner")
-        )
+        *(_text(data[key], key) for key in ("instance_id", "security_group_id", "az", "owner"))
     )
 
 
@@ -328,12 +324,6 @@ def _validate_vpc_resource_owners(
                 network.region,
                 "security-group",
                 network.access.security_group_id,
-            ),
-            (
-                network.account,
-                network.region,
-                "ssm-document",
-                network.access.identity_document,
             ),
         )
         for target in access_targets:
