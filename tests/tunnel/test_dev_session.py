@@ -156,7 +156,7 @@ def test_cleanup_failure_reports_exact_recovery_and_is_idempotent(world, network
     session.close()
     assert (
         world.messages[-1]
-        == "Host cleanup incomplete: run stlv tunnel inspect, then stlv tunnel cleanup."
+        == "Host cleanup incomplete: run stlv tunnel status, then stlv tunnel cleanup."
     )
 
 
@@ -246,7 +246,7 @@ def test_global_start_failure_reports_recovery_before_rethrow(
     session.close()
     assert not world.launches
     assert world.messages == [
-        "Host cleanup incomplete: run stlv tunnel inspect, then stlv tunnel cleanup."
+        "Host cleanup incomplete: run stlv tunnel status, then stlv tunnel cleanup."
     ]
     assert isinstance(session.admit("both"), VpcUnavailableError)
 
