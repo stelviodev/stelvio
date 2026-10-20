@@ -1,7 +1,6 @@
 """Opt-in standalone CLI → deployed DocumentDB acceptance."""
 
 import hashlib
-import shlex
 import signal
 import time
 
@@ -292,7 +291,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     session.assert_state_unchanged()
 
 
-def test_dev_host_key_rotation_is_terminal_until_a_new_session(standalone_cli_session):
+def test_dev_host_key_rotation_is_terminal_until_a_new_session(standalone_cli_session):  # noqa: PLR0915 - complete key-change and restart acceptance
     session = standalone_cli_session
     session.start_dev()
     session.wait_ready()
@@ -303,70 +302,53 @@ def test_dev_host_key_rotation_is_terminal_until_a_new_session(standalone_cli_se
     resource = next(item for item in session.manifest.resources if item.vpc == vpc.identity)
     hostname = resource.hostnames[0]
     port = session.resolver_ports()[hostname]
-    backup = f"/run/stelvio-test-key-{session.app}"
     instance_id = vpc.access.instance_id
-    backup_q = shlex.quote(backup)
-    key_q = shlex.quote("/etc/ssh/ssh_host_ed25519_key")
-    rotation_attempted = False
+    initial_pins = session.host_pins()
 
-    try:
-        rotation_attempted = True
-        session.run_ssm_commands(
-            instance_id,
-            [
-                f"backup={backup_q}",
-                f"key={key_q}",
-                'install -d -m 0700 "$backup"',
-                'cp -p "$key" "$backup/original"',
-                'cp -p "$key.pub" "$backup/original.pub"',
-                'ssh-keygen -q -t ed25519 -N "" -f "$backup/changed"',
-                'install -m 0600 "$backup/changed" "$key"',
-                'install -m 0644 "$backup/changed.pub" "$key.pub"',
-                "systemctl restart sshd",
-            ],
-        )
+    with session.rotated_host_key(instance_id) as changed_key:
         session.terminate_transport(instance_id)
-        session.wait_worker_cause(vpc.identity, "identity-or-configuration", timeout=240)
+        session.wait_worker_cause(vpc.identity, "ssh-host-key", timeout=240)
+        output = session.log()
+        assert instance_id in output
+        assert fingerprint(changed_key) in output
+        assert any(fingerprint(key) in output for key in initial_pins.values())
+        assert "stlv tunnel trust reset" in output
 
-        invocation_count = len(session.invocations())
-        status, response = session.invoke_function(1, timeout=20, marker=marker)
-        assert status == 500, response
-        assert isinstance(response, dict), response
-        assert response.get("errorType") == "VpcUnavailableError"
-        assert vpc.identity in response.get("error", "")
-        assert len(session.invocations()) == invocation_count
+        def assert_refused():
+            invocation_count = len(session.invocations())
+            status, response = session.invoke_function(1, timeout=20, marker=marker)
+            assert status == 500, response
+            assert isinstance(response, dict), response
+            assert response.get("errorType") == "VpcUnavailableError"
+            assert vpc.identity in response.get("error", "")
+            assert len(session.invocations()) == invocation_count
+            assert session.host_pins() == initial_pins
+            # Only this VPC is blocked; the peer and unrelated endpoints still run.
+            assert session.wait_function_marker(2, f"{session.app}-peer-healthy")["read_write"]
+            for number in (3, 4):
+                plain_status, plain = session.invoke_function(number)
+                assert plain_status == 200
+                assert isinstance(plain, dict)
+                assert plain["plain"]
+
+        assert_refused()
         session.wait_dns_rcode(hostname, port, expected=2)
 
-        # The failed VPC stays isolated; its healthy peer and the independent
-        # disabled/plain endpoints continue to dispatch.
-        assert session.wait_function_marker(2, f"{session.app}-peer-healthy")["read_write"]
-        for number in (3, 4):
-            plain_status, plain = session.invoke_function(number)
-            assert plain_status == 200
-            assert isinstance(plain, dict)
-            assert plain["plain"]
-    finally:
-        if rotation_attempted:
-            session.run_ssm_commands(
-                instance_id,
-                [
-                    f"backup={backup_q}",
-                    f"key={key_q}",
-                    'if test -f "$backup/original"; then',
-                    '  cp -p "$backup/original" "$key"',
-                    '  cp -p "$backup/original.pub" "$key.pub"',
-                    "  systemctl restart sshd",
-                    '  rm -rf -- "$backup"',
-                    "fi",
-                ],
-            )
+        # Neither a fresh dev command nor a fresh runtime can replace the pin.
+        session.terminate(signal.SIGINT)
+        session.wait_for_helper_cleanup(timeout=120)
+        session.start_dev()
+        session.wait_worker_cause(vpc.identity, "ssh-host-key", timeout=240)
+        assert_refused()
 
     # Pin mismatch is terminal for the old session. Restoring the proof bastion
     # key does not change that decision; only a fresh session may reconnect.
+    session.wait_worker_cause(vpc.identity, "ssh-host-key", timeout=30)
     session.terminate(signal.SIGINT)
     session.wait_for_helper_cleanup(timeout=120)
     session.start_dev()
     session.wait_ready()
+    assert session.host_pins() == initial_pins
     recovered = session.wait_function_marker(1, marker)
     assert recovered["tls"]
     assert recovered["read_write"]
