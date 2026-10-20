@@ -94,7 +94,10 @@ async def wait_for_appsync_ack(
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
             raise TimeoutError(f"Timed out waiting for AppSync {expected_type}")
-        raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        try:
+            raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        except TimeoutError as exc:
+            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}") from exc
         message = json.loads(raw_message)
         message_type = message.get("type")
         if message_type == "ka":
@@ -112,8 +115,11 @@ async def wait_for_appsync_ack(
 
 async def _close_failed_connection(ws: websockets.WebSocketClientProtocol) -> None:
     """Close a failed connection without replacing the original error."""
-    with contextlib.suppress(Exception, asyncio.CancelledError):
+    try:
         await asyncio.wait_for(ws.close(), timeout=APPSYNC_CLOSE_TIMEOUT)
+    except (Exception, asyncio.CancelledError):
+        with contextlib.suppress(Exception):
+            ws.transport.abort()
 
 
 async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:

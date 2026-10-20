@@ -5,7 +5,7 @@ import base64
 import json
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -265,6 +265,46 @@ def test_acknowledgement_wait_has_one_deadline_across_keepalives(reset_global_st
 
     with pytest.raises(TimeoutError, match="Timed out waiting for AppSync subscribe_success"):
         _run(stub.subscribe_to_channel(mock_ws))
+
+
+@pytest.mark.parametrize("expected_type", ["connection_ack", "subscribe_success"])
+def test_silent_socket_has_descriptive_ack_timeout(reset_global_state, monkeypatch, expected_type):
+    stub = reset_global_state
+
+    async def silent_recv():
+        await asyncio.Future()
+
+    monkeypatch.setattr(stub, "APPSYNC_ACK_TIMEOUT", 0.01)
+    mock_ws = AsyncMock()
+    mock_ws.recv.side_effect = silent_recv
+
+    with pytest.raises(TimeoutError, match=f"Timed out waiting for AppSync {expected_type}"):
+        _run(stub.wait_for_appsync_ack(mock_ws, expected_type))
+
+
+def test_failed_close_aborts_transport(reset_global_state, monkeypatch, unresponsive_websocket):
+    stub = reset_global_state
+    monkeypatch.setattr(stub, "APPSYNC_CLOSE_TIMEOUT", 0.01)
+
+    async def check():
+        websocket = unresponsive_websocket()
+        await stub._close_failed_connection(websocket)
+        websocket.transport.abort.assert_called_once_with()
+        await asyncio.sleep(0)
+        assert websocket.close_code is not None
+
+    _run(check())
+
+
+@pytest.mark.parametrize("error_type", [OSError, asyncio.CancelledError])
+def test_close_failure_is_suppressed_and_aborts_transport(reset_global_state, error_type):
+    websocket = AsyncMock()
+    websocket.transport = MagicMock(spec=asyncio.Transport)
+    websocket.close.side_effect = error_type("close failed")
+
+    _run(reset_global_state._close_failed_connection(websocket))
+
+    websocket.transport.abort.assert_called_once_with()
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.websockets.connect", new_callable=AsyncMock)
