@@ -55,7 +55,7 @@ async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol
         await wait_for_appsync_ack(ws, "connection_ack")
     except BaseException:
         with contextlib.suppress(Exception, asyncio.CancelledError):
-            await asyncio.wait_for(ws.close(), timeout=APPSYNC_CLOSE_TIMEOUT)
+            await _close_connection(ws)
         raise
 
     return ws
@@ -74,7 +74,10 @@ async def wait_for_appsync_ack(
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
             raise TimeoutError(f"Timed out waiting for AppSync {expected_type}")
-        raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        try:
+            raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        except TimeoutError as exc:
+            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}") from exc
         message = json.loads(raw_message)
         message_type = message.get("type")
         if message_type == "ka":
@@ -90,6 +93,16 @@ async def wait_for_appsync_ack(
                 f"AppSync {expected_type} acknowledgement had an unexpected operation ID"
             )
         return message
+
+
+async def _close_connection(ws: websockets.WebSocketClientProtocol) -> None:
+    """Bound the close handshake and abort its transport if it cannot finish."""
+    try:
+        await asyncio.wait_for(ws.close(), timeout=APPSYNC_CLOSE_TIMEOUT)
+    except (Exception, asyncio.CancelledError):
+        with contextlib.suppress(Exception):
+            ws.transport.abort()
+        raise
 
 
 async def subscribe_to_channel(
@@ -284,8 +297,12 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                     await _handle_data_message(data, ws, config.api_key, app_name, env)
                 case _:
                     pass
-    finally:
-        await asyncio.wait_for(ws.close(), timeout=APPSYNC_CLOSE_TIMEOUT)
+    except BaseException:
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await _close_connection(ws)
+        raise
+    else:
+        await _close_connection(ws)
 
 
 def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
