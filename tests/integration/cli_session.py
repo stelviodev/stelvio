@@ -1,4 +1,4 @@
-"""Disposable deployed application used only by standalone tunnel acceptance."""
+"""Disposable deployment used by standalone tunnel and dev-mode acceptance."""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
 from uuid import uuid4
+from urllib.error import HTTPError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 import boto3
 import pytest
@@ -45,7 +48,7 @@ _SSM_REASON = re.compile(r"stelvio/[0-9a-f]{16}/[0-9a-f]{32}\Z")
 
 
 class StandaloneCliSession:
-    """Own a regular Stelvio deployment and standalone CLI processes for one test."""
+    """Own a regular Stelvio deployment and tunnel/dev CLI process for one test."""
 
     def __init__(self, project: Path) -> None:
         self.project = project
@@ -87,14 +90,15 @@ class StandaloneCliSession:
         self._manifest = None
         self._proof_trust_targets: list[HostIdentity] = []
         self._fault_command_uncertain: str | None = None
+        self._mode = "standalone"
+        self.invocation_path = self.project / "handler-imports.jsonl"
         self._write_project()
 
     def _write_project(self) -> None:
         self.project.mkdir(parents=True, exist_ok=True)
         (self.project / "handlers").mkdir()
-        (self.project / "handlers" / "probe.py").write_text(
-            "def handler(event, context):\n    return {'ok': True}\n"
-        )
+        source_probe = Path(__file__).parent / "handlers" / "tunnel_dev_probe.py"
+        (self.project / "handlers" / "probe.py").write_text(source_probe.read_text())
         source = """
 import os
 from stelvio import export_output
@@ -126,12 +130,13 @@ def run():
         database = DocumentDb(f'docdb{number}', vpc=vpc, instances=2 if number == 1 else 1)
         function = Function(
             f'client{number}', handler='handlers/probe.handler', vpc=vpc,
-            links=[database], requirements=['pymongo'],
+            links=[database], requirements=['pymongo'], url='public',
         )
         export_output(f'vpc{number}_id', vpc.resources.vpc.id)
         export_output(f'bastion{number}_id', vpc.resources.bastion.id)
         export_output(f'cluster{number}_id', database.resources.cluster.id)
         export_output(f'function{number}_name', function.resources.function.name)
+        export_output(f'function{number}_url', function.url)
 """.replace("APP_NAME", repr(self.app))
         (self.project / "stlv_app.py").write_text(source)
         (self.project / ".stelvio").mkdir()
@@ -144,6 +149,7 @@ def run():
         self.environment["AWS_DEFAULT_REGION"] = self.region
         self.environment["STLV_TEST_AWS_PROFILE"] = self.profile
         self.environment["STLV_TEST_AWS_REGION"] = self.region
+        self.environment["STLV_TEST_TUNNEL_INVOCATIONS"] = str(self.invocation_path)
 
     def command(self, *args: str, timeout: int = 3600) -> str:
         result = subprocess.run(  # noqa: S603 - selected local Stelvio CLI for proof app ownership
@@ -220,11 +226,18 @@ def run():
         return self._manifest
 
     def start(self) -> None:
+        self._start(["tunnel", "start", self.environment_name], mode="standalone")
+
+    def start_dev(self) -> None:
+        self._start(["dev", self.environment_name], mode="dev")
+
+    def _start(self, arguments: list[str], *, mode: str) -> None:
         if self.process is not None and self.process.poll() is None:
-            raise RuntimeError("Standalone command is already running")
+            raise RuntimeError("Tunnel or dev command is already running")
+        self._mode = mode
         self._log_file = self.log_path.open("wb")
         self.process = subprocess.Popen(  # noqa: S603 - selected local Stelvio CLI, explicit project cwd
-            [str(self.cli), "tunnel", "start", self.environment_name],
+            [str(self.cli), *arguments],
             cwd=self.project,
             env=self.environment,
             stdout=self._log_file,
@@ -240,11 +253,34 @@ def run():
         while time.monotonic() < deadline:
             output = self.log()
             if self.process is None or self.process.poll() is not None:
-                raise RuntimeError(f"Standalone CLI exited before readiness: {output[-5000:]}")
-            if "Network READY" in output:
+                raise RuntimeError(f"Tunnel or dev CLI exited before readiness: {output[-5000:]}")
+            bridge_ready = self._mode != "dev" or "local dev server connected to AppSync" in output
+            if "Network READY" in output and bridge_ready:
                 return
             time.sleep(1)
-        raise TimeoutError(f"Standalone network did not become ready: {self.log_path}")
+        raise TimeoutError(f"Tunnel or dev network did not become ready: {self.log_path}")
+
+    def invoke_function(self, number: int, timeout: float = 60) -> tuple[int, dict | str]:
+        url = self._outputs[f"function{number}_url"]
+        if urlparse(url).scheme != "https":
+            raise ValueError("Proof Function URL must use HTTPS")
+        request = Request(url, method="GET")  # noqa: S310 - URL was verified as HTTPS
+        try:
+            with urlopen(request, timeout=timeout) as response:  # noqa: S310 - proof-app URL
+                status = response.status
+                body = response.read().decode()
+        except HTTPError as error:
+            status = error.code
+            body = error.read().decode(errors="replace")
+        try:
+            return status, json.loads(body)
+        except json.JSONDecodeError:
+            return status, body
+
+    def invocations(self) -> list[dict]:
+        if not self.invocation_path.exists():
+            return []
+        return [json.loads(line) for line in self.invocation_path.read_text().splitlines()]
 
     def _route_to(self, address) -> dict[str, str]:
         from .macos_host import run
