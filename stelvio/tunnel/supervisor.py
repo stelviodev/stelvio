@@ -161,10 +161,10 @@ class VpcWorker:
         return self._dns_revision
 
     def _next_host_generation(self) -> int:
-        inspection = self.lease.inspect()
-        if not inspection.owned or inspection.uncertain or inspection.mutating:
+        state = self.lease.status()
+        if not state.owned or state.uncertain or state.mutating:
             raise HelperError("Native helper ownership is unavailable", status=None)
-        units = [unit for unit in inspection.units if unit.unit == self.unit]
+        units = [unit for unit in state.units if unit.unit == self.unit]
         if len(units) > 1:
             raise HelperError("Native helper returned duplicate VPC units", status=None)
         if not units:
@@ -226,10 +226,10 @@ class VpcWorker:
     def _retire_host(self) -> None:
         if self._host_request is None:
             return
-        inspection = self.lease.inspect()
-        if not inspection.owned or inspection.uncertain or inspection.mutating:
+        state = self.lease.status()
+        if not state.owned or state.uncertain or state.mutating:
             raise RuntimeError("Native unit ownership cannot be certified")
-        units = [unit for unit in inspection.units if unit.unit == self.unit]
+        units = [unit for unit in state.units if unit.unit == self.unit]
         if not units:
             self._forget_absent_host()
             return
@@ -281,7 +281,7 @@ class VpcWorker:
             raise RuntimeError("Native VPC generation is exhausted; cleanup evidence retained")
         remove_generation = self._host_generation + 1
         self.lease.remove(unit=self.unit, generation=remove_generation, keep_dns=keep_dns)
-        confirmed = self.lease.inspect()
+        confirmed = self.lease.status()
         retired = [unit for unit in confirmed.units if unit.unit == self.unit]
         expected = HelperUnitStatus.RETAINED if keep_dns else HelperUnitStatus.INACTIVE
         if (
@@ -314,12 +314,12 @@ class VpcWorker:
             raise ValueError("Stale DNS readiness revision")
         self._dns("probe")
         self._dns("probe", direct=True)
-        inspection = self.lease.inspect()
-        if inspection.uncertain or not any(
+        state = self.lease.status()
+        if state.uncertain or not any(
             unit.unit == self.unit
             and unit.generation == self._host_generation
             and unit.status == HelperUnitStatus.ACTIVE
-            for unit in inspection.units
+            for unit in state.units
         ):
             raise TransportRetryError("VPC host configuration is not active")
         for resource in self._resources():
