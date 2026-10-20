@@ -365,7 +365,7 @@ def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypa
         cli_session,
         "NativeHelper",
         lambda: SimpleNamespace(
-            inspect=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
+            status=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
         ),
     )
     session.command = lambda *args, **kwargs: operations.append((args, kwargs))
