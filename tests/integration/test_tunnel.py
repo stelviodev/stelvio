@@ -63,7 +63,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
         InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
     )
     retained = session.wait_unit(first_vpc.identity, "retained", timeout=120)
-    assert retained.generation == initial_generation
+    assert retained.generation == initial_generation + 1
     ports_during_outage = session.resolver_ports()
     assert all(ports_during_outage.get(domain) == port for domain, port in ports_before.items())
 
@@ -79,9 +79,9 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     assert recovered["tls"]
     assert recovered["read_write"]
     active = session.wait_unit(
-        first_vpc.identity, "active", after=initial_generation, timeout=STARTUP_TIMEOUT
+        first_vpc.identity, "active", after=retained.generation, timeout=STARTUP_TIMEOUT
     )
-    assert active.generation > initial_generation
+    assert active.generation == retained.generation + 1
     ports_after_reconnect = session.resolver_ports()
     assert all(ports_after_reconnect.get(domain) == port for domain, port in ports_before.items())
 
