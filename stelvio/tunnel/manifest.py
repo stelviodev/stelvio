@@ -13,7 +13,7 @@ from typing import final
 
 from stelvio.tunnel.policy import BastionPolicy, domain_contains, normalize_dns_name
 
-VERSION = 2
+VERSION = 3
 OUTPUT_KEY = "_stelvio_network"
 ACCOUNT = re.compile(r"[0-9]{12}\Z")
 MAX_PORT = 65535
@@ -50,7 +50,18 @@ class VpcNetwork:
     policy: BastionPolicy
     dns_domains: tuple[str, ...]
     public_subnets: tuple[SubnetNetwork, ...]
+    private_subnets: tuple[SubnetNetwork, ...]
+    isolated_subnets: tuple[SubnetNetwork, ...]
     access: AccessDescriptor | None = None
+
+    @property
+    def subnets(self) -> tuple[SubnetNetwork, ...]:
+        return self.public_subnets + self.private_subnets + self.isolated_subnets
+
+    @property
+    def route_cidrs(self) -> tuple[IPv4Network, ...]:
+        """Eligible destinations; VPC CIDRs remain the AWS ownership boundary."""
+        return tuple(subnet.cidr for subnet in self.private_subnets + self.isolated_subnets)
 
 
 @final
@@ -163,6 +174,8 @@ def _vpc(data: dict) -> VpcNetwork:
             "policy",
             "dns_domains",
             "public_subnets",
+            "private_subnets",
+            "isolated_subnets",
         },
         {"access"},
     )
@@ -176,11 +189,20 @@ def _vpc(data: dict) -> VpcNetwork:
         normalize_dns_name(item)
         for item in _texts(data["dns_domains"], "dns_domains", required=False)
     )
-    subnets = tuple(_subnet(item) for item in _items(data["public_subnets"], "public_subnets"))
+    tiers = tuple(
+        tuple(
+            _subnet(item) for item in _items(data[tier], tier, required=tier == "public_subnets")
+        )
+        for tier in ("public_subnets", "private_subnets", "isolated_subnets")
+    )
+    subnets = tuple(subnet for tier in tiers for subnet in tier)
     if len({subnet.subnet_id for subnet in subnets}) != len(subnets):
         raise ValueError("Duplicate network metadata subnets")
     if any(not any(subnet.cidr.subnet_of(cidr) for cidr in cidrs) for subnet in subnets):
-        raise ValueError("Public subnet lies outside its VPC CIDRs")
+        raise ValueError("Subnet lies outside its VPC CIDRs")
+    for index, subnet in enumerate(subnets):
+        if any(subnet.cidr.overlaps(other.cidr) for other in subnets[index + 1 :]):
+            raise ValueError("Overlapping network metadata subnets")
     try:
         policy = BastionPolicy(data["policy"])
     except (TypeError, ValueError) as error:
@@ -199,7 +221,7 @@ def _vpc(data: dict) -> VpcNetwork:
         cidrs,
         policy,
         domains,
-        subnets,
+        *tiers,
         access,
     )
 
@@ -310,7 +332,7 @@ def _validate_vpc_resource_owners(
     vpcs: tuple[VpcNetwork, ...], owners: dict[tuple[str, str, str, str], str]
 ) -> None:
     for network in vpcs:
-        for subnet in network.public_subnets:
+        for subnet in network.subnets:
             target = (network.account, network.region, "subnet", subnet.subnet_id)
             _claim_resource_owner(owners, target, network.identity, "subnet")
         if network.access is None:

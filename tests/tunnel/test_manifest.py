@@ -22,7 +22,7 @@ def deployed_state():
                         "type": "stelvio:aws:Vpc",
                         "outputs": {
                             "_stelvio_network": {
-                                "version": 2,
+                                "version": 3,
                                 "kind": "vpc",
                                 "identity": vpc,
                                 "account": "123456789012",
@@ -38,6 +38,20 @@ def deployed_state():
                                     "owner": vpc,
                                 },
                                 "dns_domains": [],
+                                "private_subnets": [
+                                    {
+                                        "id": "subnet-private",
+                                        "az": "us-east-1a",
+                                        "cidr": "10.0.20.0/22",
+                                    }
+                                ],
+                                "isolated_subnets": [
+                                    {
+                                        "id": "subnet-isolated",
+                                        "az": "us-east-1a",
+                                        "cidr": "10.0.60.0/24",
+                                    }
+                                ],
                                 "public_subnets": [
                                     {
                                         "id": "subnet-0123456789abcdef0",
@@ -53,7 +67,7 @@ def deployed_state():
                         "type": "stelvio:aws:DocumentDb",
                         "outputs": {
                             "_stelvio_network": {
-                                "version": 2,
+                                "version": 3,
                                 "kind": "resource",
                                 "identity": database,
                                 "vpc": vpc,
@@ -72,7 +86,7 @@ def deployed_state():
                         "type": "stelvio:aws:Function",
                         "outputs": {
                             "_stelvio_network": {
-                                "version": 2,
+                                "version": 3,
                                 "kind": "endpoint",
                                 "identity": function,
                                 "endpoint_id": "api-generation",
@@ -98,6 +112,8 @@ def add_second_vpc(state, *, cidr="10.2.0.0/16", policy="persistent", domains=()
             "cidrs": [cidr],
             "policy": policy,
             "dns_domains": list(domains),
+            "private_subnets": [],
+            "isolated_subnets": [],
             "public_subnets": [
                 {
                     "id": "subnet-fedcba98765432100",
@@ -124,7 +140,7 @@ def add_second_vpc(state, *, cidr="10.2.0.0/16", policy="persistent", domains=()
 @mark.parametrize(
     ("index", "key", "value", "message"),
     [
-        param(0, "version", 3, "metadata version", id="version"),
+        param(0, "version", 4, "metadata version", id="version"),
         param(0, "version", True, "metadata version", id="bool-version"),
         param(0, "account", "bad", "AWS account", id="account"),
         param(0, "cidrs", ["10.0.0.1/16"], "canonical IPv4", id="noncanonical-cidr"),
@@ -254,7 +270,7 @@ def test_custom_domain_matching_uses_label_boundaries(deployed_state, domain, co
         assert len(read_network_manifest(deployed_state).enabled_vpcs) == 2
 
 
-@mark.parametrize("version", [0, 1, 3, "2", None])
+@mark.parametrize("version", [0, 1, 2, 4, "3", None])
 def test_unsupported_metadata_versions_are_rejected(deployed_state, version):
     metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
         "_stelvio_network"
@@ -322,7 +338,7 @@ def test_disabled_vpc_cannot_claim_bastion_access(deployed_state):
 def test_integral_float_ports_round_trip_from_pulumi_state(deployed_state):
     deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"]["_stelvio_network"][
         "version"
-    ] = 2.0
+    ] = 3.0
     metadata = deployed_state["checkpoint"]["latest"]["resources"][1]["outputs"][
         "_stelvio_network"
     ]
@@ -357,4 +373,77 @@ def test_access_descriptor_rejects_removed_identity_document_field(deployed_stat
     ]
     metadata["access"]["identity_document"] = "removed-document"
     with raises(ValueError, match="fields"):
+        read_network_manifest(deployed_state)
+
+
+@mark.parametrize(
+    ("private", "isolated", "expected"),
+    [
+        (True, True, ("10.0.20.0/22", "10.0.60.0/24")),
+        (True, False, ("10.0.20.0/22",)),
+        (False, True, ("10.0.60.0/24",)),
+        (False, False, ()),
+    ],
+)
+def test_route_eligibility_is_separate_from_vpc_and_public_ranges(
+    deployed_state, private, isolated, expected
+):
+    metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
+        "_stelvio_network"
+    ]
+    if not private:
+        metadata["private_subnets"] = []
+    if not isolated:
+        metadata["isolated_subnets"] = []
+
+    network = read_network_manifest(deployed_state).vpcs[0]
+
+    assert tuple(str(cidr) for cidr in network.cidrs) == ("10.0.0.0/16",)
+    assert tuple(str(cidr) for cidr in network.route_cidrs) == expected
+    assert tuple(str(subnet.cidr) for subnet in network.public_subnets) == ("10.0.0.0/24",)
+
+
+@mark.parametrize("tier", ["public_subnets", "private_subnets", "isolated_subnets"])
+@mark.parametrize(
+    ("change", "message"),
+    [
+        ("missing", "missing or unknown fields"),
+        ("not-list", "require a list"),
+        ("duplicate-id", "Duplicate network metadata subnets"),
+        ("outside", "outside its VPC CIDRs"),
+        ("overlap", "Overlapping network metadata subnets"),
+        ("malformed", "missing or unknown fields"),
+    ],
+)
+def test_subnet_tiers_reject_invalid_topology(deployed_state, tier, change, message):
+    metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
+        "_stelvio_network"
+    ]
+    if change == "missing":
+        del metadata[tier]
+    elif change == "not-list":
+        metadata[tier] = None
+    elif change == "duplicate-id":
+        other = "isolated_subnets" if tier == "public_subnets" else "public_subnets"
+        metadata[tier][0]["id"] = metadata[other][0]["id"]
+    elif change == "outside":
+        metadata[tier][0]["cidr"] = "10.3.0.0/24"
+    elif change == "overlap":
+        other = "isolated_subnets" if tier == "public_subnets" else "public_subnets"
+        metadata[tier][0]["cidr"] = metadata[other][0]["cidr"]
+    else:
+        metadata[tier][0]["type"] = "unknown"
+
+    with raises(ValueError, match=message):
+        read_network_manifest(deployed_state)
+
+
+@mark.parametrize("tier", ["private_subnets", "isolated_subnets"])
+def test_nonpublic_subnet_cannot_be_claimed_by_two_vpcs(deployed_state, tier):
+    metadata = deployed_state["checkpoint"]["latest"]["resources"][0]["outputs"][
+        "_stelvio_network"
+    ]
+    second = add_second_vpc(deployed_state)
+    second[tier] = [{"id": metadata[tier][0]["id"], "az": "us-east-1b", "cidr": "10.2.20.0/24"}]
+    with raises(ValueError, match="subnet is claimed by different VPCs"):
         read_network_manifest(deployed_state)
