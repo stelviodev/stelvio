@@ -355,6 +355,7 @@ def test_bastion_capture_uses_single_attempt_io_timeouts_and_deadline_hook():
 def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypatch):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
+    session.environment_name = "test"
     session.process = None
     session._outputs = {}
     session.app = "demo"
@@ -444,3 +445,134 @@ class _Clock:
     def sleep(self, delay: float) -> None:
         self.sleeps.append(delay)
         self.now += delay
+
+
+def _fault_session():
+    node = {
+        "InstanceId": "i-proof",
+        "VpcId": "vpc-proof",
+        "State": {"Name": "running"},
+        "Tags": [{"Key": "stelvio:app", "Value": "demo"}, {"Key": "stelvio:env", "Value": "test"}],
+    }
+    reservation = {"OwnerId": "123456789012", "Instances": [node]}
+    ec2 = _Client(direct={"describe_instances": {"Reservations": [reservation]}})
+    ssm = _Client(
+        direct={
+            "send_command": {"Command": {"CommandId": "proof-command"}},
+            "get_command_invocation": {
+                "Status": "Success",
+                "StandardOutputContent": "proof-output",
+            },
+        }
+    )
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._manifest = SimpleNamespace(
+        enabled_vpcs=(
+            SimpleNamespace(access=SimpleNamespace(instance_id="i-proof"), vpc_id="vpc-proof"),
+        )
+    )
+    session.aws = _Session({"ec2": ec2, "ssm": ssm})
+    session.account = "123456789012"
+    session.app = "demo"
+    session.environment_name = "test"
+    return session, node, reservation, ssm
+
+
+@pytest.mark.parametrize("change", ["instance", "vpc", "tags", "account"])
+def test_fault_command_refuses_foreign_or_changed_bastion(change):
+    session, node, reservation, ssm = _fault_session()
+    if change == "instance":
+        target = "i-foreign"
+    else:
+        target = "i-proof"
+        if change == "vpc":
+            node["VpcId"] = "vpc-foreign"
+        elif change == "tags":
+            node["Tags"] = []
+        else:
+            reservation["OwnerId"] = "999999999999"
+    with pytest.raises(RuntimeError, match=r"[Rr]efus"):
+        session.run_ssm_commands(target, ["true"])
+    assert not ssm.calls
+
+
+def test_fault_command_sets_execution_timeout_and_clears_uncertainty_on_success():
+    session, _, _, ssm = _fault_session()
+    assert session.run_ssm_commands("i-proof", ["true"], timeout=30) == "proof-output"
+    assert session._fault_command_uncertain is None
+    operation, request = ssm.calls[0]
+    assert operation == "send_command"
+    assert request["Parameters"]["executionTimeout"] == ["30"]
+    assert request["InstanceIds"] == ["i-proof"]
+    assert request["DocumentName"] == "AWS-RunShellScript"
+
+
+def test_uncertain_fault_command_blocks_later_commands(monkeypatch):
+    session, _, _, ssm = _fault_session()
+    clock = iter([0, 31])
+    with monkeypatch.context() as patch:
+        patch.setattr(cli_session.time, "monotonic", lambda: next(clock))
+        with pytest.raises(TimeoutError):
+            session.run_ssm_commands("i-proof", ["true"], timeout=30)
+    assert session._fault_command_uncertain == "proof-command"
+    with pytest.raises(RuntimeError, match="uncertain"):
+        session.run_ssm_commands("i-proof", ["restore"])
+    assert [operation for operation, _ in ssm.calls] == ["send_command"]
+
+
+def test_host_key_fault_restores_on_body_failure_but_not_uncertain_setup():
+    session, _, _, _ = _fault_session()
+    calls = []
+    session.run_ssm_commands = (
+        lambda instance, commands: calls.append(commands) or "public fixture"
+    )
+    with pytest.raises(ValueError, match="proof failure"), session.rotated_host_key("i-proof"):
+        raise ValueError("proof failure")
+    assert len(calls) == 2
+    assert any("cp -p" in command for command in calls[1])
+    calls.clear()
+
+    def uncertain(instance, commands):
+        calls.append(commands)
+        session._fault_command_uncertain = "proof-command"
+        raise TimeoutError("response lost")
+
+    session.run_ssm_commands = uncertain
+    with pytest.raises(RuntimeError, match="do not race"), session.rotated_host_key("i-proof"):
+        pytest.fail("uncertain setup succeeded")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("audit_fails", [False, True])
+def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch, audit_fails):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._deployed = True
+    session.environment_name = "test"
+    session.process = None
+    session._outputs = {"bastion1_id": "i-first", "bastion2_id": "i-second"}
+    session.aws = object()
+    operations = []
+    session.command = lambda *args, **kwargs: operations.append("destroy")
+    session._clear_proof_host_trust = lambda: operations.append("reset-proof-pins")
+
+    def audit():
+        operations.append("audit")
+        if audit_fails:
+            raise AssertionError("AWS absence is uncertain")
+
+    session._assert_aws_resources_absent = audit
+    monkeypatch.setattr(cli_session, "capture_bastion_volume_ids", lambda **kwargs: ())
+    monkeypatch.setattr(
+        cli_session,
+        "NativeHelper",
+        lambda: SimpleNamespace(
+            status=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
+        ),
+    )
+    if audit_fails:
+        with pytest.raises(AssertionError, match="uncertain"):
+            session.destroy()
+        assert operations == ["destroy", "audit"]
+    else:
+        session.destroy()
+        assert operations == ["destroy", "audit", "reset-proof-pins"]

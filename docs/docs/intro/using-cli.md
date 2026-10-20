@@ -344,6 +344,25 @@ rules as `stlv dev`. Press `Ctrl+C` to close the session; the deployment and its
 bastion remain in place. If the app has no enabled VPC dependencies, the command
 reports that networking is unnecessary and exits successfully.
 
+SSH host trust is shared with `stlv dev` and persists after `Ctrl+C`, command
+restart, and helper uninstall. Restarting `tunnel start` does not accept a changed
+host key. A mismatch exits with an error that names the instance and shows the
+expected and presented fingerprints.
+
+First investigate the change. Restore the original key when the change was not
+intentional. For an authorized rotation, stop all tunnels for that instance and
+reset only its trust entry:
+
+```bash
+stlv tunnel trust reset --partition aws --account 123456789012 \
+  --region us-east-1 --instance-id i-0123456789abcdef0
+stlv tunnel start staging
+```
+
+Reset shows the stored fingerprint and asks for confirmation. It does not change
+AWS resources or install the helper. The next successful SSH connection establishes
+a new pin. A replacement instance has a new ID and establishes its own pin.
+
 ### Route conflicts
 
 A helper configuration can contain 1–32 selected IPv4 destination ranges. The

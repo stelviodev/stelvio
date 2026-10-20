@@ -6,6 +6,7 @@ import signal
 import pytest
 
 from stelvio.tunnel.helper_client import NativeHelper
+from stelvio.tunnel.host_trust import fingerprint
 
 from .cli_session import STARTUP_TIMEOUT, StandaloneCliSession
 
@@ -32,6 +33,8 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
 
     session.start()
     session.wait_ready()
+    initial_pins = session.host_pins()
+    assert len(initial_pins) == 2
     assert len(session.manifest.resources) == 2
     cluster_by_vpc = {
         resource.vpc: resource.resource_id for resource in session.manifest.resources
@@ -91,6 +94,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     assert len(graceful_receipts) == 2
     assert session.terminate(signal.SIGINT) == 0
     assert "Tunnel stopped." in session.log().splitlines()
+    assert session.host_pins() == initial_pins
     session.wait_for_helper_cleanup()
     session.assert_sessions_terminated(graceful_receipts)
     assert not session.resolver_ports()
@@ -99,12 +103,34 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
 
     session.start()
     session.wait_ready()
+    assert session.host_pins() == initial_pins
     assert session.check_database(first_cluster)["read_write"]
     abrupt_receipts = session.active_ssm_sessions()
     assert len(abrupt_receipts) == 2
     assert session.terminate(signal.SIGKILL) == -signal.SIGKILL
+    assert session.host_pins() == initial_pins
     session.wait_for_helper_cleanup(timeout=120)
     session.assert_sessions_terminated(abrupt_receipts)
     assert not session.resolver_ports()
+    session.assert_bastions_running()
+    session.assert_state_unchanged()
+
+    # A new command must not trust a changed key for the same instance.
+    with session.rotated_host_key(bastion_id) as changed_key:
+        for _ in range(2):
+            session.start()
+            output = session.wait_host_key_refusal(bastion_id)
+            assert fingerprint(changed_key) in output
+            assert any(fingerprint(key) in output for key in initial_pins.values())
+            session.wait_for_helper_cleanup()
+            assert not session.active_ssm_sessions()
+            assert session.host_pins() == initial_pins
+            session.assert_state_unchanged()
+    session.start()
+    session.wait_ready()
+    assert session.host_pins() == initial_pins
+    assert session.check_database(first_cluster)["read_write"]
+    assert session.terminate(signal.SIGINT) == 0
+    session.wait_for_helper_cleanup()
     session.assert_bastions_running()
     session.assert_state_unchanged()

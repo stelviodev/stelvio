@@ -7,17 +7,25 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Event
+from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import boto3
 import pytest
+from botocore.config import Config
 
 from stelvio.stack_outputs import read_network_manifest
+from stelvio.tunnel.credentials import AWS_IO
 from stelvio.tunnel.helper_client import NativeHelper
+from stelvio.tunnel.host_trust import HostIdentity, fingerprint, locked_host_trust
 from stelvio.tunnel.installation import INSTALLED_HELPER
 
 from .assert_tunnel import (
@@ -26,8 +34,12 @@ from .assert_tunnel import (
     capture_bastion_volume_ids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 STARTUP_TIMEOUT = 900
 STOP_TIMEOUT = 90
+FAULT_IO = Config(connect_timeout=5, read_timeout=10, retries={"total_max_attempts": 1})
 _SSM_REASON = re.compile(r"stelvio/[0-9a-f]{16}/[0-9a-f]{32}\Z")
 
 
@@ -72,6 +84,8 @@ class StandaloneCliSession:
         self._state_hash: str | None = None
         self._outputs: dict[str, object] = {}
         self._manifest = None
+        self._proof_trust_targets: list[HostIdentity] = []
+        self._fault_command_uncertain: str | None = None
         self._write_project()
 
     def _write_project(self) -> None:
@@ -157,6 +171,39 @@ def run():
         self._manifest = read_network_manifest(json.loads(state))
         assert len(self._manifest.enabled_vpcs) == 2
         assert len(self._manifest.resources) == 2
+        self._initialize_proof_host_trust()
+
+    def _initialize_proof_host_trust(self) -> None:
+        """Claim only initially absent pins for newly deployed proof instances."""
+        self._proof_trust_targets = []
+        partition = self.aws.get_partition_for_region(self.region)
+        for network in self.manifest.enabled_vpcs:
+            target = HostIdentity(
+                partition, network.account, network.region, network.access.instance_id
+            )
+            with locked_host_trust(target, Event()) as entry:
+                if entry.key is not None:
+                    raise RuntimeError(
+                        "Proof instance already has SSH trust; retain it for inspection"
+                    )
+            self._proof_trust_targets.append(target)
+
+    def host_pins(self) -> dict[str, str]:
+        pins = {}
+        for target in self._proof_trust_targets:
+            with locked_host_trust(target, Event()) as entry:
+                if entry.key is None:
+                    raise AssertionError(f"Ready proof instance has no SSH pin: {target.label}")
+                pins[target.label] = entry.key
+        return pins
+
+    def _clear_proof_host_trust(self) -> None:
+        # Only after AWS absence is certified. Never remove a pre-existing pin
+        # or unlink stable per-identity locks, which could split concurrent users.
+        for target in getattr(self, "_proof_trust_targets", ()):
+            with locked_host_trust(target, Event()) as entry:
+                if entry.key is not None:
+                    entry.reset(fingerprint(entry.key))
 
     def state(self) -> bytes:
         response = self.aws.client("s3").get_object(
@@ -197,6 +244,129 @@ def run():
                 return
             time.sleep(1)
         raise TimeoutError(f"Standalone network did not become ready: {self.log_path}")
+
+    def wait_host_key_refusal(self, instance_id: str) -> str:
+        assert self.process is not None
+        code = self.process.wait(timeout=STOP_TIMEOUT)
+        output = self.log()
+        assert code == 1, output
+        assert "cause=ssh-host-key" in output
+        assert instance_id in output
+        assert "stlv tunnel trust reset" in output
+        assert "Network READY" not in output
+        return output
+
+    def run_ssm_commands(
+        self, instance_id: str, commands: list[str], *, timeout: float = 120
+    ) -> str:
+        """Run a bounded fault command only on a verified proof-owned bastion."""
+        if getattr(self, "_fault_command_uncertain", None) is not None:
+            raise RuntimeError("Previous SSM fault command is uncertain; do not issue another")
+        if not 30 <= timeout <= 600:
+            raise ValueError("SSM fault command timeout must be between 30 and 600 seconds")
+        networks = [
+            vpc for vpc in self.manifest.enabled_vpcs if vpc.access.instance_id == instance_id
+        ]
+        if len(networks) != 1:
+            raise RuntimeError("Refuse SSM fault command outside the proof deployment")
+        reservations = self.aws.client("ec2", config=AWS_IO).describe_instances(
+            InstanceIds=[instance_id]
+        )["Reservations"]
+        instances = [
+            (reservation.get("OwnerId"), node)
+            for reservation in reservations
+            for node in reservation["Instances"]
+        ]
+        if len(instances) != 1:
+            raise RuntimeError("Proof bastion identity is ambiguous")
+        owner, node = instances[0]
+        tags = {tag["Key"]: tag["Value"] for tag in node.get("Tags", [])}
+        if (
+            owner != self.account
+            or node.get("InstanceId") != instance_id
+            or node.get("VpcId") != networks[0].vpc_id
+            or tags.get("stelvio:app") != self.app
+            or tags.get("stelvio:env") != self.environment_name
+            or node.get("State", {}).get("Name") != "running"
+        ):
+            raise RuntimeError("Proof bastion ownership changed; fault command refused")
+        ssm = self.aws.client("ssm", config=FAULT_IO)
+        comment = f"stelvio-test/{self.app}/{uuid4().hex}"
+        self._fault_command_uncertain = comment
+        result = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Comment=comment,
+            Parameters={
+                "commands": ["set -eu\n" + "\n".join(commands)],
+                "executionTimeout": [str(int(timeout))],
+            },
+            TimeoutSeconds=min(int(timeout), 600),
+        )
+        command_id = result["Command"]["CommandId"]
+        self._fault_command_uncertain = command_id
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                invocation = ssm.get_command_invocation(
+                    CommandId=command_id, InstanceId=instance_id
+                )
+            except ssm.exceptions.InvocationDoesNotExist:
+                time.sleep(1)
+                continue
+            status = invocation.get("Status")
+            if status == "Success":
+                self._fault_command_uncertain = None
+                return invocation.get("StandardOutputContent", "")
+            if status in {"Cancelled", "TimedOut", "Failed"}:
+                self._fault_command_uncertain = None
+                raise RuntimeError(f"Proof-owned SSM command ended with {status}")
+            time.sleep(1)
+        raise TimeoutError(f"Proof-owned SSM command {command_id} exceeded {timeout}s")
+
+    @contextmanager
+    def rotated_host_key(self, instance_id: str) -> Iterator[str]:
+        nonce = uuid4().hex
+        backup = shlex.quote(f"/run/stelvio-test-key-{nonce}")
+        setup = [
+            f"backup={backup}",
+            "key=/etc/ssh/ssh_host_ed25519_key",
+            'test ! -e "$backup"',
+            'mkdir -m 0700 "$backup"',
+            f'printf "%s\\n" {nonce} > "$backup/owner"',
+            'cp -p "$key" "$backup/original"',
+            'cp -p "$key.pub" "$backup/original.pub"',
+            'ssh-keygen -q -t ed25519 -N "" -f "$backup/changed"',
+            'install -m 0600 "$backup/changed" "$key"',
+            'install -m 0644 "$backup/changed.pub" "$key.pub"',
+            "/usr/sbin/sshd -t",
+            "systemctl restart sshd",
+            'cat "$key.pub"',
+        ]
+        restore = [
+            f"backup={backup}",
+            "key=/etc/ssh/ssh_host_ed25519_key",
+            'if test -d "$backup"; then',
+            f'  test "$(cat "$backup/owner")" = {nonce}',
+            '  if test -f "$backup/original" && test -f "$backup/original.pub"; then',
+            '    cp -p "$backup/original" "$key"',
+            '    cp -p "$backup/original.pub" "$key.pub"',
+            "    /usr/sbin/sshd -t",
+            "    systemctl restart sshd",
+            "  fi",
+            '  rm -rf -- "$backup"',
+            "fi",
+        ]
+        try:
+            yield " ".join(self.run_ssm_commands(instance_id, setup).split()[:2])
+        finally:
+            if getattr(self, "_fault_command_uncertain", None) is not None:
+                raise RuntimeError(
+                    f"SSM fault command outcome is uncertain ({self._fault_command_uncertain}); "
+                    "do not race host-key restoration. "
+                    "Retain the command evidence and destroy the proof-owned bastion."
+                )
+            self.run_ssm_commands(instance_id, restore)
 
     def check_database(self, cluster_id: str, timeout: float = 30) -> dict:
         ca_file = self.project / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
@@ -394,6 +564,7 @@ finally:
             volume_capture_error = error
         self.command("destroy", self.environment_name, "--yes", timeout=STARTUP_TIMEOUT)
         self._assert_aws_resources_absent()
+        self._clear_proof_host_trust()
         if volume_capture_error is not None:
             raise RuntimeError(
                 "AWS cleanup completed, but bastion block-device absence could not be certified"
