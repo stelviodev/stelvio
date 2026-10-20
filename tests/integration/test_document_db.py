@@ -367,7 +367,12 @@ def test_document_db_provisioned_serverless_round_trip(stelvio_env, project_dir)
 
     def infra():
         vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))
-        db = DocumentDb("todos", vpc=vpc, instance=instance)
+        db = DocumentDb(
+            "todos",
+            vpc=vpc,
+            instance=instance,
+            **({"min_capacity": 1, "max_capacity": 8} if instance is None else {}),
+        )
         fn = Function(
             "client",
             handler="handlers/docdb_client::main.main",
@@ -402,7 +407,7 @@ def test_document_db_provisioned_serverless_round_trip(stelvio_env, project_dir)
             assert updated[key] == original[key]
         # The old range remains on the cluster after switching back to provisioned.
         assert_document_db_cluster(
-            cluster_id, serverless_scaling={"MinCapacity": 0.5, "MaxCapacity": 4}
+            cluster_id, serverless_scaling={"MinCapacity": 1, "MaxCapacity": 8}
         )
         assert (
             assert_document_db_instances(

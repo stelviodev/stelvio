@@ -9,14 +9,15 @@ you need Mongo-compatible queries and always-on capacity. For key-value data
 billed per request, start with [`DynamoTable`](dynamo-db.md).
 
 By default, `DocumentDb` creates a private, TLS-required, encrypted cluster on
-engine `8.0` with one serverless instance and an AWS-managed master password. The cluster sits in the
-Vpc's isolated subnets and accepts traffic from that Vpc's shared app security
-group.
+engine `8.0` with one serverless instance and an AWS-managed master password. The
+cluster sits in the Vpc's isolated subnets and accepts traffic from that Vpc's
+shared app security group.
 
 !!! warning "DocumentDB costs money"
     Instances bill while they run, not per request. A default one-instance
-    cluster starts at about **$30/month** and can reach **$240/month** at its default ceiling, see [Cost](#cost). Linked functions also
-    need NAT, which has its own [cost](vpc.md#cost).
+    cluster starts at about **$30/month** and can reach **$240/month** at its default
+    ceiling, see [Cost](#cost). Linked functions also need NAT, which has its own
+    [cost](vpc.md#cost).
 
 ## Creating a DocumentDB cluster
 
@@ -72,43 +73,6 @@ Both engine `5.0` and `8.0` support serverless. Engine `5.0` requires a recent
 patch, and availability varies by region. Check
 [AWS requirements](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-limitations.html)
 before deployment. Stelvio does not query AWS availability during construction.
-
-The automatic range is a default: app-wide dictionary customization can replace
-it. Supplying either capacity argument constructs a complete range with the
-other bound's default and takes precedence over app-wide dictionary defaults.
-Callable and component-level customizations can override it and are unvalidated.
-
-Prefer `instance="serverless"`, `min_capacity`, and `max_capacity` for ordinary
-serverless configuration. The automatic range follows the constructor's
-`instance`, before instance customization runs. If the constructor selects a
-provisioned class and app-wide or component-level customization changes it to
-`db.serverless`, also supply the cluster range. AWS rejects a serverless instance
-on a cluster without that range:
-
-```python
-from stelvio.aws.document_db import DocumentDb
-from stelvio.aws.vpc import Vpc
-
-vpc = Vpc("main")
-db = DocumentDb(
-    "todos",
-    vpc=vpc,
-    instance="t3.medium",
-    customize={
-        "cluster": {
-            "serverless_v2_scaling_configuration": {
-                "min_capacity": 0.5,
-                "max_capacity": 4,
-            },
-        },
-        "instance": {"instance_class": "db.serverless"},
-    },
-)
-```
-
-Conversely, omitting `instance` while customizing the class to a provisioned
-instance leaves the default range configured. It has no effect on provisioned
-instances.
 
 Switching to a provisioned `instance` leaves the old capacity range on the
 cluster: AWS cannot remove it, and it has no effect on provisioned instances.
@@ -183,24 +147,10 @@ The writer endpoint is `host`. Read-only traffic can use `reader_host`, which
 load-balances across replicas. With one instance, `reader_host` still exists
 but points at that same instance.
 
-Stelvio leaves `promotion_tier` unset, so AWS uses its default of **1**.
-Serverless readers in tiers 0 or 1 cannot scale below the writer's current
-capacity, even when the readers are idle. Readers in tiers 2–15 scale
-independently within the cluster's range and can idle at its minimum:
-
-```python
-db = DocumentDb(
-    "todos",
-    vpc=vpc,
-    replicas=1,
-    customize={"instance": {"promotion_tier": 2}},
-)
-```
-
-This customization applies to every instance. Independently scaling readers
-can cost less when idle, but may need to scale up to handle the writer's workload
-after failover. Tiers 0/1 keep readers ready with at least the writer's capacity.
-See [AWS's promotion-tier guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-managing.html).
+AWS defaults `promotion_tier` to **1**, so a serverless replica stays at the writer's
+capacity. Set `customize={"instance": {"promotion_tier": 2}}` to let replicas scale
+independently and idle at the minimum. See
+[AWS's promotion-tier guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-managing.html).
 
 ## Engine version
 
@@ -208,22 +158,19 @@ Default is `"8.0"`. Pass `engine="5.0"` to opt in to 5.0.
 
 !!! warning "Changing engine upgrades the live cluster"
     Changing `engine="5.0"` to `engine="8.0"` is an in-place major version
-    upgrade with downtime. AWS rejects that unless you opt in with
-    `customize={"cluster": {"allow_major_version_upgrade": True}}`. You must
-    still meet the
+    upgrade with downtime. You must meet the
     [AWS upgrade prerequisites](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-mvu.html).
-    You cannot downgrade by changing `engine` back. AWS says to resize a
-    burstable writer to at least `r5.large` or `r6g.large` before a major
-    upgrade; it may fail otherwise.
+    You cannot downgrade by changing `engine` back.
 
-    Resize first, in a separate deploy:
-
-    1. Change `instance` and deploy.
-    2. Wait until the resize has applied. Instance changes apply immediately by
-       default and restart the instance, including serverless ↔ provisioned changes.
-       Customize can override `apply_immediately` to defer changes.
-    3. Only then change `engine` with
-       `customize={"cluster": {"allow_major_version_upgrade": True}}`.
+    1. With serverless, set `max_capacity` to **3 or more** and deploy before
+       changing `engine`. With a burstable provisioned class, resize to
+       `instance="r6g.large"` in a separate deploy first.
+    2. Wait until the capacity or resize has applied. Instance class changes apply
+       immediately by default and restart the instance; customize can defer them.
+       Follow the [reboot guidance](#serverless-capacity) when changing a range.
+    3. Change `engine` with
+       `customize={"cluster": {"allow_major_version_upgrade": True, "apply_immediately": True}}`
+       so the cluster upgrade runs during deployment rather than waiting for maintenance.
 
 ## Networking
 
@@ -400,8 +347,8 @@ Stelvio uses Standard storage (pay-per-use I/O). Prices below are on-demand in
 and the [AWS Pricing Calculator](https://calculator.aws/#/createCalculator/DocumentDB)
 for your region.
 
-Compute estimates verified on **2026-10-20** for Standard storage in `us-east-1`,
-using 730 hours/month, before storage, I/O, backup, networking, and CPU credits:
+Compute estimates for Standard storage in `us-east-1`, using 730 hours/month,
+before storage, I/O, backup, networking, and CPU credits:
 
 | Compute per instance | Hourly | Monthly (730 hours) |
 |----------------------|--------|---------------------|
@@ -415,17 +362,14 @@ instance has approximately **1 GiB of memory**, **250 total connections**,
 These limits depend on the instance's current capacity; see
 [AWS's serverless instance limits](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-instance-limits.html).
 Choose a higher minimum if the limits at the floor are insufficient for your
-workload. AWS recommends `min_capacity` of at least **1.5 DCUs** when you need
-to avoid the lower eventual caps on active connections, cursors, and open
-transactions that apply when the minimum is 1 DCU or less. This does not raise
-the listed limits at 4 DCUs, where both tables have the same values. See
+workload. When `min_capacity` is 1 DCU or less, the caps on cursors, open
+transactions, and active connections stay lower at every capacity. See
 [AWS's minimum-capacity guidance](https://docs.aws.amazon.com/documentdb/latest/devguide/docdb-serverless-scaling-config.html).
 
 Serverless costs $0.0822 per DCU-hour. A replica is a full instance billed like
 the primary; multiply compute estimates by **`1 + replicas`**. Actual serverless
-compute varies with usage within the range. Prices come from
-[AWS's serverless examples](https://aws.amazon.com/documentdb/pricing/) and the
-[AWS regional price list](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonDocDB/current/us-east-1/index.json).
+compute varies with usage within the range. See
+[AWS's serverless pricing examples](https://aws.amazon.com/documentdb/pricing/).
 
 Additional charges include storage ($0.10/GB-month), I/O ($0.20 per million
 requests), and Secrets Manager storage for the managed password (about

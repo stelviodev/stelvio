@@ -4,11 +4,8 @@
 
 ### DocumentDB
 
-- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
-- **DocumentDB serverless capacity.** Serverless is the default, with 0.5–4 DCUs per instance.
-  Use `instance` to select a class, `replicas` to add read replicas, and
-  `min_capacity`/`max_capacity` to configure bounds. Instance class changes apply immediately.
-  Returning to provisioned preserves the cluster; changing the range can require instance restarts.
+- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. Serverless is the default (0.5–4 DCUs per instance); use `instance` for a provisioned class, `replicas` for read replicas, and `min_capacity`/`max_capacity` for capacity bounds. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
+
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
