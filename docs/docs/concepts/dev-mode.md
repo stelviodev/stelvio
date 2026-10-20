@@ -93,8 +93,9 @@ On normal shutdown, each worker stops its owned SSH/SSM transport and retires it
 helper generation before the lease is released. If the parent exits unexpectedly,
 the lease closes and the helper recovers host state from its durable journal. A
 transport cleanup that cannot be certified leaves its ownership receipts and
-helper evidence available for inspection; Stelvio reports the existing recovery
-commands instead of claiming the VPC is ready.
+helper evidence available through `stlv tunnel status`; Stelvio reports the
+existing recovery commands instead of claiming the VPC is ready. This status is
+local helper ownership state and does not verify AWS or database connectivity.
 
 ## Using it
 
