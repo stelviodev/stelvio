@@ -312,19 +312,20 @@ it requests administrator authorization. It installs the helper and registers it
 LaunchDaemon. During a networking session, the helper owns temporary VPC routes,
 interfaces, and scoped resolver files.
 
-Use these commands to inspect or recover the helper:
+Use these commands to check or recover the helper:
 
 ```bash
-stlv tunnel inspect
+stlv tunnel status
 stlv tunnel cleanup
 stlv tunnel uninstall
 ```
 
-`inspect` reports helper ownership and VPC units. `cleanup` reconciles stale owned
-network state and leaves the helper installed. `uninstall` removes the helper after
+`status` reports local helper ownership and VPC unit state; it does not verify AWS
+or database connectivity. `cleanup` reconciles stale owned network state and
+leaves the helper installed. `uninstall` removes the helper after
 it confirms that no active session owns host state. It uses the installed image and
 does not need a plugin download. If ownership is uncertain, the helper retains its
-evidence for inspection; do not remove resolver files or helper state by hand.
+ownership evidence for status checks; do not remove resolver files or helper state by hand.
 
 ### exit codes
 

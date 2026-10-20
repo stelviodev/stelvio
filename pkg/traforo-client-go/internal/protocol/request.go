@@ -19,7 +19,7 @@ const (
 	MaxDomains        = 64
 	MaxJournal        = 512 * 1024
 	IPv4       uint32 = 2 // Fixed carrier marker, independent of host socket constants.
-	Inspect    byte   = 1
+	Status     byte   = 1
 	Acquire    byte   = 2
 	Configure  byte   = 3
 	Remove     byte   = 4
@@ -91,13 +91,13 @@ func Decode(packet []byte) (r Request, err error) {
 	}
 	r.Operation = packet[8]
 	r.KeepDNS = packet[9] == 1
-	if r.Operation < Inspect || r.Operation > Reconcile || packet[9] > 1 || r.KeepDNS && r.Operation != Remove {
+	if r.Operation < Status || r.Operation > Reconcile || packet[9] > 1 || r.KeepDNS && r.Operation != Remove {
 		return
 	}
 	copy(r.Session[:], packet[16:32])
 	copy(r.Capability[:], packet[32:48])
 	r.Generation = binary.BigEndian.Uint64(packet[48:])
-	anonymous := r.Operation == Inspect || r.Operation == Reconcile
+	anonymous := r.Operation == Status || r.Operation == Reconcile
 	scoped := r.Operation == Configure || r.Operation == Remove
 	if Nonzero(r.Session[:]) == anonymous || Nonzero(r.Capability[:]) != (!anonymous && r.Operation != Acquire) || (r.Generation != 0) != scoped {
 		return

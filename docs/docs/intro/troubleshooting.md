@@ -136,15 +136,16 @@ user; only the helper runs with elevated privileges.
 If installation reports a missing or invalid Session Manager plugin, fix the
 download or cache error and run `stlv tunnel install` again. The command reports
 plugin errors directly and stops before it authorizes or changes the helper.
-`inspect`, `cleanup`, and `uninstall` do not download the plugin.
+`status`, `cleanup`, and `uninstall` do not download the plugin.
 
-If `inspect` reports uncertain state, run `stlv tunnel cleanup` after active
+If `status` reports uncertain state, run `stlv tunnel cleanup` after active
 networking sessions have stopped. The helper refuses to remove routes or resolver
 files that it cannot prove it owns. Keep that evidence and ask for help; do not
 delete files under `/Library/Application Support/Stelvio/tunnel` or `/etc/resolver`.
 
 If installation reports an active helper, close the networking session and retry.
-Use `stlv tunnel inspect` to see whether any VPC unit remains active.
+Use `stlv tunnel status` to see local helper ownership and whether any VPC unit
+remains active. This does not verify AWS or database connectivity.
 
 ### Permission Denied Errors
 
