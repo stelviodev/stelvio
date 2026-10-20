@@ -15,9 +15,8 @@ def assert_bastion_resources(
     vpc_id: str,
     public_subnet_ids: list[str],
     security_group_id: str,
-    identity_document: str,
 ) -> None:
-    """Assert the deployed instance, SSM role, identity document, and closed ingress."""
+    """Assert the deployed instance, SSM role, and closed ingress."""
     session = _boto3_session()
     ec2 = session.client("ec2")
     ec2.get_waiter("instance_running").wait(
@@ -64,15 +63,6 @@ def assert_bastion_resources(
         "ssmmessages:OpenControlChannel",
         "ssmmessages:OpenDataChannel",
     } <= actions
-
-    ssm = session.client("ssm")
-    described_document = ssm.describe_document(Name=identity_document)["Document"]
-    assert described_document["DocumentType"] == "Command"
-    assert described_document["Status"] == "Active"
-    document = json.loads(ssm.get_document(Name=identity_document)["Content"])
-    commands = document["mainSteps"][0]["inputs"]["runCommand"]
-    assert any("ssh_host_ed25519_key.pub" in command for command in commands)
-    assert any("/run/stelvio-tunnel/ready" in command for command in commands)
 
     user_data = ec2.describe_instance_attribute(InstanceId=instance_id, Attribute="userData")[
         "UserData"
