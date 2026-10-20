@@ -249,14 +249,14 @@ def install_helper(*, environment: Mapping[str, str] | None = None) -> TraforoSe
     installed = _installed_digest()
     if installed == digest and INSTALLED_HELPER.lstat().st_nlink == 1:
         try:
-            inspection = NativeHelper().inspect()
+            state = NativeHelper().status()
         except HelperBusyError:
             # Exact pin plus an authenticated root BUSY reply certifies compatibility.
             return selection
         except (OSError, HelperError):
             pass
         else:
-            if inspection.uncertain:
+            if state.uncertain:
                 raise HelperError(
                     "The helper has unfinished host cleanup; run stlv tunnel cleanup"
                 )
@@ -274,15 +274,15 @@ def _wait_ready() -> None:
     deadline = time.monotonic() + 15
     while True:
         try:
-            inspection = NativeHelper(timeout=1).inspect()
+            state = NativeHelper(timeout=1).status()
         except (OSError, HelperError):
             if time.monotonic() >= deadline:
                 raise HelperError(
-                    "The helper was installed but is not ready; run stlv tunnel inspect"
+                    "The helper was installed but is not ready; run stlv tunnel status"
                 ) from None
             time.sleep(0.1)
         else:
-            if inspection.uncertain:
+            if state.uncertain:
                 raise HelperError("The installed helper reports unfinished host cleanup")
             return
 

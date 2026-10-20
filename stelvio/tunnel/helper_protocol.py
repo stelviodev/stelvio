@@ -28,7 +28,7 @@ _PRIVATE = tuple(IPv4Network(value) for value in ("10.0.0.0/8", "172.16.0.0/12",
 
 
 class HelperOperation(IntEnum):
-    INSPECT = 1
+    STATUS = 1
     ACQUIRE = 2
     CONFIGURE = 3
     REMOVE = 4
@@ -100,11 +100,11 @@ class HelperRequest:
         )
 
     def _identity(self) -> tuple[bytes, bytes]:
-        anonymous = self.operation in {HelperOperation.INSPECT, HelperOperation.RECONCILE}
+        anonymous = self.operation in {HelperOperation.STATUS, HelperOperation.RECONCILE}
         acquiring = self.operation == HelperOperation.ACQUIRE
         if anonymous:
             if self.session is not None or self.capability is not None:
-                raise ValueError("Inspection/reconciliation accepts no session capability")
+                raise ValueError("Status/reconciliation accepts no session capability")
             return bytes(16), bytes(16)
         try:
             session = UUID(self.session)
