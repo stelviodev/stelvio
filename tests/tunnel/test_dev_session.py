@@ -218,6 +218,29 @@ def test_unverifiable_status_revokes_admission(world, network_state, bad_snapsho
         session.close()
 
 
+@mark.parametrize(
+    ("cause", "guidance"),
+    [
+        ("local-artifact", "Repair the pinned Traforo image"),
+        ("cleanup-incomplete", "run stlv tunnel inspect"),
+    ],
+)
+def test_terminal_vpc_failure_blocks_only_its_dependents_and_reports_guidance(
+    world, network_state, cause, guidance
+):
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: session.admit("both") is None)
+        world.statuses[0].update(state="failed", cause=cause)
+        wait_for(lambda: isinstance(session.admit("both"), VpcUnavailableError))
+        assert session.admit("healthy") is None
+        assert session.admit("plain") is None
+        wait_for(lambda: any(guidance in message for message in world.messages))
+    finally:
+        session.close()
+
+
 def test_unresponsive_status_expires_admission_with_bounded_rejection(
     world, network_state, monkeypatch
 ):
