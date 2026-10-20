@@ -18,7 +18,7 @@ if _invocation_path:
         stream.write(json.dumps({"pid": os.getpid()}) + "\n")
 
 
-def handler(_event: object, context: object) -> dict[str, object]:
+def handler(event: object, context: object) -> dict[str, object]:
     database = next(
         getattr(Resources, item.name)
         for item in fields(Resources)
@@ -37,13 +37,16 @@ def handler(_event: object, context: object) -> dict[str, object]:
         serverSelectionTimeoutMS=20_000,
     ) as client:
         ping = client.admin.command("ping")
-        marker = uuid.uuid4().hex
+        query = event.get("queryStringParameters") if isinstance(event, dict) else None
+        marker = query.get("marker") if isinstance(query, dict) else None
+        marker = marker or uuid.uuid4().hex
         collection = client.stelvio_dev.acceptance
         collection.replace_one({"_id": marker}, {"_id": marker}, upsert=True)
         read_back = collection.find_one({"_id": marker})
         body = {
             "tls": ping.get("ok") == 1,
             "read_write": bool(read_back and read_back.get("_id") == marker),
+            "marker": marker,
             "expected_host": database.host,
             "members": sorted(host for host, _ in client.nodes),
             "pid": os.getpid(),
