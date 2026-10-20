@@ -142,6 +142,10 @@ deployed Function dependencies and captures their AWS provider settings before i
 starts the session. The command does not deploy resources or replace the persistent
 bastion. It stays in the foreground until you press `Ctrl+C`; a deployment with no
 enabled VPC dependencies exits successfully without activating the helper.
+Standalone commands reuse the same persistent host trust as dev mode. A key
+mismatch produces a nonzero exit after session cleanup; repeating the command
+does not bypass the pin. See the [standalone CLI guide](../intro/using-cli.md#standalone-access-to-deployed-vpc-resources)
+for the explicit reset procedure.
 
 ## Using it
 
