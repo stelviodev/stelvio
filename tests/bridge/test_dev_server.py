@@ -134,6 +134,21 @@ def test_acknowledgement_wait_has_one_deadline_across_keepalives(monkeypatch):
         _run(subscribe_to_channel(mock_ws, "test_channel", "test_key"))
 
 
+@pytest.mark.parametrize("expected_type", ["connection_ack", "subscribe_success"])
+def test_silent_socket_has_descriptive_ack_timeout(monkeypatch, expected_type):
+    from stelvio.bridge.local import listener
+
+    async def silent_recv():
+        await asyncio.Future()
+
+    monkeypatch.setattr(listener, "APPSYNC_ACK_TIMEOUT", 0.01)
+    mock_ws = AsyncMock()
+    mock_ws.recv.side_effect = silent_recv
+
+    with pytest.raises(TimeoutError, match=f"Timed out waiting for AppSync {expected_type}"):
+        _run(listener.wait_for_appsync_ack(mock_ws, expected_type))
+
+
 @patch("stelvio.bridge.local.listener.websockets.connect", new_callable=AsyncMock)
 def test_connection_ack_timeout_closes_partial_connection(mock_connect, monkeypatch):
     from stelvio.bridge.local import listener
