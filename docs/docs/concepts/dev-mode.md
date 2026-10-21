@@ -28,6 +28,19 @@ It checks the complete VPC CIDR and subnet inventory and requires VPC DNS suppor
 and hostnames to be enabled before using private DNS. Handler changes to AWS
 environment variables cannot redirect the captured AWS session.
 
+VPC CIDRs describe AWS ownership. Inventory includes the primary block and all
+associated IPv4 blocks, and verifies every declared public, private, and isolated
+subnet by ID, account, VPC, Availability Zone, CIDR, and availability. Missing,
+duplicate, or changed records are refused. Subnet tiers come from the deployment
+metadata, not API response order or public IPv4 auto-assignment settings.
+
+Only the declared private and isolated subnet CIDRs are eligible resource routes.
+Public subnets, unused VPC space, and newly associated blocks do not implicitly
+add destinations. The VPC resolver remains the primary block's address plus two;
+it uses the separate SOCKS path and need not be inside a routed subnet. Full VPC
+ownership overlap remains an error even when the selected subnet routes differ.
+The AWS inventory check does not inspect route tables to reclassify subnets.
+
 The access path uses Systems Manager and EC2 Instance Connect; it does not open
 inbound SSH. OpenSSH learns the bastion's Ed25519 host key through the verified
 SSM connection on first use. After SSH authentication succeeds, Stelvio stores
