@@ -58,24 +58,94 @@ def test_default_selection_is_the_release_pin_without_cache_or_network(monkeypat
         (b" 0: UUID allow read,readattr,list,search\n", False),
         (b" 0: UUID allow add_file\n", True),
         (b" 0: UUID allow write\n", True),
+        (b" 0: UUID allow unknown_right\n", True),
+        (b" 0: UUID unknown read\n", True),
+        (b" malformed\n", True),
+        (b" 0: UUID deny delete\n 1: UUID allow write\n", True),
     ],
 )
+@mark.parametrize("marker", [b"+", b"@"])
 def test_acl_validation_rejects_write_grants_but_allows_restrictive_entries(
-    tmp_path, monkeypatch, acl_entry, unsafe
+    tmp_path, monkeypatch, acl_entry, unsafe, marker
 ):
     result = Mock()
     result.returncode = 0
     result.communicate.return_value = (
-        b"drwxr-x---+ 1 developer staff 32 local-cache\n" + acl_entry,
+        b"drwxr-x---" + marker + b" 1 developer staff 32 local-cache\n" + acl_entry,
         b"",
     )
     monkeypatch.setattr(assets.subprocess, "Popen", Mock(return_value=result))
 
     if unsafe:
-        with raises(assets.NativeAssetError, match="unsafe extended ACLs"):
+        with raises(assets.NativeAssetError, match="ACLs"):
             assets._no_acl(tmp_path, "cache")
     else:
         assets._no_acl(tmp_path, "cache")
+
+
+@mark.parametrize(
+    ("output", "valid"),
+    [
+        (b"drwxr-x--- 1 developer staff 32 cache\n", True),
+        (b"drwxr-x---@ 1 developer staff 32 cache\n", True),
+        (b"drwxr-x---+ 1 developer staff 32 cache\n", False),
+        (b"drwxr-x--- 1 developer staff 32 cache\n 0: UUID deny delete\n", False),
+        (b"", False),
+        (b"\n", False),
+    ],
+)
+def test_acl_metadata_marker_and_rows_must_agree(tmp_path, monkeypatch, output, valid):
+    process = Mock(returncode=0)
+    process.communicate.return_value = (output, b"")
+    monkeypatch.setattr(assets.subprocess, "Popen", Mock(return_value=process))
+    if valid:
+        assets._no_acl(tmp_path, "cache")
+    else:
+        with raises(assets.NativeAssetError, match="ACLs"):
+            assets._no_acl(tmp_path, "cache")
+
+
+@mark.parametrize("failure", ["start", "exit", "timeout"])
+def test_failed_acl_inspection_is_refused(tmp_path, monkeypatch, failure):
+    process = Mock(returncode=1 if failure == "exit" else 0)
+    process.communicate.return_value = (b"drwx------@ 1 developer staff 32 cache\n", b"")
+    start = Mock(return_value=process)
+    if failure == "start":
+        start.side_effect = OSError("cannot inspect")
+    elif failure == "timeout":
+        process.communicate.side_effect = [assets.subprocess.TimeoutExpired("ls", 5), (b"", b"")]
+    monkeypatch.setattr(assets.subprocess, "Popen", start)
+
+    with raises(assets.NativeAssetError, match="Cannot verify cache ACLs"):
+        assets._no_acl(tmp_path, "cache")
+    if failure == "timeout":
+        process.kill.assert_called_once()
+        assert process.communicate.call_count == 2
+
+
+@mark.parametrize("unsafe", [False, True])
+def test_developer_selection_validates_acl_rows_with_extended_attributes(
+    tmp_path, monkeypatch, unsafe
+):
+    image = _image(tmp_path / "developer")
+    monkeypatch.setattr(assets, "_architecture", lambda: "arm64")
+    _report_version(monkeypatch)
+    process = Mock(returncode=0)
+    entry = b"allow write" if unsafe else b"deny delete"
+    process.communicate.return_value = (
+        b"drwx------@ 1 developer staff 32 path\n 0: group:everyone " + entry + b"\n",
+        b"",
+    )
+    monkeypatch.setattr(assets.subprocess, "Popen", Mock(return_value=process))
+    download = Mock(side_effect=AssertionError("unexpected release download"))
+    monkeypatch.setattr(assets.requests, "get", download)
+    if unsafe:
+        with raises(assets.NativeAssetError, match="unsafe extended ACLs"):
+            assets.select_traforo({assets.DEVELOPMENT_BINARY_ENV: str(image)})
+    else:
+        selected = assets.select_traforo({assets.DEVELOPMENT_BINARY_ENV: str(image)})
+        assert selected.local_path == image
+    download.assert_not_called()
 
 
 def test_explicit_override_is_selected_without_changing_pins_or_environment(tmp_path, monkeypatch):
