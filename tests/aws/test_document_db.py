@@ -20,7 +20,7 @@ from stelvio.aws.document_db import (
     DocumentDbConfig,
     DocumentDbConfigDict,
 )
-from stelvio.aws.document_db.document_db import _document_db_ca_path
+from stelvio.aws.document_db.document_db import _document_db_ca_path, _identifier_prefix
 from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
 from stelvio.aws.vpc import Vpc, VpcAttachment
@@ -286,6 +286,33 @@ def test_document_db_raises_when_name_invalid(name):
     ("app", "env", "name", "instances", "cluster_prefix", "instance_prefix"),
     [
         param(
+            "stlv-tunnel-3f79fc4a",
+            "tunnel-proof",
+            "docdb1",
+            16,
+            "stlv-3265607965f4f64a-docdb1-",
+            "stlv-3265607965f4f64a-docdb1-16-",
+            id="two-character-budget",
+        ),
+        param(
+            "stlv-tunnel-3f79fc4a",
+            "tunnel-proof",
+            "a" * 30,
+            16,
+            "stlv-3265607965f4f64a-aaaaaa-3a54fc0-",
+            "stlv-3265607965f4f64a-aaa-3a54fc0-16-",
+            id="compact-prefix-and-truncated-component",
+        ),
+        param(
+            "a" * 40,
+            "b" * 40,
+            "orders",
+            16,
+            "stlv-05614983cd085e8f-orders-",
+            "stlv-05614983cd085e8f-orders-16-",
+            id="exhausted-prefix-budget",
+        ),
+        param(
             "test",
             "test",
             "a" * 26,
@@ -346,6 +373,9 @@ def test_document_db_aws_identifiers(  # noqa: PLR0913 — parametrized inputs a
         partial=True,
         prefixed=False,
     )
+    assert len(cluster_prefix) + 26 <= 63
+    assert len(instance_prefix) + 26 <= 63
+    assert "--" not in cluster_prefix + instance_prefix
     assert "clusterIdentifier" not in cluster.inputs
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: instances})
@@ -797,21 +827,29 @@ def test_document_db_customize_cluster_security_groups(pulumi_mocks, customizati
         ),
     ],
 )
-def test_document_db_custom_identifiers(
+@mark.parametrize("long_prefix", [False, True])
+def test_document_db_custom_identifiers(  # noqa: PLR0913 — parametrized inputs and expectations
     pulumi_mocks,
     customize,
     cluster_inputs,
     instance_inputs,
     absent,
+    long_prefix,
 ):
+    if long_prefix:
+        _set_app_context("stlv-tunnel-3f79fc4a", "tunnel-proof")
+    prefix = _ContextStore.get().prefix()
+
     @pulumi.runtime.test
     def deploy():
         return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), customize=customize).resources
 
     deploy()
-    cluster = pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER, cluster_inputs, partial=True)
+    cluster = pulumi_mocks.assert_res(
+        prefix + DB_NAME, R.DOCDB_CLUSTER, cluster_inputs, partial=True, prefixed=False
+    )
     instance = pulumi_mocks.assert_res(
-        f"{DB_NAME}-1", R.DOCDB_INSTANCE, instance_inputs, partial=True
+        f"{prefix}{DB_NAME}-1", R.DOCDB_INSTANCE, instance_inputs, partial=True, prefixed=False
     )
     assert absent[0] not in cluster.inputs
     assert absent[1] not in instance.inputs
@@ -1755,3 +1793,22 @@ def test_document_db_config_preserves_instance(instance):
     config = DocumentDbConfig(vpc=Vpc(VPC_NAME), instance=instance)
     assert config.instance == instance
     assert config.instance_class == ("db." + instance.removeprefix("db.") if instance else None)
+
+
+@mark.parametrize("available", [0, 2, 8, 9])
+def test_document_db_compaction_budget_boundary(available):
+    _set_app_context("app", "e" * (31 - available))
+    prefix = _identifier_prefix("orders-long", suffix="-")
+    assert prefix.startswith("app-") == (available == 9)
+    assert len(prefix) + 26 <= 63
+    assert prefix == _identifier_prefix("orders-long", suffix="-")
+
+
+def test_document_db_compact_identity_preserves_app_environment_boundaries():
+    stem = "x" * 30
+    _set_app_context(f"app-{stem}", "env")
+    first = _identifier_prefix("orders", suffix="-")
+    _set_app_context("app", f"{stem}-env")
+    second = _identifier_prefix("orders", suffix="-")
+    assert first != second
+    assert first != _identifier_prefix("another", suffix="-")

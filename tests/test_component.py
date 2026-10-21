@@ -1168,3 +1168,24 @@ def test_parse_config_rejects_config_with_opts(config):
 def test_parse_config_rejects_wrong_type():
     with pytest.raises(TypeError, match="expected _Cfg or dict, got int"):
         parse_config(_Cfg, 1, {})
+
+
+@pytest.mark.parametrize("available", [0, 2, 8, 9])
+def test_resource_name_compacts_prefix_only_when_required(available):
+    limit = 10 + available + 26 + 1
+    kwargs = {"limit": limit, "suffix": "-", "pulumi_suffix_length": 26}
+    if available == 9:
+        assert resource_name("orders-long", compact_prefix=True, **kwargs) == resource_name(
+            "orders-long", **kwargs
+        )
+    else:
+        # Small limits can remain impossible even after compaction.
+        with pytest.raises(ValueError, match="Cannot build resource name"):
+            resource_name("orders-long", compact_prefix=True, **kwargs)
+
+
+def test_resource_name_compact_option_preserves_short_fitting_base():
+    assert (
+        resource_name("ab", limit=39, suffix="-", pulumi_suffix_length=26, compact_prefix=True)
+        == "test-test-ab-"
+    )

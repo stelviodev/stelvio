@@ -514,19 +514,34 @@ def old_name_aliases(old_name: str) -> list[pulumi.Alias]:
 
 
 def resource_name(
-    base: str, *, limit: int, suffix: str = "", pulumi_suffix_length: int = 8
+    base: str,
+    *,
+    limit: int,
+    suffix: str = "",
+    pulumi_suffix_length: int = 8,
+    compact_prefix: bool = False,
 ) -> str:
     """App-env prefix + base + suffix, truncated with a 7-char hash to fit `limit`.
 
     `limit` is the AWS cap for the resource type, or the provider's autoname cap when
     that is lower. `pulumi_suffix_length` reserves room for Pulumi's random suffix; 0 when
     the string is passed as the AWS name. `suffix` survives truncation.
+    `compact_prefix` permits hashing the context prefix only when it cannot fit
+    the base or its truncation hash. Existing successful names remain unchanged.
     """
     # Prefix can't be forgotten and the guard can't be skipped (#122, #230 did);
     # any AWS-facing name not built here is greppable-wrong. A plain function, not
     # a Component method: module-level helpers build names too.
+    hash_with_separator = 8  # 7 chars + 1 dash
     prefix = context().prefix()
     available = limit - len(prefix) - len(suffix) - pulumi_suffix_length
+    if compact_prefix and (
+        available <= 0 or (len(base) > available and available <= hash_with_separator)
+    ):
+        ctx = context()
+        identity = json.dumps([ctx.name.lower(), ctx.env.lower()], separators=(",", ":"))
+        prefix = f"stlv-{sha256(identity.encode()).hexdigest()[:16]}-"
+        available = limit - len(prefix) - len(suffix) - pulumi_suffix_length
     if available <= 0:
         raise ValueError(
             f"Cannot build resource name: prefix '{prefix}' ({len(prefix)} chars), "
@@ -538,7 +553,6 @@ def resource_name(
     if len(base) <= available:
         return f"{prefix}{base}{suffix}"
 
-    hash_with_separator = 8  # 7 chars + 1 dash
     if available <= hash_with_separator:
         raise ValueError(
             f"Not enough space for name truncation: available={available}, "
