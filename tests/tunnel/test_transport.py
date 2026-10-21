@@ -14,7 +14,7 @@ from unittest.mock import Mock
 from botocore.exceptions import ClientError
 from pytest import fixture, mark, raises
 
-from stelvio.tunnel.manifest import AccessDescriptor, VpcNetwork
+from stelvio.tunnel.manifest import AccessDescriptor, SubnetNetwork, VpcNetwork
 from stelvio.tunnel.policy import BastionPolicy
 from stelvio.tunnel.processes import identity
 from stelvio.tunnel.socks import TransportInterruptedError
@@ -32,16 +32,36 @@ from stelvio.tunnel.transport import (
 @fixture
 def transport_world(tmp_path, monkeypatch):
     network = VpcNetwork(
-        "vpc-owner",
-        "123456789012",
-        "us-east-1",
-        "vpc-12345678",
-        "provider",
-        (IPv4Network("10.254.0.0/16"),),
-        BastionPolicy.PERSISTENT,
-        (),
-        (),
-        AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
+        identity="vpc-owner",
+        account="123456789012",
+        region="us-east-1",
+        vpc_id="vpc-12345678",
+        provider="provider",
+        cidrs=(IPv4Network("10.254.0.0/16"),),
+        policy=BastionPolicy.PERSISTENT,
+        dns_domains=(),
+        public_subnets=(
+            SubnetNetwork(
+                "subnet-public",
+                "us-east-1a",
+                IPv4Network("10.254.0.0/24"),
+            ),
+        ),
+        private_subnets=(
+            SubnetNetwork(
+                "subnet-private",
+                "us-east-1a",
+                IPv4Network("10.254.1.0/24"),
+            ),
+        ),
+        isolated_subnets=(
+            SubnetNetwork(
+                "subnet-isolated",
+                "us-east-1a",
+                IPv4Network("10.254.2.0/24"),
+            ),
+        ),
+        access=AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
     )
     session = Mock(region_name="us-east-1")
     session.get_partition_for_region.return_value = "aws"
