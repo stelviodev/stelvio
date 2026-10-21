@@ -257,6 +257,9 @@ the bounded runtime status to the command. They reject untrusted exception text,
 invalid status causes, nonprintable text, and misplaced or oversized diagnostics.
 A conflict blocks dependent invocations but leaves other healthy VPCs and plain
 handlers usable. Cleanup failure retains the diagnostic and ownership evidence.
+Invalid-detail tests use a fixed session identifier containing `123` and check only
+the reports after the invalid status. Startup identifiers must not count as leaked
+diagnostics. The tests require a generic failure report and blocked VPC admission.
 These tests use isolated adapters, not actual LAN or VPN mutations. Native route
 conflict and host-baseline acceptance require the privileged tier in the final
 stack; unit success does not certify that acceptance.
