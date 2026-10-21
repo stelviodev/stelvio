@@ -232,3 +232,12 @@ to finish cleanup. Independently audit AWS absence afterward. Tests never unlock
 or retry automatically, and a cleanup retry does not change a failed acceptance
 result. Do not erase helper journals, force-delete in-use interfaces, or change
 IAM permissions to make the test pass.
+
+### Active-session observation
+
+The AWS tests read helper-confirmed unit states and generations from the running
+command's owner reports. The command log starts empty for each invocation. Tests
+use the latest observation and reject unavailable runtime status or an exited
+command. They inspect the helper directly only before startup and after shutdown.
+Cleanup polling can wait for owner rejection to end, but uncertain ownership or
+an expired deadline fails acceptance.
