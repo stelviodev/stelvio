@@ -4,6 +4,7 @@ import time
 from copy import deepcopy
 from threading import Event
 from types import SimpleNamespace
+from uuid import UUID
 
 from pytest import fixture, mark, raises
 
@@ -401,16 +402,26 @@ def test_host_key_failure_blocks_dependencies_and_reports_recovery(world, networ
 
 
 @mark.parametrize("invalid", ["x" * 1025, "line\nbreak", "\x1b[31m", 123, ""])
-def test_invalid_host_key_diagnostics_fail_closed(world, network_state, invalid):
+def test_invalid_host_key_diagnostics_fail_closed(world, network_state, invalid, monkeypatch):
+    session_id = UUID("a0dad4ae-81e1-4513-8afc-18ec1239d86e")
+    monkeypatch.setattr("stelvio.tunnel.session.uuid4", lambda: session_id)
     session = world.make(network_state)
     session.start()
     try:
         wait_for(lambda: session.admit("both") is None)
+        # Wait for the final ready report before marking the diagnostic boundary.
+        wait_for(lambda: any(message.startswith("  vpc-1: ready ") for message in world.messages))
+        assert f"Network STARTING; session {session_id}" in world.messages
+        diagnostic_start = len(world.messages)
         world.statuses[0].update(state="failed", cause="ssh-host-key", detail=invalid)
-        wait_for(lambda: session._runtime_error is not None)
+        diagnostic = "Network DEGRADED: runtime status unavailable."
+        wait_for(lambda: diagnostic in world.messages[diagnostic_start:])
+        assert session._runtime_error == "ValueError"
         assert isinstance(session.admit("both"), VpcUnavailableError)
         assert session.admit("plain") is None
-        assert not any(str(invalid) in message for message in world.messages if invalid)
+        # Reject the entire untrusted status, including an empty detail. A valid
+        # startup identifier containing the same digits is not a diagnostic leak.
+        assert world.messages[diagnostic_start:] == [diagnostic]
     finally:
         session.close()
 
