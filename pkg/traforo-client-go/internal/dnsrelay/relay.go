@@ -24,14 +24,16 @@ const MaxUDP = 4096
 
 var ErrStale = errors.New("stale DNS revision")
 var ErrUnavailable = errors.New("private DNS unavailable")
-var ErrAuthorization = errors.New("DNS resource outside owning VPC")
+var ErrAuthorization = errors.New("DNS resource outside routed destination ranges")
 
 type Config struct {
 	Revision           uint64
 	Domains, Hostnames []string
-	Resolver           netip.Addr
-	Proxy              string
-	CIDRs              []netip.Prefix
+	// Resolver is supplied by the AWS ownership-validated session, not a routed resource.
+	Resolver netip.Addr
+	Proxy    string
+	// CIDRs authorizes resource destinations; it need not contain Resolver.
+	CIDRs []netip.Prefix
 }
 
 func (c Config) Validate() error {
@@ -55,8 +57,8 @@ func (c Config) Validate() error {
 			}
 		}
 	}
-	if !c.Resolver.Is4() || !c.ownsAddress(c.Resolver) {
-		return errors.New("DNS resolver outside owning VPC")
+	if !c.Resolver.Is4() || !c.Resolver.IsPrivate() {
+		return errors.New("DNS resolver must be an RFC1918 IPv4 address")
 	}
 	if len(c.Domains)+len(c.Hostnames) > protocol.MaxDomains {
 		return errors.New("too many DNS names")
@@ -240,11 +242,17 @@ func (r *Relay) snapshot(revision uint64) (*view, error) {
 	return v, nil
 }
 
-// Dial never resolves a hostname through the host resolver. Cancellation closes IO.
+// dial authorizes a resource destination, including for ordinary-host probes.
 func dial(v *view, address netip.AddrPort, direct bool) (net.Conn, error) {
 	if !v.config.ownsAddress(address.Addr()) {
 		return nil, ErrAuthorization
 	}
+	return connect(v, address, direct)
+}
+
+// connect receives only an authorized resource or the validated resolver endpoint.
+// It never resolves a hostname through the host resolver. Cancellation closes IO.
+func connect(v *view, address netip.AddrPort, direct bool) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(v.ctx, Timeout)
 	target := v.config.Proxy
 	if direct {
@@ -281,8 +289,10 @@ type deadlineConn struct {
 
 func (c *deadlineConn) Close() error { c.finish(); return c.Conn.Close() }
 
-func exchange(v *view, q *dns.Msg, direct bool) (*dns.Msg, error) {
-	c, err := dial(v, netip.AddrPortFrom(v.config.Resolver, 53), direct)
+func exchange(v *view, q *dns.Msg) (*dns.Msg, error) {
+	// The resolver may be outside routed subnets. Never send resolver traffic
+	// through ordinary host routing or grant resource access to its address.
+	c, err := connect(v, netip.AddrPortFrom(v.config.Resolver, 53), false)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +358,7 @@ func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
 		} else if available && upstream {
 			select {
 			case r.slots <- struct{}{}:
-				upstream, e := exchange(v, q, false)
+				upstream, e := exchange(v, q)
 				<-r.slots
 				r.mu.Lock()
 				if e == nil && r.current == v && !r.closed && v.ctx.Err() == nil {
@@ -364,7 +374,9 @@ func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
 	return a.Pack()
 }
 
-// Probe checks actual payloads through SOCKS or through ordinary host routing.
+// Probe resolves through SOCKS and validates every resource A record against CIDRs.
+// direct selects ordinary host routing for the resource TCP connection only; a
+// resolver-only probe never establishes packet-forwarding readiness.
 func (r *Relay) Probe(revision uint64, hostname string, port uint16, direct bool) error {
 	v, err := r.snapshot(revision)
 	if err != nil {
@@ -380,7 +392,7 @@ func (r *Relay) Probe(revision uint64, hostname string, port uint16, direct bool
 		}
 		q.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
 	}
-	a, err := exchange(v, q, direct)
+	a, err := exchange(v, q)
 	if err != nil {
 		return err
 	}
