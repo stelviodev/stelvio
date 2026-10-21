@@ -126,6 +126,46 @@ def _application_resources_remaining(
     )
 
 
+def capture_proof_volume_ids(
+    *, sdk, app: str, env: str, instance_ids: Sequence[str]
+) -> tuple[str, ...]:
+    """Discover partial deployments before destroy, including instances absent from outputs."""
+    known = set(instance_ids)
+    if len(known) != len(instance_ids) or any(not isinstance(i, str) or not i for i in known):
+        raise ValueError("Known bastion IDs must be nonempty strings and unique")
+    # Discovery is bounded separately from the strict single-request volume capture.
+    bounded_sdk = _BoundedSession(sdk, monotonic() + 30)
+    client = bounded_sdk.client("ec2")
+    expected_tags = {"stelvio:app": app, "stelvio:env": env}
+    filters = [{"Name": f"tag:{key}", "Values": [value]} for key, value in expected_tags.items()]
+    observed = set()
+    for number, page in enumerate(
+        client.get_paginator("describe_instances").paginate(Filters=filters)
+    ):
+        if number >= AWS_MAX_REQUESTS:
+            raise AssertionError("Proof instance discovery exceeded its page budget")
+        for reservation in page.get("Reservations", []):
+            for instance in reservation.get("Instances", []):
+                tags = {item["Key"]: item["Value"] for item in instance.get("Tags", [])}
+                identifier = instance.get("InstanceId")
+                if not identifier or any(
+                    tags.get(key) != value for key, value in expected_tags.items()
+                ):
+                    raise AssertionError(
+                        "Proof instance discovery returned a foreign or invalid instance"
+                    )
+                if identifier in observed:
+                    raise AssertionError(
+                        "Proof instance discovery returned duplicate instance IDs"
+                    )
+                observed.add(identifier)
+    if not known <= observed:
+        raise AssertionError("Proof instance discovery did not verify every known bastion")
+    if not observed:
+        return ()
+    return capture_bastion_volume_ids(sdk=sdk, instance_ids=sorted(observed))
+
+
 def capture_bastion_volume_ids(*, sdk, instance_ids: Sequence[str]) -> tuple[str, ...]:
     """Capture exact attached-volume IDs before destroying the proof stack.
 
