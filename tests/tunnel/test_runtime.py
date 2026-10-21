@@ -26,6 +26,7 @@ from stelvio.tunnel.policy import BastionPolicy
 from stelvio.tunnel.runtime import NetworkRuntime
 from stelvio.tunnel.runtime_child import (
     _has_unresolved_inventory,
+    _owner_status,
     _resolve_independent_inventory,
 )
 
@@ -237,6 +238,7 @@ class Helper:
         lease=SimpleNamespace(carrier=carrier,connection=peer,closed=False)
         def close(): carrier.close();peer.close()
         lease.close=close;lease.revoke=close
+        lease.status=lambda:SimpleNamespace(owned=True,uncertain=False,units=())
         return lease
 class Worker:
     def __init__(self,description,network,*args,**kwargs):
@@ -351,6 +353,7 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
         assert status == [
             {
                 "identity": "vpc-owner",
+                "host_unit": None,
                 "state": "ready",
                 "attempt": 1,
                 "cause": None,
@@ -574,3 +577,100 @@ def test_actual_forwarder_exact_hostnames_and_probe_scope(custom_domains):
         for name in ("unowned." + host, "other.stelvio.test"):
             wire = dns_query_wire(name)
             assert dns_response(wire, dns_exchange("127.0.0.1", port, wire, "tcp"))[0] == 5
+
+
+@mark.parametrize(("generation", "state"), [(1, "ACTIVE"), (2, "RETAINED"), (3, "ACTIVE")])
+def test_owner_status_exports_observed_generation_once(generation, state):
+    from hashlib import sha256
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from stelvio.tunnel.helper_client import HelperUnitStatus
+    from stelvio.tunnel.supervisor import VpcStatus
+
+    identity = "first-vpc"
+    unit = SimpleNamespace(
+        unit=sha256(identity.encode()).hexdigest()[:8],
+        generation=generation,
+        status=HelperUnitStatus[state],
+    )
+    lease = Mock()
+    lease.status.return_value = SimpleNamespace(owned=True, uncertain=False, units=(unit,))
+    result = _owner_status(lease, [VpcStatus(identity), VpcStatus("second-vpc")])
+    assert result[0]["host_unit"] == {
+        "unit": unit.unit,
+        "generation": generation,
+        "status": state.lower(),
+    }
+    assert result[1]["host_unit"] is None
+    lease.status.assert_called_once_with()
+    assert set(result[0]) == {
+        "identity",
+        "state",
+        "attempt",
+        "cause",
+        "dns_retained",
+        "resource_probe",
+        "phase",
+        "detail",
+        "host_unit",
+    }
+
+
+@mark.parametrize(("owned", "uncertain"), [(False, False), (True, True)])
+def test_owner_status_does_not_certify_uncertain_ownership(owned, uncertain):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    lease = Mock()
+    lease.status.return_value = SimpleNamespace(owned=owned, uncertain=uncertain)
+    with raises(RuntimeError, match="ownership"):
+        _owner_status(lease, [])
+
+
+def test_owner_status_propagates_closed_lease():
+    from unittest.mock import Mock
+
+    lease = Mock()
+    lease.status.side_effect = RuntimeError("closed lease")
+    with raises(RuntimeError, match="closed lease"):
+        _owner_status(lease, [])
+
+
+def test_owner_snapshot_keeps_other_vpc_independent_during_retirement():
+    from hashlib import sha256
+    from unittest.mock import Mock
+
+    from stelvio.tunnel.helper_client import (
+        HelperOwnershipState,
+        HelperUnitState,
+        HelperUnitStatus,
+    )
+    from stelvio.tunnel.supervisor import VpcStatus
+
+    first = sha256(b"first-vpc").hexdigest()[:8]
+    second = sha256(b"second-vpc").hexdigest()[:8]
+    lease = Mock()
+    snapshots = []
+    for generation, state in [(1, "ACTIVE"), (2, "RETAINED"), (3, "ACTIVE")]:
+        lease.status.return_value = HelperOwnershipState(
+            owned=True,
+            uncertain=False,
+            mutating=False,
+            units=(
+                HelperUnitState(first, generation, HelperUnitStatus[state]),
+                HelperUnitState(second, 7, HelperUnitStatus.ACTIVE),
+            ),
+        )
+        snapshots.append(_owner_status(lease, [VpcStatus("first-vpc"), VpcStatus("second-vpc")]))
+    assert [snapshot[0]["host_unit"]["generation"] for snapshot in snapshots] == [1, 2, 3]
+    assert [snapshot[0]["host_unit"]["status"] for snapshot in snapshots] == [
+        "active",
+        "retained",
+        "active",
+    ]
+    assert all(
+        snapshot[1]["host_unit"] == {"unit": second, "generation": 7, "status": "active"}
+        for snapshot in snapshots
+    )
+    assert lease.status.call_count == 3
