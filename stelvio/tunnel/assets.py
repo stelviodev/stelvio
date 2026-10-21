@@ -205,10 +205,15 @@ def _no_acl(path: Path, label: str) -> None:  # noqa: C901 - ACL metadata parser
     lines = output.splitlines()
     if not lines:
         raise NativeAssetError(f"Cannot verify {label} ACLs")
-    acl_marker = b"+" in lines[0].split(maxsplit=1)[0]
-    if not acl_marker and len(lines) != 1:
+    header = lines[0].split(maxsplit=1)
+    if not header:
+        raise NativeAssetError(f"Cannot verify {label} ACLs")
+    marker = header[0][-1:]
+    # Darwin displays @ instead of + when extended attributes and ACLs coexist.
+    # @ alone is also valid; any following ACL rows still need full validation.
+    if marker not in {b"+", b"@"} and len(lines) != 1:
         raise NativeAssetError(f"{label} has unsafe extended ACLs")
-    if acl_marker != (len(lines) > 1):
+    if marker == b"+" and len(lines) == 1:
         raise NativeAssetError(f"Cannot verify {label} ACLs")
     for line in lines[1:]:
         fields = line.decode(errors="replace").split()
