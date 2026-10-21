@@ -79,12 +79,12 @@ def test_isolated_wheel_import_and_cli(candidate_wheel, tmp_path):
     home.mkdir()
     environment["HOME"] = str(home)
 
-    def run(*arguments):
+    def run(*arguments, check=True):
         return subprocess.run(  # noqa: S603 - explicit candidate wheel and isolated commands
             arguments,
             cwd=tmp_path,
             env=environment,
-            check=True,
+            check=check,
             capture_output=True,
             text=True,
             timeout=240,
@@ -122,4 +122,25 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         for line in help_result.stdout.split("Commands:\n", 1)[-1].splitlines()
         if line.strip()
     }
-    assert command_names == {"cleanup", "inspect", "install", "uninstall"}
+    assert command_names == {"cleanup", "status", "install", "uninstall"}
+    status_help = run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.cli import main; main()",
+        "tunnel",
+        "status",
+        "--help",
+    )
+    assert "Usage:" in status_help.stdout
+    inspect_result = run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.cli import main; main()",
+        "tunnel",
+        "inspect",
+        check=False,
+    )
+    assert inspect_result.returncode == 2
+    assert "No such command 'inspect'" in inspect_result.stderr
