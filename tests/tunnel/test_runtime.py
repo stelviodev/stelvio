@@ -206,9 +206,12 @@ class Ec2:
                else "EnableDnsHostnames")
         return {"VpcId":"vpc-12345678",field:{"Value":True}}
     def describe_subnets(self,**kwargs):
-        return {"Subnets":[{"SubnetId":"subnet-12345678","VpcId":"vpc-12345678",
+        expected={"subnet-12345678":"10.254.1.0/24",
+                  "subnet-private":"10.254.2.0/24", "subnet-isolated":"10.254.3.0/24"}
+        assert set(kwargs["SubnetIds"])==set(expected)
+        return {"Subnets":[{"SubnetId":identity,"VpcId":"vpc-12345678",
             "OwnerId":"123456789012","AvailabilityZone":"us-east-1a",
-            "CidrBlock":"10.254.1.0/24","State":"available"}]}
+            "CidrBlock":cidr,"State":"available"} for identity,cidr in expected.items()]}
 def factory(**kwargs):
     session=real_factory(**kwargs)
     assert session.get_credentials().get_frozen_credentials().access_key=="PUBLIC_STARTUP_KEY"
