@@ -391,3 +391,28 @@ not use those interfaces. Each lookup is retained in
 reject whole-VPC routes, missing interfaces, cross-VPC interface reuse, and leaks
 into each excluded address category. Live execution requires both privileged
 and AWS opt-ins above; collection alone is not acceptance.
+
+
+## Dev-mode subnet routing and diagnostics
+
+```bash
+uv run pytest tests/tunnel/test_dev_session.py tests/test_cli_dev.py \
+  tests/bridge/test_dev_admission.py -q
+```
+
+The combined boundary regression runs dev command capture, the actual shared
+session and admission code, and actual bridge message dispatch with controlled
+runtime and publish adapters. It verifies two-VPC subnet selection, preservation
+of full ownership CIDRs, console conflict diagnostics, and cleanup. A conflicted
+VPC is rejected before handler lookup while a healthy VPC and a plain handler
+still dispatch. Malformed diagnostics block managed dependencies and are not
+printed. Public invocation errors must not contain local route diagnostics.
+These tests do not start an AppSync connection or mutate host networking.
+
+The opt-in dev AWS scenarios reuse `assert_selected_routes()` after readiness,
+transport recovery, process restart, and recovery from a host-key failure. They
+retain the exact-route and excluded-address evidence described above, alongside
+Function URL, DocumentDB TLS/member discovery/read-write, admission, and baseline
+restoration checks. Collection alone does not certify live acceptance. Run the
+privileged/AWS lane only with the required authorization and exclusive host
+ownership. Native Intel acceptance remains pending until run on Intel hardware.

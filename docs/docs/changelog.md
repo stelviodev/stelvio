@@ -11,7 +11,7 @@
 
 ### Dev Mode
 
-- **`stlv dev` starts managed networking for private handler dependencies.** It captures deployed VPC metadata, starts the shared session before the AppSync bridge, and rejects expired or unready dependent invocations before handler import. A failure in one VPC does not block independent Functions.
+- **`stlv dev` starts managed networking for private handler dependencies.** It captures deployed VPC metadata, starts the shared session before the AppSync bridge, and rejects expired or unready dependent invocations before handler import. A failure in one VPC does not block independent Functions. Managed routes cover the deployed private and isolated subnets. Route conflicts show both ranges in the local console and block dependent handlers without widening routes to the whole VPC.
 
     → [Dev Mode Guide](concepts/dev-mode.md#managed-vpc-transport)
 

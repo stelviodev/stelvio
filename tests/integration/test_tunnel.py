@@ -146,6 +146,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     session = standalone_cli_session
     session.start_dev()
     session.wait_ready()
+    session.assert_selected_routes()
     # Dev mode deploys its stub bridge. Compare state from that point through session exit.
     session._state_hash = hashlib.sha256(session.state()).hexdigest()
     first_vpc = next(vpc for vpc in session.manifest.enabled_vpcs if vpc.identity.endswith("net1"))
@@ -252,6 +253,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     )
     assert active.generation == retained.generation + 1
     session.wait_network_ready(after=readiness_offset, timeout=STARTUP_TIMEOUT)
+    session.assert_selected_routes()
     recovered = session.wait_function_marker(1, marker1)
     assert recovered["tls"]
     assert recovered["read_write"]
@@ -272,6 +274,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     # second dev process must acquire fresh ownership and serve the same app.
     session.start_dev()
     session.wait_ready()
+    session.assert_selected_routes()
     assert session.wait_function_marker(2, marker2)["read_write"]
     abrupt_receipts = session.active_ssm_sessions()
     assert len(abrupt_receipts) == 2
@@ -284,6 +287,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
 
     session.start_dev()
     session.wait_ready()
+    session.assert_selected_routes()
     assert session.wait_function_marker(1, marker1)["read_write"]
     session.terminate(signal.SIGINT)
     session.wait_for_helper_cleanup()
@@ -295,6 +299,7 @@ def test_dev_host_key_rotation_is_terminal_until_a_new_session(standalone_cli_se
     session = standalone_cli_session
     session.start_dev()
     session.wait_ready()
+    session.assert_selected_routes()
     session._state_hash = hashlib.sha256(session.state()).hexdigest()
     vpc = next(vpc for vpc in session.manifest.enabled_vpcs if vpc.identity.endswith("net1"))
     marker = f"{session.app}-host-key-proof"
@@ -348,6 +353,7 @@ def test_dev_host_key_rotation_is_terminal_until_a_new_session(standalone_cli_se
     session.wait_for_helper_cleanup(timeout=120)
     session.start_dev()
     session.wait_ready()
+    session.assert_selected_routes()
     assert session.host_pins() == initial_pins
     recovered = session.wait_function_marker(1, marker)
     assert recovered["tls"]
