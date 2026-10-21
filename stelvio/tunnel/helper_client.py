@@ -15,6 +15,7 @@ from enum import IntEnum
 from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
 from threading import Lock
+from time import monotonic
 from typing import TYPE_CHECKING
 
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest
@@ -232,13 +233,20 @@ def _success(response: HelperStatus, payload: bytes = b"") -> None:
         )
 
 
-def _receive(connection: socket.socket) -> tuple[bytes, list[int]]:
+def _receive(
+    connection: socket.socket, *, deadline: float | None = None
+) -> tuple[bytes, list[int]]:
     packet = bytearray()
     descriptors: list[int] = []
     target = _REPLY.size
     response = HelperStatus.OK
     try:
         while len(packet) < target:
+            if deadline is not None:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise HelperError("Native helper request timed out")  # noqa: TRY301 - cleanup received descriptors
+                connection.settimeout(remaining)
             data, controls, flags, _ = connection.recvmsg(target - len(packet), 4096)
             _message(_controls(controls, descriptors), flags, descriptors, data)
             packet.extend(data)
@@ -288,11 +296,23 @@ class NativeHelper:
 
     def request(self, request: HelperRequest) -> bytes:
         with self.connect() as connection:
-            connection.sendall(request.encode())
-            payload, descriptors = _receive(connection)
+            deadline = monotonic() + self.timeout
+            send_error = None
+            try:
+                connection.sendall(request.encode())
+            except (BrokenPipeError, ConnectionResetError) as error:
+                # The authenticated service may reject a peer before reading.
+                # Read its bounded reply, but never replay an ambiguous request.
+                send_error = error
+            try:
+                payload, descriptors = _receive(connection, deadline=deadline)
+            except OSError as error:
+                raise HelperError("Native helper reply unavailable") from error
             if descriptors:
                 _close_descriptors(descriptors)
                 raise HelperError("Only acquisition may return a packet descriptor")
+            if send_error is not None:
+                raise HelperError("Native helper request delivery is uncertain") from send_error
             return payload
 
     def status(self) -> HelperOwnershipState:
