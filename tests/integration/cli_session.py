@@ -26,7 +26,12 @@ from botocore.config import Config
 
 from stelvio.stack_outputs import read_network_manifest
 from stelvio.tunnel.credentials import AWS_IO
-from stelvio.tunnel.helper_client import NativeHelper
+from stelvio.tunnel.helper_client import (
+    HelperBusyError,
+    HelperUnitState,
+    HelperUnitStatus,
+    NativeHelper,
+)
 from stelvio.tunnel.host_trust import HostIdentity, fingerprint, locked_host_trust
 from stelvio.tunnel.installation import INSTALLED_HELPER
 
@@ -525,17 +530,40 @@ finally:
     def wait_unit(self, identity: str, status_name: str, *, after: int = 0, timeout: float = 90):
         unit_id = hashlib.sha256(identity.encode()).hexdigest()[:8]
         deadline = time.monotonic() + timeout
+        last = None
         while time.monotonic() < deadline:
-            state = NativeHelper().status()
-            unit = next((item for item in state.units if item.unit == unit_id), None)
+            if self.process is None or self.process.poll() is not None:
+                raise RuntimeError(f"Tunnel command exited while observing {identity}")
+            # Starting a command truncates its log. Keep only
+            # the newest owner observation, including absence/unavailability.
+            last = None
+            pattern = re.compile(
+                rf"^  Host unit ({unit_id}) "
+                r"generation=([0-9]+) status=(active|retained|inactive|failed|mutating|absent)$"
+            )
+            for line in self.log().splitlines():
+                if line == "Network DEGRADED: runtime status unavailable.":
+                    last = None
+                match = pattern.fullmatch(line)
+                if match:
+                    last = (
+                        HelperUnitState(
+                            match[1], int(match[2]), HelperUnitStatus[match[3].upper()]
+                        )
+                        if match[3] != "absent" and 0 < int(match[2]) < 2**64
+                        else None
+                    )
             if (
-                unit is not None
-                and unit.status.name.lower() == status_name
-                and (after == 0 or unit.generation > after)
+                last is not None
+                and last.status.name.lower() == status_name
+                and (after == 0 or last.generation > after)
             ):
-                return unit
-            time.sleep(1)
-        raise TimeoutError(f"VPC unit {identity} did not reach {status_name}")
+                return last
+            time.sleep(0.1)
+        raise TimeoutError(
+            f"VPC unit {identity} did not reach {status_name} after generation {after}; "
+            f"last owner observation: {last}"
+        )
 
     def terminate(self, signum: int = signal.SIGINT) -> int:
         if self.process is None:
@@ -611,13 +639,21 @@ finally:
         return ports
 
     def wait_for_helper_cleanup(self, timeout: float = 60) -> None:
-        helper = NativeHelper()
+        helper = NativeHelper(timeout=min(1, timeout))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            state = helper.status()
-            if not state.owned and not state.uncertain and not state.mutating and not state.units:
+            try:
+                state = helper.status()
+            except HelperBusyError:
+                # The authenticated networking child can still own its lease
+                # briefly after the foreground command exits.
+                time.sleep(0.1)
+                continue
+            if state.uncertain:
+                raise AssertionError(f"Native helper ownership is uncertain: {state}")
+            if not state.owned and not state.mutating and not state.units:
                 return
-            time.sleep(1)
+            time.sleep(0.1)
         raise AssertionError("Native helper still owns or is uncertain about host state")
 
     def assert_bastions_running(self) -> None:
