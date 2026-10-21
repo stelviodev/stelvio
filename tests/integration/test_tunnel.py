@@ -1,6 +1,5 @@
 """Opt-in standalone CLI → deployed DocumentDB acceptance."""
 
-import hashlib
 import signal
 
 import pytest
@@ -61,9 +60,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     assert second_proof["tls"]
     assert second_proof["read_write"]
 
-    helper = NativeHelper()
-    first_unit_id = hashlib.sha256(first_vpc.identity.encode()).hexdigest()[:8]
-    first_unit = next(item for item in helper.status().units if item.unit == first_unit_id)
+    first_unit = session.wait_unit(first_vpc.identity, "active", timeout=STARTUP_TIMEOUT)
     assert first_unit.status.name.lower() == "active"
     initial_generation = first_unit.generation
     ports_before = session.resolver_ports()
