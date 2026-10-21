@@ -212,3 +212,23 @@ and retains ownership for a retry. These tests do not deploy AWS resources or
 change host networking.
 
 Set `STLV_TEST_SSH_INTEROP=1` to include the local OpenSSH interoperability test.
+
+### Owner-reported host observations
+
+The networking child holds the helper lease. It reads one helper snapshot for
+each session status request and reports each VPC's observed unit, generation,
+and state. A missing unit is reported as null. These observations do not replace
+DNS, routing, or database readiness checks. Other processes must use the session
+report instead of requesting active helper status directly.
+
+Run the real two-unit observation regression with:
+
+```bash
+uv run pytest tests/integration/test_tunnel_observation.py \
+  --integration-macos-privileged -n 0
+```
+
+It verifies observed active, retained, and recovered generations with real owned
+routes and resolver files. It also verifies that the second unit does not change.
+The shared reporter keeps each host-unit record within the default console width
+so standalone and dev commands can both expose the observation without wrapping.
