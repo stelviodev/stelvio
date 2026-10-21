@@ -14,7 +14,7 @@ from stelvio.tunnel.policy import normalize_dns_name
 MAGIC = b"STLVTUN1"
 HEADER = struct.Struct("!8sBBHI16s16sQ")
 MAX_BODY = 32768
-MAX_RANGES = 8
+MAX_RANGES = 32
 MAX_DOMAINS = 64
 IDENTITY_BYTES = 16
 MIN_PREFIX = 16
@@ -128,7 +128,9 @@ class HelperRequest:
         if not isinstance(self.vpc_id, str) or not _VPC.fullmatch(self.vpc_id):
             raise ValueError("Helper configuration requires an AWS VPC identity")
         if not isinstance(self.cidrs, tuple) or not 1 <= len(self.cidrs) <= MAX_RANGES:
-            raise ValueError("Helper configuration requires one through eight IPv4 ranges")
+            raise ValueError(
+                f"Helper configuration requires 1 through {MAX_RANGES} IPv4 destination ranges"
+            )
         networks = []
         for value in self.cidrs:
             network = IPv4Network(value, strict=True)

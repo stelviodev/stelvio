@@ -54,7 +54,7 @@ def test_scoped_operations_require_nonzero_canonical_unit(unit):
 @pytest.mark.parametrize(
     ("cidrs", "message"),
     [
-        ((), "one through eight IPv4 ranges"),
+        ((), "1 through 32 IPv4 destination ranges"),
         (("10.254.0.0/16", "10.254.0.0/16"), "overlapping ranges"),
         (("8.8.8.0/24",), "RFC1918"),
         (("10.254.1.0/16",), "host bits set"),
@@ -83,3 +83,39 @@ def test_status_requests_are_anonymous_and_configuration_is_bounded():
     oversized = configure(resolvers=endpoints)
     with pytest.raises(ValueError, match="domain limit"):
         oversized.encode()
+
+
+@pytest.mark.parametrize("count", [1, 8, 20, 32])
+def test_configure_preserves_selected_subnet_wire_order(count):
+    cidrs = tuple(f"10.254.{index + 1}.0/24" for index in range(count))
+    packet = configure(cidrs=cidrs, resolvers=()).encode()
+    # Independently construct the body: unit, VPC text, ranges, empty DNS list.
+    expected = b"\x00\x00\x00\x01\x0cvpc-12345678" + bytes([count])
+    expected += b"".join(bytes([len(value)]) + value.encode("ascii") for value in cidrs)
+    expected += b"\x00"
+    assert packet[56:] == expected
+    assert int.from_bytes(packet[12:16], "big") == len(expected)
+    assert packet[:12] == b"STLVTUN1\x03\x00\x00\x00"
+    assert b"10.254.0.0/16" not in packet
+
+
+@pytest.mark.parametrize("count", [0, 33, 255])
+def test_configure_rejects_range_count_outside_protocol_bound(count):
+    cidrs = tuple(f"10.254.{index}.0/24" for index in range(count))
+    with pytest.raises(ValueError, match="1 through 32 IPv4 destination ranges"):
+        configure(cidrs=cidrs).encode()
+
+
+def test_maximum_range_and_dns_request_stays_within_wire_body_limit():
+    from stelvio.tunnel.helper_protocol import MAX_BODY, MAX_RANGES
+
+    assert MAX_RANGES == 32
+    cidrs = tuple(f"192.168.{index}.240/28" for index in range(128, 160))
+    endpoints = tuple(
+        ResolverEndpoint(f"{index:03d}{'a' * 60}.{'b' * 63}.{'c' * 63}.{'d' * 61}", 65535)
+        for index in range(64)
+    )
+    assert all(len(endpoint.domain) == 253 for endpoint in endpoints)
+    packet = configure(vpc_id="vpc-0123456789abcdef0", cidrs=cidrs, resolvers=endpoints).encode()
+    assert len(packet) - HEADER.size == 17020
+    assert int.from_bytes(packet[12:16], "big") == 17020 < MAX_BODY
