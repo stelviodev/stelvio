@@ -25,6 +25,20 @@ uv run pytest \
   tests/tunnel/test_host_trust.py -q
 ```
 
+The inventory regressions require an exact response for all declared public,
+private, and isolated subnet IDs. They reject missing, duplicate, extra, changed,
+or unavailable records and subnets outside the live VPC associations. Tests also
+cover changing associations, secondary-block subnets, reversed API order, a
+ten-AZ layout with 30 subnet records and 20 route destinations, and public-only
+metadata with no route fallback. Disabled and unused VPCs request no inventory.
+
+`VpcNetwork.cidrs` retains full AWS ownership blocks, with the verified primary
+block first for resolver selection. `route_cidrs` preserves only the deployed
+private and isolated subnet CIDRs. Tests keep full-VPC overlap rejection even
+when the selected routes are disjoint. They use Botocore Stubber with exact
+request parameters, not live AWS calls. Session wiring must use `route_cidrs` for
+helper and packet configuration while keeping the owning resolver separate.
+
 The Session Manager plugin must already be available through the verified private
 cache for a live connection. Tests stub its selected path and never download or
 run the plugin. A missing or unsafe plugin is a terminal local artifact error;
