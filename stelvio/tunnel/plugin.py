@@ -26,19 +26,19 @@ from stelvio.tunnel.assets import (
     _validate_cache_directory,
 )
 
-PLUGIN_VERSION = "1.2.707.0"
+PLUGIN_VERSION = "1.2.835.0"
 MAX_DOWNLOAD = 32 * 1024 * 1024
 EXECUTABLE_MODE = 0o755
 LOCK_MODE = 0o600
 MEMBER = "sessionmanager-bundle/bin/session-manager-plugin"
 # AWS versioned distribution artifacts, verified during release preparation.
 TARGETS = {
-    "arm64": ("mac_arm64", "ed8fddd305df8122ed462adc38458fc4e1d75c224c4a65a57fafc4638255b71f"),
-    "x86_64": ("mac", "c285834745f100702e9369c5b17766382a91595133ec8f4198e1e5a4b5fce977"),
+    "arm64": ("mac_arm64", "7287f20d41eef91643b72dcf28b5f135de49090dd297216a408dc18729e70272"),
+    "x86_64": ("mac", "03be79726bbf30ad2a26177d6531636ab6a42f574e0e3326dfb146585cedf260"),
 }
 BINARY_DIGESTS = {
-    "arm64": "5457434601469f24f7e6660453a956f4b88e40d780c0291f2fa10c43d54e492a",
-    "x86_64": "80f001add28033f6a6f6c397e367702e4eff6739fe5b0620ecac65a0ebd3b224",
+    "arm64": "cca46503c725072d76cdeb67ec70d4147c5e570a77fbebe6de38c2c8e8463993",
+    "x86_64": "77dbb32192f0332c293f56123044720d612a1c8e62bf88ad9e58b90fb8afe867",
 }
 
 
