@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, Mock
 from pytest import fixture, mark, raises
 
 from stelvio.tunnel import assets, plugin
+from stelvio.tunnel.assets import _no_acl as inspect_acl
 
 
 @fixture
@@ -83,6 +84,30 @@ def test_private_install_publishes_verified_executable_and_reuses_exact_pin(plug
     )
     assert world.execute.call_args.args[0] == [str(path), "--version"]
     assert list(path.parent.glob(".ssm-*")) == []
+
+
+@mark.parametrize("unsafe", [False, True])
+def test_plugin_cache_validates_acl_rows_with_extended_attributes(
+    plugin_world, monkeypatch, unsafe
+):
+    # Keep the real shared parser on Linux too; only Darwin ls output is mocked.
+    monkeypatch.setattr(assets, "_no_acl", inspect_acl)
+    monkeypatch.setattr(plugin, "_no_acl", inspect_acl)
+    process = Mock(returncode=0)
+    entry = b"allow write" if unsafe else b"deny delete"
+    process.communicate.return_value = (
+        b"drwx------@ 1 developer staff 32 cache\n 0: group:everyone " + entry + b"\n",
+        b"",
+    )
+    monkeypatch.setattr(assets.subprocess, "Popen", Mock(return_value=process))
+    if unsafe:
+        with raises(plugin.PluginAssetError, match="cache is unavailable or unsafe"):
+            plugin.ensure_plugin()
+        plugin_world.download.assert_not_called()
+        plugin_world.execute.assert_not_called()
+    else:
+        assert plugin.ensure_plugin().read_bytes() == plugin_world.binary
+        plugin_world.download.assert_called_once()
 
 
 @mark.parametrize("corruption", ["archive", "binary", "version", "architecture", "size"])
