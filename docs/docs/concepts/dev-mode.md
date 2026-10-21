@@ -72,6 +72,8 @@ environment. It starts networking in a separate nonroot Python process with that
 captured environment. Later handler changes to AWS variables cannot redirect the
 session's clients. The parent and runtime exchange bounded messages over a private
 local socket; an independent lease pipe lets the runtime detect parent exit.
+The session metadata preserves the VPC ownership ranges and each public, private,
+and isolated subnet's ID, availability zone, and CIDR across that process boundary.
 
 Each eligible VPC has its own worker, transport attempt, helper generation, DNS
 revision, discovery state, and retry schedule. A failure in one VPC leaves workers

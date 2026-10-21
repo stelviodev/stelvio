@@ -2,11 +2,13 @@
 
 import socket
 import struct
+from dataclasses import replace
 from ipaddress import IPv4Network
 
-from pytest import raises
+from pytest import mark, raises
 
 from stelvio.tunnel.manifest import (
+    VERSION,
     AccessDescriptor,
     EndpointNetwork,
     NetworkManifest,
@@ -20,16 +22,24 @@ from stelvio.tunnel.wire import MAX_MESSAGE, receive, send, session_from_wire, s
 
 def _description():
     network = VpcNetwork(
-        "vpc-owner",
-        "123456789012",
-        "us-east-1",
-        "vpc-12345678",
-        "provider",
-        (IPv4Network("10.254.0.0/16"),),
-        BastionPolicy.PERSISTENT,
-        ("private.example",),
-        (SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),),
-        AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
+        identity="vpc-owner",
+        account="123456789012",
+        region="us-east-1",
+        vpc_id="vpc-12345678",
+        provider="provider",
+        cidrs=(IPv4Network("10.254.0.0/16"),),
+        policy=BastionPolicy.PERSISTENT,
+        dns_domains=("private.example",),
+        public_subnets=(
+            SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),
+        ),
+        private_subnets=(
+            SubnetNetwork("subnet-private", "us-east-1a", IPv4Network("10.254.2.0/24")),
+        ),
+        isolated_subnets=(
+            SubnetNetwork("subnet-isolated", "us-east-1a", IPv4Network("10.254.3.0/24")),
+        ),
+        access=AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
     )
     manifest = NetworkManifest(
         (network,), (), (EndpointNetwork("function", "function", ("vpc-owner",)),)
@@ -37,13 +47,48 @@ def _description():
     return SessionDescription("11111111-1111-4111-8111-111111111111", "app", "dev", 501, manifest)
 
 
-def test_session_description_round_trips_only_validated_network_metadata():
+@mark.parametrize("empty_private_tiers", [False, True])
+def test_session_description_round_trips_only_validated_network_metadata(empty_private_tiers):
     original = _description()
+    if empty_private_tiers:
+        network = replace(original.manifest.vpcs[0], private_subnets=(), isolated_subnets=())
+        original = replace(original, manifest=replace(original.manifest, vpcs=(network,)))
     wire = session_to_wire(original)
-    decoded = session_from_wire(wire)
-    assert decoded == original
-    assert wire["version"] == 2
+    assert wire["version"] == VERSION
     assert wire["records"][0]["access"]["az"] == "us-east-1a"
+    network = original.manifest.vpcs[0]
+    for tier in ("public_subnets", "private_subnets", "isolated_subnets"):
+        assert wire["records"][0][tier] == [
+            {"id": subnet.subnet_id, "az": subnet.availability_zone, "cidr": str(subnet.cidr)}
+            for subnet in getattr(network, tier)
+        ]
+    left, right = socket.socketpair()
+    left.settimeout(1)
+    right.settimeout(1)
+    try:
+        send(left, wire)
+        decoded = session_from_wire(receive(right))
+    finally:
+        left.close()
+        right.close()
+    assert decoded == original
+    assert decoded.manifest.vpcs[0].route_cidrs == network.route_cidrs
+
+
+@mark.parametrize("version", [True, 2, VERSION + 1])
+def test_session_wire_rejects_unsupported_metadata_versions(version):
+    value = session_to_wire(_description())
+    value["version"] = version
+    with raises(ValueError, match="version"):
+        session_from_wire(value)
+
+
+@mark.parametrize("tier", ["public_subnets", "private_subnets", "isolated_subnets"])
+def test_session_wire_validates_subnet_records(tier):
+    value = session_to_wire(_description())
+    value["records"][0][tier][0]["cidr"] = "192.168.1.0/24"
+    with raises(ValueError, match="outside"):
+        session_from_wire(value)
 
 
 def test_session_wire_rejects_unknown_or_unsupported_fields():
