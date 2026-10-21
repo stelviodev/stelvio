@@ -156,18 +156,23 @@ class Forwarding:
         revision: int,
         network: VpcNetwork,
         hostnames: tuple[str, ...],
+        *,
+        probe_domain: str | None = None,
     ) -> int:
         from ipaddress import IPv4Address  # noqa: PLC0415 - DNS control boundary
 
         if type(revision) is not int or revision < 1:
             raise ValueError("DNS configuration requires a positive revision")
+        domains = tuple(
+            dict.fromkeys((*network.dns_domains, *((probe_domain,) if probe_domain else ())))
+        )
         reply = self._command(
             dict(
                 self._identity(unit, generation, attempt, revision),
                 operation="dns-configure",
                 resolver=str(IPv4Address(int(network.cidrs[0].network_address) + 2)),
-                domains=list(network.dns_domains),
-                hostnames=[name for name in hostnames if name not in network.dns_domains],
+                domains=list(domains),
+                hostnames=[name for name in hostnames if name not in domains],
             )
         )
         port = reply.get("port")

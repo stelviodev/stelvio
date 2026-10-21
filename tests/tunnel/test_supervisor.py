@@ -156,12 +156,22 @@ def _worker_world(  # noqa: C901 - models a cross-adapter VPC lifecycle in one f
             events.append(("forward-add", generation, attempt))
 
         def configure_dns(  # noqa: PLR0913 - mirrors the forwarder protocol signature
-            self, unit, generation, attempt, revision, configured_network, names
+            self,
+            unit,
+            generation,
+            attempt,
+            revision,
+            configured_network,
+            names,
+            *,
+            probe_domain=None,
         ):
             if (generation, attempt) != (self.host_generation, self.attempt):
                 raise ValueError("stale DNS configuration")
             if revision <= self.revision:
                 raise ValueError("stale DNS revision")
+            assert probe_domain == worker._probe_domain
+            assert probe_domain in names
             self.revision, self.claims = revision, tuple(names)
             events.append(("dns-configure", generation, attempt, revision, tuple(names)))
             dns_state["rejected"] = False
@@ -535,3 +545,54 @@ def test_route_conflict_is_terminal_and_reports_only_decoded_facts(monkeypatch, 
     assert "interface index 7" in status["detail"]
     assert "SECRET" not in status["detail"]
     assert world.transport.attempt == 1
+
+
+@mark.parametrize("domains", [(), ("private.example.com",)])
+def test_probe_scope_is_owned_stable_and_separate_from_resource_names(monkeypatch, domains):
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    worker.network.dns_domains = domains
+    worker._host_generation = worker._attempt = 1
+    world.forwarding.add(worker.unit, 1, 1, worker.network, 32123)
+    worker._configure(worker._view())
+    probe = worker._probe_domain
+    assert probe == f"probe-session-{worker.unit}.stelvio.test"
+    assert worker._claims == (*domains, probe, "db.private.example.com")
+    worker._probe(worker._dns_revision_current)
+    worker._probe(worker._dns_revision_current)
+    arms = [e[-1]["name"] for e in world.events if e[0] == "dns-arm"]
+    assert len(set(arms)) == 2
+    assert all(name.endswith("." + probe) for name in arms)
+    assert all(not name.endswith(".db.private.example.com") for name in arms)
+    worker._claims += ("member.private.example.com",)
+    worker._configure(worker._view())
+    assert worker._probe_domain == probe
+    assert worker._claims.count(probe) == 1
+
+
+@mark.parametrize(("resource_count", "allowed"), [(63, True), (64, False)])
+def test_probe_scope_counts_toward_name_limit(monkeypatch, resource_count, allowed):
+    from stelvio.tunnel.transport import TransportAuthorizationError
+
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    worker.network.dns_domains = ()
+    resource = world.worker.discovery.manifest.resources[0]
+    from dataclasses import replace
+
+    worker.discovery.manifest = NetworkManifest(
+        (),
+        (
+            replace(
+                resource, hostnames=tuple(f"db-{i}.example.com" for i in range(resource_count))
+            ),
+        ),
+        (),
+    )
+    if allowed:
+        worker._view()
+        assert len(worker._claims) == 64
+    else:
+        with raises(TransportAuthorizationError, match="domain bound"):
+            worker._view()
+        assert not any(e[0] == "host-configure" for e in world.events)
