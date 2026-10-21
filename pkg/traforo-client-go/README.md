@@ -31,6 +31,11 @@ and stack before returning. The helper retains raw utun descriptors and all
 host networking state. Stelvio does not expose a Python client or a tunnel
 command in this step.
 
+Packet units retain 1–32 selected resource subnet ranges without expanding them
+to whole VPC blocks. The same ranges gate inbound packets, return packets, SOCKS
+resource connections, and DNS resource readiness. The VPC resolver uses SOCKS
+separately and needs no host route.
+
 The forwarder control interface uses bounded newline-delimited JSON version 2
 messages with strictly increasing request IDs. It supports unit add/remove and
 DNS configure/reject/retire/probe/observation operations. Unit generations,
