@@ -201,3 +201,14 @@ SNS stay near free tier, CloudFront and NAT gateways don't.
 - A bucket that receives objects needs `customize=FORCE_DESTROY_BUCKET`, otherwise destroy
   fails on a non-empty bucket.
 - Sleeps are named module constants with a comment explaining the number.
+
+### Local transport shutdown regression
+
+Run `uv run pytest tests/tunnel/test_transport.py -n 0` to check SSH process ownership
+and bounded shutdown. On macOS, the real-process regression creates a child that
+ignores SIGTERM. Shutdown must confirm that the process group has no live members
+before it reaps the SSH leader. If confirmation fails, cleanup reports an error
+and retains ownership for a retry. These tests do not deploy AWS resources or
+change host networking.
+
+Set `STLV_TEST_SSH_INTEROP=1` to include the local OpenSSH interoperability test.

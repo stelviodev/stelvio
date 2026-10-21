@@ -16,7 +16,7 @@ from pytest import fixture, mark, raises
 
 from stelvio.tunnel.manifest import AccessDescriptor, SubnetNetwork, VpcNetwork
 from stelvio.tunnel.policy import BastionPolicy
-from stelvio.tunnel.processes import identity
+from stelvio.tunnel.processes import ProcessIdentity, identity
 from stelvio.tunnel.socks import TransportInterruptedError
 from stelvio.tunnel.transport import (
     SshTransport,
@@ -241,6 +241,77 @@ time.sleep(60)
     finally:
         transport.stop_local()
         child.stdout.close()
+
+
+@fixture
+def shutdown_world(transport_world, monkeypatch):
+    transport = transport_world[0]
+    child = Mock(pid=123)
+    owner = ProcessIdentity(123, 1, 123, os.geteuid(), 1, 0, 5)
+    transport.process, transport._process_identity = child, owner
+    transport._temporary = Mock()
+    monkeypatch.setattr("stelvio.tunnel.transport.identity", lambda pid: owner)
+    monkeypatch.setattr("stelvio.tunnel.transport.unreaped_child", lambda pid: True)
+    signals = []
+    monkeypatch.setattr("stelvio.tunnel.transport.os.killpg", lambda *args: signals.append(args))
+    clock = [0.0]
+    monkeypatch.setattr("stelvio.tunnel.transport.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        "stelvio.tunnel.transport.time.sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
+    )
+    return transport, child, owner, signals, clock
+
+
+def test_shutdown_confirms_group_exit_before_reaping_leader(shutdown_world, monkeypatch):
+    transport, child, _, signals, clock = shutdown_world
+    checks = []
+
+    def group_empty(group, *, timeout):
+        child.wait.assert_not_called()
+        assert group == child.pid
+        assert 0 < timeout <= 3
+        checks.append(timeout)
+        return len(checks) == 3
+
+    monkeypatch.setattr("stelvio.tunnel.transport.process_group_empty", group_empty)
+    transport.stop_local()
+    assert signals == [(123, 15), (123, 9)]
+    assert len(checks) == 3
+    assert clock[0] == 0.02
+    child.wait.assert_called_once_with(timeout=3)
+    assert transport.process is None
+    assert transport._process_identity is None
+    transport.stop_local()
+    assert len(signals) == 2
+
+
+@mark.parametrize("failure", ["deadline", "inventory", "inventory-timeout"])
+def test_unconfirmed_shutdown_retains_ownership_and_can_retry(
+    shutdown_world, monkeypatch, failure
+):
+    transport, child, owner, _, clock = shutdown_world
+    temporary = transport._temporary
+
+    def group_empty(group, *, timeout):
+        if failure == "inventory":
+            raise RuntimeError("cannot inspect process identity")
+        if failure == "inventory-timeout":
+            raise subprocess.TimeoutExpired("ps", timeout)
+        clock[0] += timeout
+        return False
+
+    monkeypatch.setattr("stelvio.tunnel.transport.process_group_empty", group_empty)
+    with raises(TransportCleanupError, match="retain cleanup ownership"):
+        transport.stop_local()
+    child.wait.assert_not_called()
+    assert transport.process is child
+    assert transport._process_identity is owner
+    assert transport._temporary is temporary
+    temporary.cleanup.assert_not_called()
+    monkeypatch.setattr("stelvio.tunnel.transport.process_group_empty", lambda *a, **k: True)
+    transport.stop_local()
+    child.wait.assert_called_once_with(timeout=3)
+    assert transport.process is None
 
 
 @mark.parametrize(
