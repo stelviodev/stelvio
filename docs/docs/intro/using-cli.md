@@ -281,7 +281,7 @@ stlv --version
 ### Managed networking downloads
 
 When a Stelvio networking operation requests its executables, Stelvio uses the
-checksum-pinned Traforo `v0.0.7` release and AWS Session Manager plugin `1.2.707.0`.
+checksum-pinned Traforo `v0.0.7` release and AWS Session Manager plugin `1.2.835.0`.
 The releases support macOS `arm64` and `x86_64`. Stelvio checks each artifact's
 checksum, executable architecture, file permissions, and version before use.
 
