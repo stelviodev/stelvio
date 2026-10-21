@@ -187,6 +187,11 @@ until explicitly authorized and run.
 
 ## Unit tests
 
+The CLI teardown unit tests use a temporary helper path and explicit VPC policy.
+They cover both helper presence and absence without an installed helper or macOS.
+An absent helper permits non-VPC teardown only; active or uncertain helper state
+blocks destruction and trust-record removal. These checks do not change host networking.
+
 Run the Python tunnel suite with the normal repository checks:
 
 ```bash
