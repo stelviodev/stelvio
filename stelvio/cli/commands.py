@@ -334,8 +334,9 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
             bridge_profile = context().aws.profile
             bridge_app_name = run.app_name
 
-        # The state/workdir context is no longer needed. Start networking before AppSync can
-        # dispatch an invocation to a handler that depends on a private VPC resource.
+        # The shared session applies the deployed private/isolated subnet selection.
+        # Start it after releasing the state context; AppSync admission then gates each
+        # handler on its own VPC readiness, including terminal route conflicts.
         console.print("\n[bold green]✓[/bold green] Stelvio app deployed in DEV MODE.")
         try:
             network.start()
