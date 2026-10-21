@@ -338,3 +338,20 @@ not use those interfaces. Each lookup is retained in
 reject whole-VPC routes, missing interfaces, cross-VPC interface reuse, and leaks
 into each excluded address category. Live execution requires both privileged
 and AWS opt-ins above; collection alone is not acceptance.
+
+
+## Proof application setup and partial deployments
+
+The standalone acceptance app uses one replica beyond the primary in its first
+DocumentDB cluster and no replicas in its second cluster. Nonprivileged tests
+execute the generated definition with real component constructors and controlled
+resource boundaries, so configuration API changes fail before AWS acceptance.
+
+Before destruction, acceptance discovers EC2 instances using the exact proof app
+and environment tags, validates ownership, and records attached volume IDs even
+when deployment outputs are incomplete. Successful empty discovery means no
+volumes need capture. Failed discovery or capture remains an acceptance failure;
+destruction and the absence audit still run. Proof host pins remain until all
+required cleanup checks pass. Deployment interruptions also run cleanup; simultaneous
+setup and cleanup failures are reported together.
+These checks do not certify a live acceptance run.
