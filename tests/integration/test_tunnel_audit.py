@@ -729,12 +729,13 @@ def test_proof_discovery_has_a_page_bound():
 
 
 @pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("interrupted", [False, True])
 def test_failed_deployment_preserves_original_and_any_cleanup_error(
-    monkeypatch, tmp_path, cleanup_fails
+    monkeypatch, tmp_path, cleanup_fails, interrupted
 ):
     from . import test_tunnel
 
-    setup_error = TypeError("invalid proof configuration")
+    setup_error = KeyboardInterrupt() if interrupted else TypeError("invalid proof configuration")
     cleanup_error = RuntimeError("uncertified cleanup")
     events = []
 
@@ -754,11 +755,11 @@ def test_failed_deployment_preserves_original_and_any_cleanup_error(
     )
     fixture = test_tunnel.standalone_cli_session.__wrapped__(tmp_path)
     if cleanup_fails:
-        with pytest.raises(ExceptionGroup) as caught:
+        with pytest.raises(BaseExceptionGroup) as caught:
             next(fixture)
         assert caught.value.exceptions == (setup_error, cleanup_error)
     else:
-        with pytest.raises(TypeError) as caught:
+        with pytest.raises(type(setup_error)) as caught:
             next(fixture)
         assert caught.value is setup_error
     assert events == ["deploy", "destroy"]

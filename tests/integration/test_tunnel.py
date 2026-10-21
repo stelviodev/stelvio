@@ -18,11 +18,11 @@ def standalone_cli_session(tmp_path):
     session = StandaloneCliSession(tmp_path / "standalone-proof")
     try:
         session.deploy()
-    except Exception as deployment_error:
+    except BaseException as deployment_error:
         try:
             session.destroy()
-        except Exception as cleanup_error:
-            raise ExceptionGroup(
+        except BaseException as cleanup_error:
+            raise BaseExceptionGroup(
                 "Proof deployment and cleanup failed", [deployment_error, cleanup_error]
             ) from None
         raise

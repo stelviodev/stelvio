@@ -338,5 +338,6 @@ and environment tags, validates ownership, and records attached volume IDs even
 when deployment outputs are incomplete. Successful empty discovery means no
 volumes need capture. Failed discovery or capture remains an acceptance failure;
 destruction and the absence audit still run. Proof host pins remain until all
-required cleanup checks pass. Setup and cleanup failures are reported together.
+required cleanup checks pass. Deployment interruptions also run cleanup; simultaneous
+setup and cleanup failures are reported together.
 These checks do not certify a live acceptance run.
