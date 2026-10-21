@@ -41,3 +41,35 @@ The Python encoder must use the same range limit when its administration layer i
 updated. Helper journal capacity and lifecycle checks belong to the helper layer;
 forwarder and DNS policy checks belong to their packages. This protocol layer does
 not install routes or infer subnet classification from an address.
+
+## Helper subnet routing and recovery
+
+The helper checks every requested destination against a complete route inventory
+before adding a route, then checks again around each addition. Default routes do
+not establish ownership. An overlapping non-default route on a foreign interface
+is refused, including a broader VPN route or a more specific LAN route. A LAN
+range outside the selected subnet ranges does not conflict merely because both
+addresses lie inside the same VPC block. Exact duplicate routes remain uncertain.
+
+Route installation is idempotent for the owned interface. Partial failures retain
+the journaled destination set. Closing the raw utun descriptor lets the kernel
+remove its routes; cleanup confirms that every exact destination route is absent.
+A foreign replacement blocks certified cleanup and is never deleted.
+
+The maximum snapshot regression covers eight units, each with 32 longest prefixes,
+64 longest resolver names, and current plus previous-generation receipts. It uses
+290,941 bytes (290,957 with journal framing), within the unchanged 524,288-byte
+snapshot limit. Corrupt successors remain uncertain; incomplete successors are
+discarded only when the previous journal validates. Snapshot identifiers and
+independent fixtures are unchanged.
+
+Configure failures retain `CF`, version byte `1`, and the stage byte. A route
+conflict adds `RC` and five big-endian uint32 values: requested network/mask,
+conflicting network/mask, and interface index. The complete payload is 26 bytes,
+within the existing 256-byte reply limit. No kernel strings enter this payload.
+The Python administration step must decode this optional suffix and display both
+ranges and the interface index. Unknown diagnostics must still fail closed.
+
+Run route and journal regressions through Go, with no service installation or
+host route mutations. Actual routing, process-death cleanup, and foreign-resource
+acceptance remain in the explicitly authorized native integration tier.
