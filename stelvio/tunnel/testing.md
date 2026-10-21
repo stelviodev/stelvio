@@ -443,3 +443,14 @@ Function URL, DocumentDB TLS/member discovery/read-write, admission, and baselin
 restoration checks. Collection alone does not certify live acceptance. Run the
 privileged/AWS lane only with the required authorization and exclusive host
 ownership. Native Intel acceptance remains pending until run on Intel hardware.
+
+
+## Automated dev startup
+
+AWS dev acceptance uses `stlv dev ENV --yes` for its proof-owned shared
+environment. CLI subprocesses receive closed stdin, so an unexpected interactive
+prompt fails instead of waiting for input. Production shared-environment
+confirmation remains enabled when `--yes` is omitted. Deterministic tests check
+the subprocess arguments, captured local-binary selection, and real CLI
+confirmation behavior before the opt-in AWS run. Standalone acceptance still uses
+`stlv tunnel start ENV` without deployment confirmation flags.
