@@ -204,8 +204,7 @@ def standalone_host_world(ssh_world, monkeypatch):
     """Drive real CLI/session/transport code with deterministic external boundaries."""
     import os
     import time
-    from dataclasses import asdict, replace
-    from ipaddress import IPv4Network
+    from dataclasses import asdict
     from threading import Event
 
     from stelvio.tunnel.host_trust import HostIdentity, locked_host_trust
@@ -213,7 +212,6 @@ def standalone_host_world(ssh_world, monkeypatch):
         EndpointNetwork,
         NetworkManifest,
         SessionDescription,
-        SubnetNetwork,
     )
     from stelvio.tunnel.session import NetworkSession
     from stelvio.tunnel.supervisor import VpcStatus
@@ -221,12 +219,7 @@ def standalone_host_world(ssh_world, monkeypatch):
     from stelvio.tunnel.wire import session_to_wire
 
     original, server, key = ssh_world
-    network = replace(
-        original.network,
-        public_subnets=(
-            SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),
-        ),
-    )
+    network = original.network
     manifest = NetworkManifest((network,), (), (EndpointNetwork("fn", "fn", (network.identity,)),))
     description = SessionDescription(
         "11111111-1111-4111-8111-111111111111", "app", "staging", os.geteuid(), manifest
