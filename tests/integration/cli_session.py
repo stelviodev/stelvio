@@ -847,11 +847,7 @@ finally:
     def assert_state_unchanged(self) -> None:
         assert hashlib.sha256(self.state()).hexdigest() == self._state_hash
 
-    def destroy(self) -> None:
-        if not self._deployed:
-            return
-        if self.process is not None and self.process.poll() is None:
-            self.terminate()
+    def _require_idle_host(self) -> None:
         if INSTALLED_HELPER.exists():
             state = NativeHelper().status()
             if state.owned or state.uncertain or state.mutating or state.units:
@@ -861,6 +857,13 @@ finally:
                 )
         elif not self.no_vpc:
             raise RuntimeError("Retaining VPC proof deployment because the helper is unavailable")
+
+    def destroy(self) -> None:
+        if not self._deployed:
+            return
+        if self.process is not None and self.process.poll() is None:
+            self.terminate()
+        self._require_idle_host()
         volume_capture_error = None
         try:
             bastion_ids = [
