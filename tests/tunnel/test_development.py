@@ -29,7 +29,7 @@ def builder(tmp_path, monkeypatch):  # noqa: C901 - fixture assembles an isolate
     (source / "cmd/stelvio-traforo").mkdir(parents=True)
     (source / "scripts").mkdir()
     (source / ".github/workflows/release.yml").write_text(
-        "version: 'v2.18.3'\ngo-version: '1.27.2'\n"
+        "version: 'v2.18.3'\ngo-version: '1.27.3'\n"
     )
     (source / ".goreleaser.yml").write_text("version: 2\n")
     (source / "go.mod").write_text("module fixture\n")
@@ -62,7 +62,7 @@ def builder(tmp_path, monkeypatch):  # noqa: C901 - fixture assembles an isolate
         if args[0] == "/usr/bin/xcrun":
             return "fixture-xcode"
         if args[0] == "/go":
-            return "go version go1.27.2 darwin/arm64"
+            return "go version go1.27.3 darwin/arm64"
         if args[-1] == "version" and "traforo-darwin" in str(args):
             return f"v{snapshot}"
         return "fixture-tool"
@@ -112,7 +112,7 @@ def test_build_validates_and_atomically_publishes_both_architectures(builder):
     assert record["source_sha256"] == builder.module.fingerprint(builder.source, names)
     assert record["commit"] == builder.commit
     assert record["version"] == f"v{builder.snapshot}"
-    assert record["go_version"] == "1.27.2"
+    assert record["go_version"] == "1.27.3"
     assert record["goreleaser"] == "v2.18.3"
     assert {item["architecture"] for item in record["artifacts"]} == {"arm64", "x86_64"}
     assert all(item["sha256"] for item in record["artifacts"])
@@ -163,17 +163,18 @@ def test_wrong_goreleaser_version_fails_before_build(builder, monkeypatch):
     assert not (builder.source / "build").exists()
 
 
-def test_wrong_go_version_fails_before_build(builder, monkeypatch):
+@pytest.mark.parametrize("version", ["1.27.1", "1.27.2"])
+def test_wrong_go_version_fails_before_build(builder, monkeypatch, version):
     original_tool = builder.module.tool
 
     def wrong_go(*args, **kwargs):
         if args[0] == "/go":
-            return "go version go1.27.1 darwin/arm64"
+            return f"go version go{version} darwin/arm64"
         return original_tool(*args, **kwargs)
 
     monkeypatch.setattr(builder.module, "tool", wrong_go)
 
-    with pytest.raises(RuntimeError, match=r"Install Go 1\.27\.2, matching release\.yml"):
+    with pytest.raises(RuntimeError, match=r"Install Go 1\.27\.3, matching release\.yml"):
         builder.module.build(builder.source)
 
     builder.compile.assert_not_called()
