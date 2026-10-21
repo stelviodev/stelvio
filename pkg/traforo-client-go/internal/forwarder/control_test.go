@@ -123,6 +123,13 @@ func TestControlFramingAndSequence(t *testing.T) {
 	}
 }
 func FuzzControl(f *testing.F) {
+	for _, count := range []int{20, 32, 33} {
+		wire, err := json.Marshal(command{Version: 2, ID: 1, Operation: "add", Unit: 1, Generation: 1, Attempt: 1, Proxy: "127.0.0.1:1080", CIDRs: subnetRanges(254, count)})
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(wire)
+	}
 	f.Add([]byte(`{"version":2,"id":1,"operation":"dns-probe","unit":1,"generation":1,"attempt":1,"revision":1}`))
 	f.Fuzz(func(t *testing.T, wire []byte) {
 		c, e := decodeCommand(wire)
