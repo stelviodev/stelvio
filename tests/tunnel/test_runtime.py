@@ -532,3 +532,45 @@ except HostTrustError:
     assert result.stdout == b""
     with locked_host_trust(target, Event()) as entry:
         assert entry.key == key
+
+
+@mark.skipif(not os.environ.get("STLV_TEST_TRAFORO_IMAGE"), reason=IMAGE_REASON)
+@mark.parametrize("custom_domains", [(), ("custom.example.test",)])
+def test_actual_forwarder_exact_hostnames_and_probe_scope(custom_domains):
+    from contextlib import ExitStack
+    from pathlib import Path
+    from uuid import uuid4
+
+    from stelvio.tunnel.forwarding import Forwarding
+    from tests.integration.tunnel_dns_fixture import (
+        SocksDnsFixture,
+        dns_exchange,
+        dns_query_wire,
+        dns_response,
+        native_network,
+    )
+
+    probe = f"probe-{uuid4().hex}-00000019.stelvio.test"
+    host = "db.exact.example.test"
+    network = native_network(254, *custom_domains)
+    with ExitStack() as scope:
+        carrier, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+        scope.enter_context(carrier)
+        scope.enter_context(peer)
+        proxy = SocksDnsFixture()
+        scope.callback(proxy.close)
+        forwarding = Forwarding(Path(os.environ["STLV_TEST_TRAFORO_IMAGE"]), carrier)
+        scope.callback(forwarding.close)
+        forwarding.add("00000019", 1, 1, network, proxy.port)
+        port = forwarding.configure_dns(
+            "00000019", 1, 1, 1, network, (host, probe), probe_domain=probe
+        )
+        name = f"stlv-{uuid4().hex}.{probe}"
+        forwarding.dns("arm", "00000019", 1, 1, 1, name=name)
+        wire = dns_query_wire(name)
+        assert dns_response(wire, dns_exchange("127.0.0.1", port, wire, "udp"))[0] == 0
+        assert forwarding.dns("check", "00000019", 1, 1, 1, name=name)["observed"]
+        forwarding.dns("release", "00000019", 1, 1, 1, name=name)
+        for name in ("unowned." + host, "other.stelvio.test"):
+            wire = dns_query_wire(name)
+            assert dns_response(wire, dns_exchange("127.0.0.1", port, wire, "tcp"))[0] == 5
