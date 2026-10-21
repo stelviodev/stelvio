@@ -419,3 +419,187 @@ def test_proof_fixture_never_claims_a_preexisting_pin(proof_pin_world):
     session._clear_proof_host_trust()
     with locked_host_trust(target, Event()) as entry:
         assert entry.key == key
+
+
+@fixture
+def standalone_routing_world(transport_world, monkeypatch):
+    """Real CLI capture and session reporting with a controlled runtime boundary."""
+    import os
+    import time
+    from copy import deepcopy
+    from dataclasses import replace
+    from ipaddress import IPv4Network
+
+    from stelvio.tunnel.manifest import (
+        EndpointNetwork,
+        NetworkManifest,
+        SessionDescription,
+    )
+    from stelvio.tunnel.session import NetworkSession
+    from stelvio.tunnel.wire import session_from_wire, session_to_wire
+
+    transport, *_ = transport_world
+    first = transport.network
+
+    def other_network(identity, octet, suffix):
+        subnets = {
+            tier: tuple(
+                replace(
+                    subnet,
+                    subnet_id=f"{subnet.subnet_id}-{identity}",
+                    cidr=IPv4Network(str(subnet.cidr).replace("10.254.", f"10.{octet}.")),
+                )
+                for subnet in getattr(first, tier)
+            )
+            for tier in ("public_subnets", "private_subnets", "isolated_subnets")
+        }
+        return replace(
+            first,
+            identity=identity,
+            vpc_id=f"vpc-{suffix}",
+            cidrs=(IPv4Network(f"10.{octet}.0.0/16"),),
+            access=replace(
+                first.access,
+                owner=identity,
+                instance_id=f"i-{suffix}",
+                security_group_id=f"sg-{suffix}",
+            ),
+            **subnets,
+        )
+
+    second = other_network("network-two", 253, "87654321")
+    unused = other_network("unused", 252, "abcdef12")
+    records = session_to_wire(
+        SessionDescription(
+            "11111111-1111-4111-8111-111111111111",
+            "app",
+            "staging",
+            os.geteuid(),
+            NetworkManifest(
+                (first, second, unused),
+                (),
+                (EndpointNetwork("fn", "fn", (first.identity, second.identity)),),
+            ),
+        )
+    )["records"]
+    state = {
+        "checkpoint": {
+            "latest": {
+                "resources": [
+                    {
+                        "urn": record["identity"],
+                        "type": "stelvio:aws:Vpc"
+                        if record["kind"] == "vpc"
+                        else "stelvio:aws:Function",
+                        "outputs": {"_stelvio_network": record},
+                    }
+                    for record in records
+                ]
+                + [{"urn": "provider", "type": "pulumi:providers:aws", "inputs": {}}]
+            }
+        }
+    }
+    events, captured, closed = [], [], []
+    statuses = [
+        {"identity": network.identity, "state": "ready", "attempt": 1, "cause": None}
+        for network in (first, second)
+    ]
+
+    class Runtime:
+        def __init__(self, description, contexts):
+            assert events[-1] == "release"
+            captured.append(session_from_wire(session_to_wire(description)))
+
+        def status(self):
+            return deepcopy(statuses)
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr("stelvio.tunnel.session.require_network_version", lambda *a: None)
+    monkeypatch.setattr("stelvio.tunnel.session.install_helper", lambda **kw: None)
+    monkeypatch.setattr("stelvio.tunnel.session.NetworkRuntime", Runtime)
+    monkeypatch.setattr("stelvio.cli.determine_env", lambda env, **kw: env)
+    sessions = []
+
+    def capture(report):
+        session = NetworkSession(state=state, app="app", env="staging", report=report)
+        sessions.append(session)
+        return session
+
+    _install_command_run(monkeypatch, capture=capture, events=events)
+    real_wait = NetworkSession.wait
+
+    def wait(session):
+        deadline = time.monotonic() + 3
+        while not session._observed and session._runtime_error is None:
+            assert time.monotonic() < deadline, "No runtime status reached the command"
+            time.sleep(0.01)
+        if session._runtime_error or any(s["state"] == "failed" for s in statuses):
+            real_wait(session)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(NetworkSession, "wait", wait)
+    return SimpleNamespace(
+        run=lambda: CliRunner().invoke(tunnel, ["start", "staging"]),
+        captured=captured,
+        statuses=statuses,
+        state=state,
+        closed=closed,
+        sessions=sessions,
+    )
+
+
+def test_standalone_preserves_selected_subnets_and_excludes_unused_vpcs(standalone_routing_world):
+    world = standalone_routing_world
+    result = world.run()
+    assert result.exit_code == 0, result.output
+    assert "Network READY" in result.output
+    assert "Tunnel stopped." in result.output
+    networks = world.captured[0].manifest.enabled_vpcs
+    assert [network.identity for network in networks] == ["vpc-owner", "network-two"]
+    assert [tuple(map(str, n.route_cidrs)) for n in networks] == [
+        ("10.254.1.0/24", "10.254.2.0/24"),
+        ("10.253.1.0/24", "10.253.2.0/24"),
+    ]
+    assert [tuple(map(str, n.cidrs)) for n in networks] == [("10.254.0.0/16",), ("10.253.0.0/16",)]
+    assert all(
+        not any(n.cidrs[0].network_address + 2 in route for route in n.route_cidrs)
+        for n in networks
+    )
+    assert world.closed == [True]
+
+
+@mark.parametrize("cause", ["host-uncertain-configure-20", "cleanup-incomplete"])
+def test_standalone_reports_subnet_conflict_and_exits_with_recovery(
+    standalone_routing_world, cause
+):
+    world = standalone_routing_world
+    detail = (
+        "Native helper request failed: uncertain (configure stage 20): "
+        "requested route 10.254.1.0/24 conflicts with route 10.254.1.128/25 on interface index 7"
+    )
+    world.statuses[0].update(state="failed", cause=cause, detail=detail, dns_retained=True)
+    result = world.run()
+    assert result.exit_code == 1, result.output
+    assert detail in result.output
+    assert f"cause={cause}" in result.output
+    assert "network-two: ready" in result.output
+    assert "stlv tunnel status" in result.output
+    assert "stlv tunnel cleanup" in result.output
+    assert "Network READY" not in result.output
+    assert "Tunnel stopped." not in result.output
+    assert "Traceback" not in result.output
+    assert world.closed == [True]
+
+
+def test_standalone_rejects_invalid_conflict_diagnostics(standalone_routing_world):
+    world = standalone_routing_world
+    world.statuses[0].update(
+        state="failed", cause="host-uncertain-configure-20", detail="SECRET\x1b[31m"
+    )
+    result = world.run()
+    assert result.exit_code == 1
+    assert "SECRET" not in result.output
+    assert "Network READY" not in result.output
+    assert world.closed == [True]

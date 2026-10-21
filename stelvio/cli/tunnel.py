@@ -101,7 +101,7 @@ def reset_trust(partition: str, account: str, region: str, instance_id: str) -> 
 @tunnel.command("start")
 @click.argument("env", required=False)
 def start(env: str | None) -> None:
-    """Connect to deployed VPC dependencies without deploying the app."""
+    """Connect to deployed private and isolated subnets without deploying the app."""
     from stelvio.cli import determine_env  # noqa: PLC0415 - avoid the CLI registration cycle
     from stelvio.command_run import CommandRun  # noqa: PLC0415 - load project state on demand
     from stelvio.exceptions import (  # noqa: PLC0415 - keep admin commands app-independent

@@ -155,6 +155,13 @@ membership. A missing or invalid local plugin is terminal; repair it with
 `stlv tunnel install`. If cleanup cannot be certified, keep the recovery evidence and
 run `stlv tunnel status`, then `stlv tunnel cleanup` after the session has stopped.
 
+If standalone startup reports `host-uncertain-configure-N`, read the requested
+subnet, conflicting route, and interface index in its diagnostic. An overlapping
+LAN or VPN range must be resolved before restarting. Public-only VPCs have no
+private destination ranges and cannot fall back to routing the entire VPC.
+A terminal VPC failure ends the standalone command; it does not leave a partially
+ready foreground session running. Keep any ownership evidence when cleanup fails.
+
 ### Managed VPC transport identity and authorization
 
 Managed VPC access stops when the captured AWS account or region differs from the

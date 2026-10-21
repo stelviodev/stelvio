@@ -576,3 +576,64 @@ def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch,
     else:
         session.destroy()
         assert operations == ["destroy", "audit", "reset-proof-pins"]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [None, "whole-vpc", "public", "resolver", "unused", "shared-interface", "missing-interface"],
+)
+def test_standalone_route_acceptance_requires_exact_subnets_and_exclusions(
+    monkeypatch, tmp_path, fault
+):
+    from ipaddress import IPv4Address, IPv4Network
+
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session.project = tmp_path
+    networks = []
+    for octet in (252, 253):
+        public = SimpleNamespace(cidr=IPv4Network(f"10.{octet}.0.0/24"))
+        private = SimpleNamespace(cidr=IPv4Network(f"10.{octet}.1.0/24"))
+        isolated = SimpleNamespace(cidr=IPv4Network(f"10.{octet}.2.0/24"))
+        networks.append(
+            SimpleNamespace(
+                cidrs=(IPv4Network(f"10.{octet}.0.0/16"),),
+                route_cidrs=(private.cidr, isolated.cidr),
+                public_subnets=(public,),
+                subnets=(public, private, isolated),
+            )
+        )
+    session._manifest = SimpleNamespace(enabled_vpcs=tuple(networks))
+    queries = []
+
+    def lookup(*args):
+        assert args[:4] == ("/sbin/route", "-n", "get", "-inet")
+        address = IPv4Address(args[4])
+        queries.append(address)
+        network = next(n for n in networks if address in n.cidrs[0])
+        selected = next((c for c in network.route_cidrs if address in c), None)
+        interface = "utun21" if address in networks[0].cidrs[0] else "utun22"
+        if selected:
+            destination = network.cidrs[0] if fault == "whole-vpc" else selected
+            if fault == "shared-interface":
+                interface = "utun21"
+            return SimpleNamespace(
+                stdout=f"destination: {destination.network_address}\nmask: {destination.netmask}\n"
+                + ("" if fault == "missing-interface" else f"interface: {interface}\n")
+            )
+        bad = (
+            (fault == "public" and address == network.cidrs[0].network_address + 1)
+            or (fault == "resolver" and address == network.cidrs[0].network_address + 2)
+            or (fault == "unused" and address == network.cidrs[0].broadcast_address - 1)
+        )
+        return SimpleNamespace(
+            stdout=f"destination: default\ninterface: {interface if bad else 'en0'}\n"
+        )
+
+    monkeypatch.setattr("tests.integration.macos_host.run", lookup)
+    if fault:
+        with pytest.raises(AssertionError):
+            session.assert_selected_routes()
+    else:
+        session.assert_selected_routes()
+        assert len(queries) == 10
+    assert (tmp_path / "standalone-routes.jsonl").read_text()
