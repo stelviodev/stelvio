@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from botocore.exceptions import ClientError
@@ -547,6 +548,7 @@ def test_host_key_fault_restores_on_body_failure_but_not_uncertain_setup():
 def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch, audit_fails):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
+    session.app = "demo"
     session.environment_name = "test"
     session.process = None
     session._outputs = {"bastion1_id": "i-first", "bastion2_id": "i-second"}
@@ -561,7 +563,7 @@ def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch,
             raise AssertionError("AWS absence is uncertain")
 
     session._assert_aws_resources_absent = audit
-    monkeypatch.setattr(cli_session, "capture_bastion_volume_ids", lambda **kwargs: ())
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", lambda **kwargs: ())
     monkeypatch.setattr(
         cli_session,
         "NativeHelper",
@@ -637,3 +639,217 @@ def test_standalone_route_acceptance_requires_exact_subnets_and_exclusions(
         session.assert_selected_routes()
         assert len(queries) == 10
     assert (tmp_path / "standalone-routes.jsonl").read_text()
+
+
+def _proof_instance(identifier, *, app="demo", env="test"):
+    return {
+        "InstanceId": identifier,
+        "Tags": [{"Key": "stelvio:app", "Value": app}, {"Key": "stelvio:env", "Value": env}],
+        "BlockDeviceMappings": [{"Ebs": {"VolumeId": "vol-" + identifier}}],
+    }
+
+
+@pytest.mark.parametrize("known", [[], ["i-one"], ["i-one", "i-two"]])
+def test_partial_deployment_discovers_all_proof_volumes_before_destroy(known):
+    sdk = _empty_session()
+    ec2 = sdk.clients["ec2"]
+    first, second = _proof_instance("i-one"), _proof_instance("i-two")
+    ec2.pages["describe_instances"] = [
+        {"Reservations": [{"Instances": [first]}]},
+        {"Reservations": [{"Instances": [second]}]},
+    ]
+    ec2.direct["describe_instances"] = {"Reservations": [{"Instances": [first, second]}]}
+
+    assert assert_tunnel.capture_proof_volume_ids(
+        sdk=sdk, app="demo", env="test", instance_ids=known
+    ) == ("vol-i-one", "vol-i-two")
+    assert ec2.calls == [
+        (
+            "describe_instances",
+            {
+                "Filters": [
+                    {"Name": "tag:stelvio:app", "Values": ["demo"]},
+                    {"Name": "tag:stelvio:env", "Values": ["test"]},
+                ]
+            },
+        ),
+        ("describe_instances", {"InstanceIds": ["i-one", "i-two"]}),
+    ]
+
+
+@pytest.mark.parametrize("known", [[], ["i-missing"]])
+def test_empty_discovery_only_accepts_absence_without_known_bastions(known):
+    sdk = _empty_session()
+    sdk.clients["ec2"].pages["describe_instances"] = [{"Reservations": []}]
+    if known:
+        with pytest.raises(AssertionError, match="every known bastion"):
+            assert_tunnel.capture_proof_volume_ids(
+                sdk=sdk, app="demo", env="test", instance_ids=known
+            )
+    else:
+        assert (
+            assert_tunnel.capture_proof_volume_ids(
+                sdk=sdk, app="demo", env="test", instance_ids=[]
+            )
+            == ()
+        )
+    assert len(sdk.clients["ec2"].calls) == 1
+
+
+@pytest.mark.parametrize("change", [{"app": "foreign"}, {"env": "foreign"}])
+def test_proof_volume_discovery_rejects_foreign_instances(change):
+    sdk = _empty_session()
+    sdk.clients["ec2"].pages["describe_instances"] = [
+        {"Reservations": [{"Instances": [_proof_instance("i-one", **change)]}]}
+    ]
+    with pytest.raises(AssertionError, match="foreign"):
+        assert_tunnel.capture_proof_volume_ids(sdk=sdk, app="demo", env="test", instance_ids=[])
+    assert len(sdk.clients["ec2"].calls) == 1
+
+
+def test_partial_discovery_failure_does_not_certify_empty_or_complete_inventory():
+    def pages():
+        yield {"Reservations": [{"Instances": [_proof_instance("i-one")]}]}
+        raise RuntimeError("discovery interrupted")
+
+    sdk = _empty_session()
+    sdk.clients["ec2"].pages["describe_instances"] = pages()
+    with pytest.raises(RuntimeError, match="discovery interrupted"):
+        assert_tunnel.capture_proof_volume_ids(sdk=sdk, app="demo", env="test", instance_ids=[])
+    assert len(sdk.clients["ec2"].calls) == 1
+
+
+def test_proof_discovery_has_a_page_bound():
+    sdk = _empty_session()
+    sdk.clients["ec2"].pages["describe_instances"] = [
+        {"Reservations": []} for _ in range(assert_tunnel.AWS_MAX_REQUESTS + 1)
+    ]
+    with pytest.raises(AssertionError, match="page budget"):
+        assert_tunnel.capture_proof_volume_ids(sdk=sdk, app="demo", env="test", instance_ids=[])
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_failed_deployment_preserves_original_and_any_cleanup_error(
+    monkeypatch, tmp_path, cleanup_fails, interrupted
+):
+    from . import test_tunnel
+
+    setup_error = KeyboardInterrupt() if interrupted else TypeError("invalid proof configuration")
+    cleanup_error = RuntimeError("uncertified cleanup")
+    events = []
+
+    def deploy():
+        events.append("deploy")
+        raise setup_error
+
+    def destroy():
+        events.append("destroy")
+        if cleanup_fails:
+            raise cleanup_error
+
+    monkeypatch.setattr(
+        test_tunnel,
+        "StandaloneCliSession",
+        lambda _: SimpleNamespace(deploy=deploy, destroy=destroy),
+    )
+    fixture = test_tunnel.standalone_cli_session.__wrapped__(tmp_path)
+    if cleanup_fails:
+        with pytest.raises(BaseExceptionGroup) as caught:
+            next(fixture)
+        assert caught.value.exceptions == (setup_error, cleanup_error)
+    else:
+        with pytest.raises(type(setup_error)) as caught:
+            next(fixture)
+        assert caught.value is setup_error
+    assert events == ["deploy", "destroy"]
+
+
+@pytest.mark.parametrize("capture_fails", [False, True])
+def test_partial_destroy_audits_after_command_failure_and_retains_all_errors(
+    monkeypatch, tmp_path, capture_fails
+):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._deployed = True
+    session.process = None
+    session._outputs = {}
+    session.app = "demo"
+    session.environment_name = "test"
+    session.aws = _empty_session()
+    session.aws.clients["ec2"].pages["describe_instances"] = [{"Reservations": []}]
+    operations = []
+    path = tmp_path / "helper"
+    path.touch()
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", path)
+    monkeypatch.setattr(
+        cli_session,
+        "NativeHelper",
+        lambda: SimpleNamespace(
+            status=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
+        ),
+    )
+    capture_error = RuntimeError("inventory unavailable")
+    destroy_error = RuntimeError("destroy unavailable")
+    audit_error = AssertionError("resources remain")
+
+    if capture_fails:
+        monkeypatch.setattr(
+            cli_session, "capture_proof_volume_ids", Mock(side_effect=capture_error)
+        )
+
+    def destroy(*args, **kwargs):
+        operations.append("destroy")
+        raise destroy_error
+
+    def audit():
+        operations.append("audit")
+        raise audit_error
+
+    session.command = destroy
+    session._assert_aws_resources_absent = audit
+    session._clear_proof_host_trust = lambda: operations.append("reset")
+    with pytest.raises(ExceptionGroup) as caught:
+        session.destroy()
+    errors = caught.value.exceptions
+    assert errors[-2:] == (destroy_error, audit_error)
+    if capture_fails:
+        assert errors[0].__cause__ is capture_error
+    else:
+        assert len(errors) == 2
+    assert operations == ["destroy", "audit"]
+
+
+def test_destroy_before_infrastructure_creation_needs_no_volume_capture(monkeypatch, tmp_path):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._deployed = True
+    session.process = None
+    session._outputs = {}
+    session.app = "demo"
+    session.environment_name = "test"
+    session.aws = _empty_session()
+    session.aws.clients["ec2"].pages["describe_instances"] = [{"Reservations": []}]
+    operations = []
+    monkeypatch.setattr(
+        cli_session,
+        "NativeHelper",
+        lambda: SimpleNamespace(
+            status=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
+        ),
+    )
+    capture = Mock(side_effect=AssertionError("empty capture called"))
+    monkeypatch.setattr(assert_tunnel, "capture_bastion_volume_ids", capture)
+    session.command = lambda *args, **kwargs: operations.append("destroy")
+    session._assert_aws_resources_absent = lambda: operations.append("audit")
+    session._clear_proof_host_trust = lambda: operations.append("reset")
+    session.destroy()
+    assert operations == ["destroy", "audit", "reset"]
+    capture.assert_not_called()
+
+
+def test_proof_discovery_rejects_duplicate_instances():
+    sdk = _empty_session()
+    sdk.clients["ec2"].pages["describe_instances"] = [
+        {"Reservations": [{"Instances": [_proof_instance("i-one"), _proof_instance("i-one")]}]}
+    ]
+    with pytest.raises(AssertionError, match="duplicate"):
+        assert_tunnel.capture_proof_volume_ids(sdk=sdk, app="demo", env="test", instance_ids=[])
