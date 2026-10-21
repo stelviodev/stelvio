@@ -19,20 +19,38 @@ from stelvio.tunnel.policy import BastionPolicy
 
 
 def _network(name: str, cidr: str) -> VpcNetwork:
+    cidr = IPv4Network(cidr)
     return VpcNetwork(
-        name,
-        "123456789012",
-        "us-east-1",
-        f"vpc-{name}",
-        f"provider-{name}",
-        (IPv4Network(cidr),),
-        BastionPolicy.PERSISTENT,
-        (),
-        (
+        identity=name,
+        account="123456789012",
+        region="us-east-1",
+        vpc_id=f"vpc-{name}",
+        provider=f"provider-{name}",
+        cidrs=(cidr,),
+        policy=BastionPolicy.PERSISTENT,
+        dns_domains=(),
+        public_subnets=(
             SubnetNetwork(
-                f"subnet-{name}", "us-east-1a", IPv4Network(cidr).subnets(new_prefix=24).__next__()
+                f"subnet-{name}",
+                "us-east-1a",
+                IPv4Network((cidr.network_address, 24)),
             ),
         ),
+        private_subnets=(
+            SubnetNetwork(
+                f"subnet-{name}-private",
+                "us-east-1a",
+                IPv4Network((cidr.network_address + 256, 24)),
+            ),
+        ),
+        isolated_subnets=(
+            SubnetNetwork(
+                f"subnet-{name}-isolated",
+                "us-east-1a",
+                IPv4Network((cidr.network_address + 512, 24)),
+            ),
+        ),
+        access=None,
     )
 
 
