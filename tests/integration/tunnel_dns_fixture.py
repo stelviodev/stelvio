@@ -3,7 +3,27 @@
 import socket
 import socketserver
 import struct
+from ipaddress import IPv4Network
 from threading import Thread
+from types import SimpleNamespace
+
+
+def native_network(octet, *domains):
+    """Keep VPC ownership separate from the subnet carrying fixture traffic."""
+    return SimpleNamespace(
+        cidrs=(IPv4Network(f"10.{octet}.0.0/16"),),
+        route_cidrs=(IPv4Network(f"10.{octet}.9.0/24"),),
+        dns_domains=domains,
+    )
+
+
+def packet_network(network):
+    """Supply only selected destinations to clients before and after subnet selection.
+
+    DNS configuration must use the original network to select the owning resolver.
+    Earlier clients read cidrs for packets; newer clients read route_cidrs.
+    """
+    return SimpleNamespace(cidrs=network.route_cidrs, route_cidrs=network.route_cidrs)
 
 
 def _receive(connection, length):

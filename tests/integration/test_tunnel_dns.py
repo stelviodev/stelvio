@@ -5,9 +5,7 @@ import platform
 import subprocess
 import sys
 from contextlib import ExitStack
-from ipaddress import IPv4Network
 from pathlib import Path
-from types import SimpleNamespace
 from uuid import uuid4
 
 from pytest import mark, raises
@@ -21,6 +19,8 @@ from .tunnel_dns_fixture import (
     dns_exchange,
     dns_query_wire,
     dns_response,
+    native_network,
+    packet_network,
 )
 
 pytestmark = mark.integration_macos_privileged
@@ -80,16 +80,14 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
         binary = scope.enter_context(packaged_forwarder())
         forwarding = Forwarding(binary, lease.carrier)
         scope.callback(forwarding.close)
-        network = SimpleNamespace(
-            cidrs=(IPv4Network("10.254.0.0/16"),), dns_domains=(domain, private_domain)
-        )
-        forwarding.add("00000019", 1, 1, network, proxy.port)
+        network = native_network(254, domain, private_domain)
+        forwarding.add("00000019", 1, 1, packet_network(network), proxy.port)
         port = forwarding.configure_dns("00000019", 1, 1, 1, network, ())
         lease.configure(
             unit="00000019",
             generation=1,
             vpc_id="vpc-12345678",
-            cidrs=("10.254.0.0/16",),
+            cidrs=tuple(str(cidr) for cidr in network.route_cidrs),
             resolvers=(
                 ResolverEndpoint(domain, port),
                 ResolverEndpoint(private_domain, port),
@@ -185,21 +183,19 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
             proxy = SocksDnsFixture(address)
             scope.callback(proxy.close)
             domain = f"dns-{owner.replace('-', '')}-{index}.internal"
-            network = SimpleNamespace(
-                cidrs=(IPv4Network(f"10.{octet}.0.0/16"),), dns_domains=(domain,)
-            )
+            network = native_network(octet, domain)
             unit = f"{index:08x}"
-            forwarding.add(unit, 1, 1, network, proxy.port)
+            forwarding.add(unit, 1, 1, packet_network(network), proxy.port)
             port = forwarding.configure_dns(unit, 1, 1, 1, network, ())
             lease.configure(
                 unit=unit,
                 generation=1,
                 vpc_id=f"vpc-1234567{index}",
-                cidrs=(str(network.cidrs[0]),),
+                cidrs=tuple(str(cidr) for cidr in network.route_cidrs),
                 resolvers=(ResolverEndpoint(domain, port),),
             )
+            forwarding.dns("probe", unit, 1, 1, 1, direct=False)
             for direct in (False, True):
-                forwarding.dns("probe", unit, 1, 1, 1, direct=direct)
                 forwarding.dns(
                     "probe", unit, 1, 1, 1, name="db." + domain, port=27017, direct=direct
                 )
@@ -225,22 +221,22 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
         assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == set()
         assert _os_lookup(uuid4().hex + "." + networks[1][1].dns_domains[0]) == {networks[1][3]}
         with raises(ConnectionError, match="Forwarder rejected operation"):
-            forwarding.add(unit, 1, 2, network, proxy.port)
+            forwarding.add(unit, 1, 2, packet_network(network), proxy.port)
         lease.remove(unit=unit, generation=3)
         with raises(HelperError):
             lease.configure(
                 unit=unit,
                 generation=1,
                 vpc_id="vpc-12345671",
-                cidrs=(str(network.cidrs[0]),),
+                cidrs=tuple(str(cidr) for cidr in network.route_cidrs),
             )
-        forwarding.add(unit, 4, 2, network, proxy.port)
+        forwarding.add(unit, 4, 2, packet_network(network), proxy.port)
         assert forwarding.configure_dns(unit, 4, 2, 2, network, ()) == ports[0]
         lease.configure(
             unit=unit,
             generation=4,
             vpc_id="vpc-12345671",
-            cidrs=(str(network.cidrs[0]),),
+            cidrs=tuple(str(cidr) for cidr in network.route_cidrs),
             resolvers=(ResolverEndpoint(network.dns_domains[0], ports[0]),),
         )
         with raises(ConnectionError, match="Forwarder rejected operation"):
