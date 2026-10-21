@@ -241,3 +241,33 @@ termination do not assert that AWS history immediately displays `Terminated`.
 Run the local response and ownership regressions with
 `uv run pytest tests/tunnel/test_transport.py -q`. Live AWS acceptance is a
 separate opt-in check; unit results do not certify it.
+
+## Shared-session subnet routing and conflicts
+
+Run the session boundary regressions without changing host networking:
+
+```bash
+uv run pytest tests/tunnel/test_forwarding.py tests/tunnel/test_supervisor.py \
+  tests/tunnel/test_dev_session.py tests/tunnel/test_runtime.py -q
+```
+
+They require the same private and isolated destination ranges in helper requests
+and forwarder controls. Reconnects, member refresh, and lost-reply replay keep the
+selection and DNS port stable. Empty or changed selections fail before SSH, with
+no whole-VPC fallback. Full VPC ownership overlap checks remain independent of
+this smaller route set.
+
+Readiness checks the resolver through SOCKS, each named resource through SOCKS
+and ordinary host TCP, and system-resolver delivery using a generation-bound
+observation. A successful SOCKS connection does not mask a failed direct resource
+path. The resolver-only direct probe is intentionally absent: the owning VPC
+resolver uses a separate SOCKS path.
+
+Conflict tests carry decoded range and interface facts from the worker through
+the bounded runtime status to the command. They reject untrusted exception text,
+invalid status causes, nonprintable text, and misplaced or oversized diagnostics.
+A conflict blocks dependent invocations but leaves other healthy VPCs and plain
+handlers usable. Cleanup failure retains the diagnostic and ownership evidence.
+These tests use isolated adapters, not actual LAN or VPN mutations. Native route
+conflict and host-baseline acceptance require the privileged tier in the final
+stack; unit success does not certify that acceptance.

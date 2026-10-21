@@ -7,6 +7,7 @@ import struct
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from stelvio.tunnel.helper_client import MAX_CONFIGURE_STAGE
 from stelvio.tunnel.manifest import VERSION, SessionDescription, manifest_from_records
 
 if TYPE_CHECKING:
@@ -14,6 +15,10 @@ if TYPE_CHECKING:
 
 MAX_MESSAGE = 1024 * 1024
 MAX_STATUS_DETAIL_LENGTH = 1024
+HOST_CONFIGURE_FAILURE_CAUSES = frozenset(
+    f"host-uncertain-configure-{stage}" for stage in range(1, MAX_CONFIGURE_STAGE + 1)
+)
+STATUS_DETAIL_CAUSES = HOST_CONFIGURE_FAILURE_CAUSES | {"ssh-host-key", "cleanup-incomplete"}
 
 
 def send(connection: socket.socket, value: dict) -> None:
