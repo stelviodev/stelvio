@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from hashlib import sha256
 from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -29,6 +30,18 @@ if TYPE_CHECKING:
 
 STATUS_MAX_AGE = 5
 MAX_STATUS_CAUSE_LENGTH = 64
+
+
+def _valid_host_unit(status: dict) -> bool:
+    unit = status.get("host_unit")
+    return unit is None or (
+        isinstance(unit, dict)
+        and set(unit) == {"unit", "generation", "status"}
+        and unit["unit"] == sha256(status["identity"].encode()).hexdigest()[:8]
+        and type(unit["generation"]) is int
+        and 0 < unit["generation"] <= (1 << 64) - 1
+        and unit["status"] in {"inactive", "active", "failed", "mutating", "retained"}
+    )
 
 
 class VpcUnavailableError(RuntimeError):
@@ -169,7 +182,8 @@ class NetworkSession:
                     set(statuses) != expected
                     or len(statuses) != len(values)
                     or any(
-                        s.get("state")
+                        not _valid_host_unit(s)
+                        or s.get("state")
                         not in {"starting", "retrying", "ready", "failed", "stopped"}
                         or type(s.get("attempt")) is not int
                         or not 0 <= s["attempt"] <= (1 << 64) - 1
@@ -222,6 +236,7 @@ class NetworkSession:
                         s.get("cause"),
                         s.get("dns_retained"),
                         s.get("detail"),
+                        repr(s.get("host_unit")),
                     )
                     for s in values
                 )
@@ -246,6 +261,12 @@ class NetworkSession:
             f"  {status['identity']}: {status['state']} "
             f"attempt={status.get('attempt', 0)} cause={status.get('cause') or '-'} "
             f"retained_dns={status.get('dns_retained', False)}"
+        )
+        unit = status.get("host_unit")
+        self.report(
+            f"  Host unit {sha256(status['identity'].encode()).hexdigest()[:8]} "
+            f"generation={unit['generation'] if unit else 0} "
+            f"status={unit['status'] if unit else 'absent'}"
         )
         if status.get("detail"):
             self.report("  " + status["detail"])

@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import ExitStack, suppress
 from dataclasses import asdict, replace
+from hashlib import sha256
 from threading import Event, Lock, Thread
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -33,12 +34,32 @@ if TYPE_CHECKING:
 
     from botocore.client import BaseClient
 
+    from stelvio.tunnel.helper_client import NativeLease
     from stelvio.tunnel.manifest import VpcNetwork
 
 MAX_RUNTIME_NETWORKS = 8
 MAX_PROVIDER_NAME = 1024
 MAX_REGION_NAME = 64
 MAX_PROFILE_NAME = 128
+
+
+def _owner_status(lease: NativeLease, statuses: list[VpcStatus]) -> list[dict]:
+    """Export one authenticated host observation, never a planned generation."""
+    host = lease.status()
+    if not host.owned or host.uncertain:
+        raise RuntimeError("Native host ownership cannot be observed safely")
+    units = {unit.unit: unit for unit in host.units}
+    values = []
+    for status in statuses:
+        value = asdict(status)
+        unit = units.get(sha256(status.identity.encode()).hexdigest()[:8])
+        value["host_unit"] = (
+            {"unit": unit.unit, "generation": unit.generation, "status": unit.status.name.lower()}
+            if unit is not None
+            else None
+        )
+        values.append(value)
+    return values
 
 
 def _resolve_independent_inventory(
@@ -348,7 +369,7 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                         current.update(
                             {worker.network.identity: worker.status for worker in workers}
                         )
-                    send(control, {"vpcs": [asdict(status) for status in current.values()]})
+                    send(control, {"vpcs": _owner_status(lease, list(current.values()))})
                 elif command == {"operation": "stop"}:
                     break
                 else:
