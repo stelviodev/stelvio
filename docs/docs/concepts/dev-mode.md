@@ -110,7 +110,11 @@ private or isolated subnets and accepted a TCP connection on its declared port
 through both SOCKS and ordinary host routing. Resolver queries use TCP through
 SOCKS to the owning VPC's primary resolver; that address need not be routed through
 the virtual interface. A separate system-resolver observation proves macOS scoped
-DNS delivery. A resolver-only direct probe cannot prove resource routing and is
+DNS delivery. Each VPC has a session-specific probe scope under `stelvio.test`;
+readiness observes a fresh name in that scope. The scope remains stable across
+reconnects and is removed with the session. It counts toward the DNS name limit.
+Database and member hostnames keep exact-name ownership; their subdomains do not
+become private DNS suffixes. A resolver-only direct probe cannot prove resource routing and is
 not used. A working SOCKS proxy by itself
 does not make a VPC ready. New invocations that depend on an unready VPC are
 rejected before handler execution; unrelated VPCs and handlers without a VPC can
