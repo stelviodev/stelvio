@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from pytest import fixture, mark, raises
 
 from stelvio.exceptions import StelvioValidationError
+from stelvio.tunnel.manifest import VERSION
 from stelvio.tunnel.session import NetworkSession, VpcUnavailableError
 
 
@@ -22,7 +23,7 @@ def network_state():
                 "type": "stelvio:aws:Vpc",
                 "outputs": {
                     "_stelvio_network": {
-                        "version": 2,
+                        "version": VERSION,
                         "kind": "vpc",
                         "identity": identity,
                         "account": "123456789012",
@@ -45,6 +46,20 @@ def network_state():
                                 "cidr": f"10.{index}.0.0/24",
                             }
                         ],
+                        "private_subnets": [
+                            {
+                                "id": f"subnet-private-{index}",
+                                "az": "us-east-1a",
+                                "cidr": f"10.{index}.1.0/24",
+                            }
+                        ],
+                        "isolated_subnets": [
+                            {
+                                "id": f"subnet-isolated-{index}",
+                                "az": "us-east-1a",
+                                "cidr": f"10.{index}.2.0/24",
+                            }
+                        ],
                     }
                 },
             }
@@ -56,7 +71,7 @@ def network_state():
                 "type": "stelvio:aws:Function",
                 "outputs": {
                     "_stelvio_network": {
-                        "version": 2,
+                        "version": VERSION,
                         "kind": "endpoint",
                         "identity": name,
                         "endpoint_id": name,
