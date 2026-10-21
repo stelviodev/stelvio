@@ -971,7 +971,7 @@ def test_database_audit_refuses_unverified_ownership(missing_arn):
 
 
 @pytest.fixture
-def command_session(tmp_path):
+def command_session(tmp_path, monkeypatch):
     session = cli_session.StandaloneCliSession.__new__(cli_session.StandaloneCliSession)
     session.project = tmp_path
     session.app = "proof-app"
@@ -979,6 +979,11 @@ def command_session(tmp_path):
     session.cli = tmp_path / "stlv"
     session.environment = {}
     session.aws = object()
+    session.no_vpc = False
+    session._deployed = True
+    session.process = None
+    session._outputs = {}
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", tmp_path / "helper")
     return session
 
 
@@ -1045,9 +1050,7 @@ def test_deploy_keeps_startup_deadline(monkeypatch, command_session):
 def test_destroy_uses_separate_budget_and_audits_failures(monkeypatch, command_session, timeout):
     import subprocess
 
-    command_session._deployed = True
-    command_session.process = None
-    command_session._outputs = {}
+    cli_session.INSTALLED_HELPER.touch()
     calls = []
     monkeypatch.setattr(
         cli_session,
@@ -1074,3 +1077,45 @@ def test_destroy_uses_separate_budget_and_audits_failures(monkeypatch, command_s
     assert calls[:2] == [(("destroy", "test", "--yes"), {"timeout": 3600}), "audit"]
     assert ("trust-clear" in calls) is not timeout
     assert all(entry[0][0] == "destroy" for entry in calls if isinstance(entry, tuple))
+
+
+@pytest.mark.parametrize("no_vpc", [False, True])
+@pytest.mark.parametrize(
+    "helper_state", ["absent", "idle", "owned", "uncertain", "mutating", "units"]
+)
+def test_destroy_requires_certified_host_state(monkeypatch, command_session, no_vpc, helper_state):
+    command_session.no_vpc = no_vpc
+    if helper_state != "absent":
+        cli_session.INSTALLED_HELPER.touch()
+    state = {"owned": False, "uncertain": False, "mutating": False, "units": []}
+    if helper_state in {"owned", "uncertain", "mutating"}:
+        state[helper_state] = True
+    elif helper_state == "units":
+        state["units"] = ["proof-unit"]
+    helper = Mock(return_value=SimpleNamespace(status=lambda: SimpleNamespace(**state)))
+    monkeypatch.setattr(cli_session, "NativeHelper", helper)
+    operations = []
+    monkeypatch.setattr(
+        cli_session,
+        "capture_proof_volume_ids",
+        lambda **kwargs: operations.append("capture") or (),
+    )
+    command_session.command = lambda *args, **kwargs: operations.append("destroy")
+    command_session._assert_aws_resources_absent = lambda: operations.append("audit")
+    command_session._clear_proof_host_trust = lambda: operations.append("trust-clear")
+
+    allowed = helper_state == "idle" or (helper_state == "absent" and no_vpc)
+    if allowed:
+        command_session.destroy()
+        assert operations == ["capture", "destroy", "audit", "trust-clear"]
+    else:
+        reason = (
+            "helper is unavailable" if helper_state == "absent" else "cleanup is not certified"
+        )
+        with pytest.raises(RuntimeError, match=reason):
+            command_session.destroy()
+        assert operations == []
+    if helper_state == "absent":
+        helper.assert_not_called()
+    else:
+        helper.assert_called_once_with()
