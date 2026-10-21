@@ -18,7 +18,7 @@ from pytest import fixture, mark, raises, skip
 
 from stelvio.tunnel import installation
 from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
-from stelvio.tunnel.helper_client import HelperError, NativeHelper
+from stelvio.tunnel.helper_client import HelperBusyError, HelperError, NativeHelper
 from stelvio.tunnel.helper_protocol import HelperOperation, HelperRequest, ResolverEndpoint
 from stelvio.tunnel.processes import identity as process_identity
 
@@ -79,6 +79,8 @@ def test_owner_lifecycle_cleans_without_python_request(tmp_path, mode):
             identity = _ready(ready, parent)
             # Status is intentionally restricted to the authenticated owner.
             assert identity["pid"] > 0
+            with raises(HelperBusyError):
+                NativeHelper(timeout=2).status()
             if mode == "frozen-orphan":
                 child_pid = identity["pid"]
                 child_birth = process_identity(child_pid)
@@ -93,6 +95,8 @@ def test_owner_lifecycle_cleans_without_python_request(tmp_path, mode):
             else:
                 parent.kill()
             parent.wait(timeout=30)
+            if mode == "normal":
+                assert parent.returncode == 0, (tmp_path / "holder.log").read_text()
             wait_empty()
             if child_pid:
                 current = process_identity(child_pid)
