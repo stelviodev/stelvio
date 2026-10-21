@@ -41,7 +41,11 @@ func TestTwoVPCLargeStreamsAndHalfClose(t *testing.T) {
 	}()
 	for id := uint32(1); id <= 2; id++ {
 		proxy := streamProxy(t, byte(255-id))
-		if err := m.apply(command{Operation: "add", Unit: id, Generation: 7, Attempt: 1, Proxy: proxy, CIDRs: []string{fmt.Sprintf("10.%d.0.0/16", 255-id)}}); err != nil {
+		count := 20
+		if id == 2 {
+			count = 32
+		}
+		if err := m.apply(command{Operation: "add", Unit: id, Generation: 7, Attempt: 1, Proxy: proxy, CIDRs: subnetRanges(byte(255-id), count)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -133,7 +137,7 @@ func TestTwoVPCLargeStreamsAndHalfClose(t *testing.T) {
 		t.Fatalf("healthy VPC after removal: %v", err)
 	}
 	proxy := streamProxy(t, 254)
-	if err := m.apply(command{Operation: "add", Unit: 1, Generation: 8, Attempt: 2, Proxy: proxy, CIDRs: []string{"10.254.0.0/16"}}); err != nil {
+	if err := m.apply(command{Operation: "add", Unit: 1, Generation: 8, Attempt: 2, Proxy: proxy, CIDRs: subnetRanges(254, 20)}); err != nil {
 		t.Fatal(err)
 	}
 	// Delayed ACKs can reach a newly published unit before this assignment.

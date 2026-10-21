@@ -110,7 +110,8 @@ func (m *manager) control(c command) reply {
 			err = e
 			break
 		}
-		// Proxy and ranges come from the already validated packet configuration.
+		// Proxy and selected destination ranges come from the validated packet unit.
+		// A DNS update cannot add or broaden resource destinations.
 		if c.Proxy != "" || len(c.CIDRs) != 0 {
 			err = errors.New("unexpected network fields")
 			break
