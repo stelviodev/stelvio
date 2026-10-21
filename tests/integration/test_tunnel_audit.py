@@ -405,7 +405,7 @@ def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypa
     def fail_volume_capture(**_kwargs):
         raise RuntimeError("volume inventory unavailable")
 
-    monkeypatch.setattr(cli_session, "capture_bastion_volume_ids", fail_volume_capture)
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", fail_volume_capture)
     operations = []
     monkeypatch.setattr(
         cli_session,
@@ -826,6 +826,7 @@ def test_partial_destroy_audits_after_command_failure_and_retains_all_errors(
 ):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
+    session.no_vpc = False
     session.process = None
     session._outputs = {}
     session.app = "demo"
@@ -877,12 +878,16 @@ def test_partial_destroy_audits_after_command_failure_and_retains_all_errors(
 def test_destroy_before_infrastructure_creation_needs_no_volume_capture(monkeypatch, tmp_path):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
+    session.no_vpc = False
     session.process = None
     session._outputs = {}
     session.app = "demo"
     session.environment_name = "test"
     session.aws = _empty_session()
     session.aws.clients["ec2"].pages["describe_instances"] = [{"Reservations": []}]
+    helper = tmp_path / "helper"
+    helper.touch()
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", helper)
     operations = []
     monkeypatch.setattr(
         cli_session,
