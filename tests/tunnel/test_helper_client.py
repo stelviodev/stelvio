@@ -373,3 +373,91 @@ def test_kernel_route_masks_are_displayed_without_assuming_private_subnet_policy
         assert caught.value.route_conflict.conflicting == expected
         assert caught.value.route_conflict.interface_index == 0xFFFFFFFF
         assert expected in str(caught.value)
+
+
+@mark.parametrize("failure", [BrokenPipeError, ConnectionResetError])
+@mark.parametrize("status", [1, 2, 3, 4])
+def test_early_rejection_preserves_authenticated_status(monkeypatch, failure, status):
+    helper = NativeHelper(timeout=0.1)
+    first, second = _pair()
+    connection = Mock(wraps=first)
+    connection.__enter__ = Mock(return_value=connection)
+    connection.__exit__ = Mock(return_value=False)
+    connection.sendall.side_effect = failure()
+    monkeypatch.setattr(helper, "connect", lambda: connection)
+    with first, second:
+        second.sendall(reply(status=status))
+        with raises(HelperError) as caught:
+            helper.request(HelperRequest(HelperOperation.STATUS))
+        assert caught.value.status == HelperStatus(status)
+        connection.sendall.assert_called_once()
+        assert 0 < connection.settimeout.call_args.args[0] <= 0.1
+
+
+@mark.parametrize("response", [b"", b"bad", reply(magic=b"INVALID!"), reply()])
+def test_failed_send_never_becomes_success_or_invented_busy(monkeypatch, response):
+    helper = NativeHelper(timeout=0.1)
+    first, second = _pair()
+    connection = Mock(wraps=first)
+    connection.__enter__ = Mock(return_value=connection)
+    connection.__exit__ = Mock(return_value=False)
+    connection.sendall.side_effect = BrokenPipeError()
+    monkeypatch.setattr(helper, "connect", lambda: connection)
+    with first, second:
+        second.sendall(response)
+        second.shutdown(socket.SHUT_WR)
+        with raises(HelperError) as caught:
+            helper.request(HelperRequest(HelperOperation.STATUS))
+        assert caught.value.status is None
+        connection.sendall.assert_called_once()
+
+
+def test_early_rejection_wait_is_bounded(monkeypatch):
+    helper = NativeHelper(timeout=0.01)
+    first, second = _pair()
+    connection = Mock(wraps=first)
+    connection.__enter__ = Mock(return_value=connection)
+    connection.__exit__ = Mock(return_value=False)
+    connection.sendall.side_effect = BrokenPipeError()
+    monkeypatch.setattr(helper, "connect", lambda: connection)
+    with first, second, raises(HelperError, match="reply unavailable"):
+        helper.request(HelperRequest(HelperOperation.STATUS))
+
+
+def test_reply_budget_does_not_reset_after_partial_header(monkeypatch):
+    connection = Mock()
+    connection.recvmsg.return_value = (b"S", [], 0, None)
+    monkeypatch.setattr("stelvio.tunnel.helper_client.monotonic", Mock(side_effect=[0, 2]))
+    with raises(HelperError, match="timed out"):
+        _receive(connection, deadline=1)
+    connection.recvmsg.assert_called_once()
+
+
+def test_early_rejection_closes_unexpected_descriptor(monkeypatch):
+    import stelvio.tunnel.helper_client as client
+
+    helper = NativeHelper(timeout=0.1)
+    first, second = _pair()
+    connection = Mock(wraps=first)
+    connection.__enter__ = Mock(return_value=connection)
+    connection.__exit__ = Mock(return_value=False)
+    connection.sendall.side_effect = BrokenPipeError()
+    monkeypatch.setattr(helper, "connect", lambda: connection)
+    closed = []
+    original = client._close_descriptors
+
+    def close(descriptors):
+        closed.extend(descriptors)
+        original(descriptors)
+
+    monkeypatch.setattr(client, "_close_descriptors", close)
+    with first, second, Path(os.devnull).open("rb") as descriptor:
+        second.sendmsg(
+            [reply()],
+            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [descriptor.fileno()]))],
+        )
+        with raises(HelperError, match="Only acquisition"):
+            helper.request(HelperRequest(HelperOperation.STATUS))
+        assert len(closed) == 1
+        with raises(OSError, match=r"[Bb]ad file descriptor"):
+            os.fstat(closed[0])
