@@ -110,7 +110,10 @@ STLV_TEST_STELVIO_SDIST="$(find "$DIST_DIR" -name '*.tar.gz' -print -quit)" \
 ```
 
 The suite checks archive contents and installs the wheel into a clean virtual
-environment outside the checkout. Pytest does not build Go or Python artifacts.
+environment outside the checkout. It verifies the installed CLI command set,
+checks `tunnel status --help`, and rejects the unsupported `tunnel inspect`
+command. These CLI checks do not contact the helper or AWS. Pytest does not build
+Go or Python artifacts.
 Distinct-candidate upgrade acceptance remains pending until its candidate and the
 required native authorization are available.
 
@@ -132,4 +135,3 @@ without root access or Go compilation. The 100-cycle lifecycle and scoped-DNS
 scenarios still require the privileged lane above. Record the tested commit,
 platform, binary digest, commands, skips and host restoration for each run;
 nonprivileged success alone does not certify native or AWS acceptance.
-
