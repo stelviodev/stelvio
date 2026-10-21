@@ -413,3 +413,55 @@ def test_invalid_host_key_diagnostics_fail_closed(world, network_state, invalid)
         assert not any(str(invalid) in message for message in world.messages if invalid)
     finally:
         session.close()
+
+
+@mark.parametrize("cause", ["host-uncertain-configure-20", "cleanup-incomplete"])
+def test_route_conflict_reports_both_ranges_without_blocking_other_vpcs(
+    world, network_state, cause
+):
+    detail = (
+        "Native helper request failed: uncertain (configure stage 20): "
+        "requested route 10.0.1.0/24 conflicts with route 10.0.1.128/25 on interface index 7"
+    )
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: session.admit("both") is None)
+        world.statuses[0].update(state="failed", cause=cause, detail=detail, dns_retained=True)
+        wait_for(lambda: isinstance(session.admit("both"), VpcUnavailableError))
+        assert session.admit("healthy") is None
+        assert session.admit("plain") is None
+        wait_for(lambda: "  " + detail in world.messages)
+        assert any(
+            "Do not delete" in message or "stlv tunnel cleanup" in message
+            for message in world.messages
+        )
+    finally:
+        session.close()
+
+
+@mark.parametrize(
+    ("cause", "state", "detail"),
+    [
+        ("host-uncertain-configure-20", "ready", "route facts"),
+        ("host-uncertain-configure-0", "failed", "route facts"),
+        ("identity-or-configuration", "failed", "route facts"),
+        ("host-uncertain-configure-20", "failed", "line\nbreak"),
+        ("host-uncertain-configure-20", "failed", "x" * 1025),
+        ("host-uncertain-configure-20\x1b", "failed", None),
+    ],
+)
+def test_invalid_route_diagnostics_fail_before_output_or_admission(
+    world, network_state, cause, state, detail
+):
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: session.admit("both") is None)
+        world.statuses[0].update(state=state, cause=cause, detail=detail)
+        wait_for(lambda: session._runtime_error is not None)
+        assert isinstance(session.admit("both"), VpcUnavailableError)
+        assert session.admit("plain") is None
+        assert "  " + str(detail) not in world.messages
+    finally:
+        session.close()

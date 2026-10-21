@@ -3,10 +3,15 @@
 from ipaddress import IPv4Network
 from types import SimpleNamespace
 
-from pytest import raises
+from pytest import mark, raises
 
 from stelvio.tunnel.evidence import record_transport_event
-from stelvio.tunnel.helper_client import HelperError, HelperStatus, HelperUnitStatus
+from stelvio.tunnel.helper_client import (
+    HelperError,
+    HelperRouteConflict,
+    HelperStatus,
+    HelperUnitStatus,
+)
 from stelvio.tunnel.manifest import NetworkManifest, ResourceNetwork
 from stelvio.tunnel.supervisor import VpcWorker
 from stelvio.tunnel.transport import (
@@ -24,6 +29,7 @@ def _worker_world(  # noqa: C901 - models a cross-adapter VPC lifecycle in one f
     network = SimpleNamespace(
         identity="network-a",
         cidrs=(IPv4Network("10.254.0.0/16"),),
+        route_cidrs=(IPv4Network("10.254.16.0/20"), IPv4Network("10.254.64.0/20")),
         dns_domains=("private.example.com",),
         vpc_id="vpc-owned",
     )
@@ -146,6 +152,7 @@ def _worker_world(  # noqa: C901 - models a cross-adapter VPC lifecycle in one f
             if generation <= self.host_generation or attempt <= self.attempt:
                 raise ValueError("stale forwarder attempt")
             self.host_generation, self.attempt = generation, attempt
+            assert configured_network.route_cidrs == network.route_cidrs
             events.append(("forward-add", generation, attempt))
 
         def configure_dns(  # noqa: PLR0913 - mirrors the forwarder protocol signature
@@ -226,6 +233,9 @@ def test_reconnect_advances_generation_and_keeps_dns_rejected_until_ready(monkey
     configurations = [e for e in world.events if e[0] == "host-configure"]
     assert [entry[1]["generation"] for entry in configurations] == [1, 3]
     assert all(entry[1]["resolvers"][0].port == world.forwarding.port for entry in configurations)
+    assert all(
+        entry[1]["cidrs"] == ("10.254.16.0/20", "10.254.64.0/20") for entry in configurations
+    )
     assert [e[1:3] for e in world.events if e[0] == "forward-add"] == [(1, 1), (3, 2)]
     assert world.events.index(("dns-reject", 1, 1, 1, {})) < world.events.index(
         ("transport-start", 2)
@@ -367,24 +377,29 @@ def test_uncertain_transport_cleanup_retains_active_helper_generation(monkeypatc
     assert worker.status.cause == "cleanup-incomplete"
 
 
-def test_successful_socks_probe_cannot_mask_failed_direct_path():
-    worker = object.__new__(VpcWorker)
-    worker._dns_generation = 1
-    worker._host_generation = 1
+def test_successful_socks_probe_cannot_mask_failed_direct_resource_path(monkeypatch):
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    worker._dns_generation = worker._host_generation = 1
     worker._dns_revision_current = 7
     calls = []
+    world.lease.unit = {"unit": worker.unit, "generation": 1, "status": HelperUnitStatus.ACTIVE}
 
     def dns(operation, **options):
         calls.append((operation, options))
         if options.get("direct"):
-            raise ConnectionError("host path unavailable")
+            assert options["name"] == "db.private.example.com"
+            raise ConnectionError("host resource path unavailable")
         return {}
 
     worker._dns = dns
-    worker.lease = SimpleNamespace(status=lambda: (_ for _ in ()).throw(AssertionError()))
-    with raises(ConnectionError, match="host path unavailable"):
+    with raises(ConnectionError, match="host resource path unavailable"):
         worker._probe(7)
-    assert calls == [("probe", {}), ("probe", {"direct": True})]
+    assert calls == [
+        ("probe", {}),
+        ("probe", {"name": "db.private.example.com", "port": 27017}),
+        ("probe", {"name": "db.private.example.com", "port": 27017, "direct": True}),
+    ]
 
 
 def test_changed_ssh_key_is_terminal_before_forwarding(monkeypatch):
@@ -450,3 +465,73 @@ def test_key_change_during_reconnect_retains_dns_and_stops_retry(monkeypatch):
     rejection = next(i for i, event in enumerate(world.events) if event[0] == "dns-reject")
     removal = next(i for i, event in enumerate(world.events) if event[0] == "forward-remove")
     assert rejection < removal
+
+
+@mark.parametrize("routes", [(), (IPv4Network("10.254.0.0/16"),)])
+def test_missing_or_changed_destination_ranges_fail_before_transport(monkeypatch, routes):
+    world = _worker_world(monkeypatch)
+    world.worker.network.route_cidrs = routes
+    if not routes:
+        world.worker._route_cidrs = ()
+    world.worker.start()
+    world.worker._thread.join(5)
+    assert not world.worker._thread.is_alive()
+    world.worker.close()
+    assert world.worker.status.cause == "identity-or-configuration"
+    assert not any(
+        e[0] in {"transport-start", "forward-add", "host-configure"} for e in world.events
+    )
+
+
+def test_member_refresh_keeps_subnet_routes_and_listener_port(monkeypatch):
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    worker._host_generation = worker._attempt = 1
+    world.forwarding.add(worker.unit, 1, 1, worker.network, 32123)
+    worker._configure(worker._view())
+    original = world.lease.unit["request"]
+    worker._claims += ("member.private.example.com",)
+    worker._configure(worker._view())
+    refreshed = world.lease.unit["request"]
+    assert refreshed["cidrs"] == original["cidrs"] == ("10.254.16.0/20", "10.254.64.0/20")
+    assert refreshed["generation"] == original["generation"] == 1
+    assert refreshed["resolvers"][: len(original["resolvers"])] == original["resolvers"]
+    assert all(r.port == world.forwarding.port for r in refreshed["resolvers"])
+
+
+@mark.parametrize("cleanup_failure", [False, True])
+def test_route_conflict_is_terminal_and_reports_only_decoded_facts(monkeypatch, cleanup_failure):
+    from stelvio.tunnel.supervisor import statuses
+
+    world = _worker_world(monkeypatch, close_uncertain=cleanup_failure)
+    configure = world.lease.configure
+
+    def conflict(**request):
+        configure(**request)
+        world.lease.configure = configure
+        raise HelperError(
+            "untrusted exception text SECRET",
+            status=HelperStatus.UNCERTAIN,
+            configure_stage=20,
+            route_conflict=HelperRouteConflict("10.254.16.0/20", "10.254.17.0/24", 7),
+        )
+
+    world.lease.configure = conflict
+    world.worker.start()
+    world.worker._thread.join(5)
+    assert not world.worker._thread.is_alive()
+    if cleanup_failure:
+        with raises(RuntimeError, match="cleanup incomplete"):
+            world.worker.close()
+    else:
+        world.worker.close()
+    status = statuses((world.worker,))[0]
+    assert status["state"] == "failed"
+    assert status["cause"] == (
+        "cleanup-incomplete" if cleanup_failure else "host-uncertain-configure-20"
+    )
+    assert "10.254.16.0/20" in status["detail"]
+    assert "10.254.17.0/24" in status["detail"]
+    assert "interface index 7" in status["detail"]
+    assert "SECRET" not in status["detail"]
+    assert world.transport.attempt == 1
