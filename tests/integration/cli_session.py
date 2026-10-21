@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from ipaddress import IPv4Network
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
@@ -244,6 +245,53 @@ def run():
                 return
             time.sleep(1)
         raise TimeoutError(f"Standalone network did not become ready: {self.log_path}")
+
+    def _route_to(self, address) -> dict[str, str]:
+        from .macos_host import run
+
+        output = run("/sbin/route", "-n", "get", "-inet", str(address)).stdout
+        fields = {}
+        for line in output.splitlines():
+            key, separator, value = line.strip().partition(":")
+            if separator and key in {"destination", "mask", "interface"}:
+                assert key not in fields, f"Ambiguous route lookup: {output}"
+                fields[key] = value.strip()
+        with (self.project / "standalone-routes.jsonl").open("a") as evidence:
+            evidence.write(json.dumps({"address": str(address), "output": output}) + "\n")
+        assert fields.get("interface"), f"No route interface: {output}"
+        return fields
+
+    def assert_selected_routes(self) -> None:
+        """Prove exact subnet routes and exclusion of public/unused/resolver space."""
+        interfaces = set()
+        for network in self.manifest.enabled_vpcs:
+            assert network.route_cidrs, "Proof VPC has no private or isolated subnets"
+            unit_interfaces = set()
+            for cidr in network.route_cidrs:
+                route = self._route_to(cidr.network_address + 1)
+                assert "destination" in route, route
+                assert "mask" in route, route
+                assert IPv4Network(f"{route['destination']}/{route['mask']}") == cidr, route
+                assert route["interface"].startswith("utun"), route
+                unit_interfaces.add(route["interface"])
+            assert len(unit_interfaces) == 1, unit_interfaces
+            assert not (unit_interfaces & interfaces), "VPCs share a routed interface"
+            interfaces.update(unit_interfaces)
+
+        for network in self.manifest.enabled_vpcs:
+            excluded = {network.cidrs[0].network_address + 2}
+            excluded.update(subnet.cidr.network_address + 1 for subnet in network.public_subnets)
+            for block in network.cidrs:
+                unused = block.broadcast_address - 1
+                assert not any(unused in subnet.cidr for subnet in network.subnets), (
+                    "Proof must leave unused address space for route exclusion checks"
+                )
+                excluded.add(unused)
+            for address in excluded:
+                route = self._route_to(address)
+                assert route["interface"] not in interfaces, (
+                    f"Excluded VPC address {address} uses a tunnel route: {route}"
+                )
 
     def wait_host_key_refusal(self, instance_id: str) -> str:
         assert self.process is not None
