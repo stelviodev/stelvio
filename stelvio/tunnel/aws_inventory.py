@@ -1,4 +1,4 @@
-"""Resolve complete deployed IPv4 ranges before a session changes host routes."""
+"""Verify VPC ownership and every declared subnet before selecting route destinations."""
 
 from __future__ import annotations
 
@@ -23,7 +23,9 @@ def resolve_vpc_inventory(
 
     The component's primary CIDR cannot inventory independently associated IPv4
     ranges. Query used VPCs, retain all associated ranges, then validate overlap
-    across the full collection before any host operation.
+    across the full collection before any host operation. Verify public, private,
+    and isolated subnet identities against AWS. route_cidrs remains the declared
+    private/isolated set; associated ownership blocks never add destinations.
     """
     resolved = {
         network.identity: resolve_vpc_network(network, client_for(network))
@@ -59,23 +61,36 @@ def resolve_vpc_network(network: VpcNetwork, client: BaseClient) -> VpcNetwork:
             for value in [actual["CidrBlock"], *(item["CidrBlock"] for item in associations)]
         )
     )
-    subnets = client.describe_subnets(
-        SubnetIds=[subnet.subnet_id for subnet in network.public_subnets]
-    )["Subnets"]
-    expected = {subnet.subnet_id: subnet for subnet in network.public_subnets}
-    if {subnet["SubnetId"] for subnet in subnets} != set(expected):
-        raise ValueError(f"VPC {network.identity!r} public subnet inventory changed")
+    _validate_subnets(network, client, cidrs)
+    return replace(network, cidrs=cidrs)
+
+
+def _validate_subnets(
+    network: VpcNetwork, client: BaseClient, cidrs: tuple[IPv4Network, ...]
+) -> None:
+    # Classification comes from deployed metadata, not public-IP assignment or
+    # response order. Never enumerate arbitrary AWS subnets if the ID list is empty.
+    expected = {subnet.subnet_id: subnet for subnet in network.subnets}
+    if not expected or len(expected) != len(network.subnets):
+        raise ValueError(f"VPC {network.identity!r} has an invalid deployed subnet inventory")
+    subnets = client.describe_subnets(SubnetIds=list(expected))["Subnets"]
+    if len(subnets) != len(expected) or {subnet.get("SubnetId") for subnet in subnets} != set(
+        expected
+    ):
+        raise ValueError(f"VPC {network.identity!r} subnet inventory changed; redeploy")
     for subnet in subnets:
         known = expected[subnet["SubnetId"]]
         if (
-            subnet["VpcId"] != network.vpc_id
-            or subnet["OwnerId"] != network.account
-            or subnet["AvailabilityZone"] != known.availability_zone
-            or subnet["CidrBlock"] != str(known.cidr)
-            or subnet["State"] != "available"
+            subnet.get("VpcId") != network.vpc_id
+            or subnet.get("OwnerId") != network.account
+            or subnet.get("AvailabilityZone") != known.availability_zone
+            or subnet.get("CidrBlock") != str(known.cidr)
+            or subnet.get("State") != "available"
+            or not any(known.cidr.subnet_of(cidr) for cidr in cidrs)
         ):
-            raise ValueError(f"VPC {network.identity!r} public subnet identity changed")
-    return replace(network, cidrs=cidrs)
+            raise ValueError(
+                f"VPC {network.identity!r} subnet identity changed: {known.subnet_id!r}; redeploy"
+            )
 
 
 def _validate_dns(network: VpcNetwork, client: BaseClient) -> None:
