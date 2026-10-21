@@ -69,10 +69,11 @@ def session_to_wire(session: SessionDescription) -> dict:
             cidrs=[str(cidr) for cidr in network.cidrs],
             policy=network.policy.value,
         )
-        data["public_subnets"] = [
-            {"id": subnet.subnet_id, "az": subnet.availability_zone, "cidr": str(subnet.cidr)}
-            for subnet in network.public_subnets
-        ]
+        for tier in ("public_subnets", "private_subnets", "isolated_subnets"):
+            data[tier] = [
+                {"id": subnet.subnet_id, "az": subnet.availability_zone, "cidr": str(subnet.cidr)}
+                for subnet in getattr(network, tier)
+            ]
         if network.access:
             data["access"]["az"] = data["access"].pop("availability_zone")
         records.append(data)
