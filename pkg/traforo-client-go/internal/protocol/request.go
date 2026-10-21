@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	Header            = 56
-	MaxBody           = 32768
-	MaxUnits          = 8
-	MaxRanges         = 8
+	Header   = 56
+	MaxBody  = 32768
+	MaxUnits = 8
+	// MaxRanges bounds destination subnets per unit, not VPC ownership ranges.
+	// Ten availability zones need twenty private/isolated ranges; retain headroom.
+	MaxRanges         = 32
 	MaxDomains        = 64
 	MaxJournal        = 512 * 1024
 	IPv4       uint32 = 2 // Fixed carrier marker, independent of host socket constants.
@@ -39,7 +41,7 @@ type Request struct {
 	Generation          uint64
 	Unit                uint32
 	VPC                 string
-	Ranges              []netip.Prefix
+	Ranges              []netip.Prefix // Authorized destinations; public/unused VPC space is not implied.
 	Resolvers           []Resolver
 }
 
