@@ -343,4 +343,11 @@ volumes need capture. Failed discovery or capture remains an acceptance failure;
 destruction and the absence audit still run. Proof host pins remain until all
 required cleanup checks pass. Deployment interruptions also run cleanup; simultaneous
 setup and cleanup failures are reported together.
+The absence audit checks DocumentDB cluster and instance application/environment
+ownership tags as well as readable name prefixes. This detects resources with
+compacted names even after a partial deployment. Tag inspection uses resource
+ARNs; missing ARNs or failed AWS requests fail the audit rather than certifying
+cleanup. Both ownership tags must match before an otherwise unrelated name is
+reported as belonging to the proof application.
+
 These checks do not certify a live acceptance run.

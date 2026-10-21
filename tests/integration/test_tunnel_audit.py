@@ -853,3 +853,58 @@ def test_proof_discovery_rejects_duplicate_instances():
     ]
     with pytest.raises(AssertionError, match="duplicate"):
         assert_tunnel.capture_proof_volume_ids(sdk=sdk, app="demo", env="test", instance_ids=[])
+
+
+@pytest.mark.parametrize(
+    ("operation", "field", "identifier", "arn_key"),
+    [
+        ("describe_db_clusters", "DBClusters", "DBClusterIdentifier", "DBClusterArn"),
+        ("describe_db_instances", "DBInstances", "DBInstanceIdentifier", "DBInstanceArn"),
+    ],
+)
+@pytest.mark.parametrize(
+    "tags",
+    [
+        {"stelvio:app": "demo", "stelvio:env": "test"},
+        {"stelvio:app": "demo", "stelvio:env": "other"},
+        {"stelvio:app": "other", "stelvio:env": "test"},
+        {"stelvio:app": "demo"},
+        {},
+    ],
+)
+def test_database_audit_checks_compact_names_on_all_pages(
+    operation, field, identifier, arn_key, tags
+):
+    session = _empty_session()
+    client = session.clients["docdb"]
+    arn = "arn:aws:rds:us-east-1:123456789012:cluster:stlv-compact-orders"
+    client.pages[operation] = [
+        {field: []},
+        {field: [{identifier: "stlv-compact-orders", arn_key: arn}]},
+    ]
+    client.direct["list_tags_for_resource"] = {
+        "TagList": [{"Key": key, "Value": value} for key, value in tags.items()]
+    }
+    remaining = assert_tunnel._database_resources("demo", "test", sdk=session)
+    expected = tags == {"stelvio:app": "demo", "stelvio:env": "test"}
+    assert remaining == ([f"DocumentDB {identifier} stlv-compact-orders"] if expected else [])
+    assert ("list_tags_for_resource", {"ResourceName": arn}) in client.calls
+
+
+@pytest.mark.parametrize("missing_arn", [False, True])
+def test_database_audit_refuses_unverified_ownership(missing_arn):
+    session = _empty_session()
+    client = session.clients["docdb"]
+    item = {"DBClusterIdentifier": "stlv-compact-orders"}
+    if not missing_arn:
+        item["DBClusterArn"] = "arn:aws:rds:us-east-1:123456789012:cluster:stlv-compact-orders"
+    client.pages["describe_db_clusters"] = [{"DBClusters": [item]}]
+
+    def fail(**_kwargs):
+        raise ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListTagsForResource"
+        )
+
+    client.direct["list_tags_for_resource"] = fail
+    with pytest.raises(AssertionError if missing_arn else ClientError):
+        assert_tunnel._database_resources("demo", "test", sdk=session)
