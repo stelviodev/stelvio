@@ -358,6 +358,7 @@ try:
     assert len(NativeHelper().status().units)==2
     Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'owner':owner}))
     sys.stdin.read()
+    assert len(NativeHelper().status().units)==2
 finally:
     lease.close()
 """
