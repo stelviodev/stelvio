@@ -32,7 +32,7 @@ from stelvio.tunnel.installation import INSTALLED_HELPER
 from .assert_tunnel import (
     AbsenceAuditOptions,
     assert_application_absent,
-    capture_bastion_volume_ids,
+    capture_proof_volume_ids,
 )
 
 if TYPE_CHECKING:
@@ -123,7 +123,7 @@ def relocate(octet):
 def run():
     for number, octet in ((1, 252), (2, 253)):
         vpc = Vpc(f'net{number}', az=2, bastion=True, customize=relocate(octet))
-        database = DocumentDb(f'docdb{number}', vpc=vpc, instances=2 if number == 1 else 1)
+        database = DocumentDb(f'docdb{number}', vpc=vpc, replicas=1 if number == 1 else 0)
         function = Function(
             f'client{number}', handler='handlers/probe.handler', vpc=vpc,
             links=[database], requirements=['pymongo'],
@@ -600,9 +600,13 @@ finally:
             )
         volume_capture_error = None
         try:
-            bastion_ids = [self._outputs[f"bastion{number}_id"] for number in (1, 2)]
-            self._bastion_volume_ids = capture_bastion_volume_ids(
-                sdk=self.aws, instance_ids=bastion_ids
+            bastion_ids = [
+                self._outputs[key]
+                for key in ("bastion1_id", "bastion2_id")
+                if self._outputs.get(key)
+            ]
+            self._bastion_volume_ids = capture_proof_volume_ids(
+                sdk=self.aws, app=self.app, env=self.environment_name, instance_ids=bastion_ids
             )
         except Exception as error:
             # Missing outputs or an inventory error must not prevent cleanup of
@@ -610,13 +614,24 @@ finally:
             # all tagged and name-owned resources, then reports the volume gap.
             self._bastion_volume_ids = ()
             volume_capture_error = error
-        self.command("destroy", self.environment_name, "--yes", timeout=STARTUP_TIMEOUT)
-        self._assert_aws_resources_absent()
-        self._clear_proof_host_trust()
+        errors = []
         if volume_capture_error is not None:
-            raise RuntimeError(
-                "AWS cleanup completed, but bastion block-device absence could not be certified"
-            ) from volume_capture_error
+            error = RuntimeError("Bastion block-device absence could not be certified")
+            error.__cause__ = volume_capture_error
+            errors.append(error)
+        try:
+            self.command("destroy", self.environment_name, "--yes", timeout=STARTUP_TIMEOUT)
+        except Exception as error:
+            errors.append(error)
+        try:
+            self._assert_aws_resources_absent()
+        except Exception as error:
+            errors.append(error)
+        if len(errors) > 1:
+            raise ExceptionGroup("Proof cleanup incomplete", errors)
+        if errors:
+            raise errors[0]
+        self._clear_proof_host_trust()
 
     def _assert_aws_resources_absent(self) -> None:
         assert_application_absent(
