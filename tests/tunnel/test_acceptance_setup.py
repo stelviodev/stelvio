@@ -14,8 +14,11 @@ from tests.integration.cli_session import StandaloneCliSession
 
 
 @pytest.mark.usefixtures("pulumi_mocks")
-def test_generated_proof_uses_current_component_configuration(tmp_path, monkeypatch):
+@pytest.mark.parametrize("no_vpc", [False, True])
+def test_generated_proof_uses_current_component_configuration(tmp_path, monkeypatch, no_vpc):
     session = object.__new__(StandaloneCliSession)
+    session.no_vpc = no_vpc
+    session.invocation_path = tmp_path / "handler-imports.jsonl"
     session.project = tmp_path / "proof"
     session.app = "proof-app"
     session.environment_name = "tunnel-proof"
@@ -41,7 +44,10 @@ def test_generated_proof_uses_current_component_configuration(tmp_path, monkeypa
     monkeypatch.setattr(
         Function,
         "_create_resources",
-        lambda self: SimpleNamespace(function=SimpleNamespace(name=self.name)),
+        lambda self: SimpleNamespace(
+            function=SimpleNamespace(name=self.name),
+            function_url=SimpleNamespace(function_url=f"https://{self.name}.example.test"),
+        ),
     )
     source = session.project / "stlv_app.py"
     namespace = {}
@@ -51,6 +57,11 @@ def test_generated_proof_uses_current_component_configuration(tmp_path, monkeypa
     databases = [
         item for item in ComponentRegistry.all_instances() if isinstance(item, DocumentDb)
     ]
+    if no_vpc:
+        assert not databases
+        assert not any(isinstance(item, Vpc) for item in ComponentRegistry.all_instances())
+        assert sum(isinstance(item, Function) for item in ComponentRegistry.all_instances()) == 1
+        return
     assert [item.name for item in databases] == ["docdb1", "docdb2"]
     assert [item.config.replicas for item in databases] == [1, 0]
     assert [1 + item.config.replicas for item in databases] == [2, 1]
