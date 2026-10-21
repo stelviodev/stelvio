@@ -3,9 +3,13 @@ import base64
 import contextlib
 import datetime
 import json
+import signal
+import threading
 import traceback
 import uuid
+from collections.abc import Iterator
 from dataclasses import asdict
+from types import FrameType
 
 import websockets
 from rich.console import Console
@@ -305,20 +309,58 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
         await _close_connection(ws)
 
 
+@contextlib.contextmanager
+def _cancel_on_sigint(loop: asyncio.AbstractEventLoop, task: asyncio.Task[None]) -> Iterator[None]:
+    """Defer Ctrl+C until asyncio finishes its current task transition."""
+    if (
+        threading.current_thread() is not threading.main_thread()
+        or signal.getsignal(signal.SIGINT) is not signal.default_int_handler
+    ):
+        yield
+        return
+
+    interrupt_count = 0
+
+    def handle_sigint(_signum: int, _frame: FrameType | None) -> None:
+        nonlocal interrupt_count
+        interrupt_count += 1
+        if interrupt_count == 1 and not task.done():
+            # Raising here can strand a task between yielding its future and
+            # registering its wakeup callback. Cancel on the next loop turn.
+            loop.call_soon_threadsafe(task.cancel)
+        else:
+            raise KeyboardInterrupt
+
+    previous_handler = signal.signal(signal.SIGINT, handle_sigint)
+    try:
+        try:
+            yield
+        except asyncio.CancelledError:
+            if interrupt_count:
+                raise KeyboardInterrupt from None
+            raise
+    finally:
+        if signal.getsignal(signal.SIGINT) is handle_sigint:
+            signal.signal(signal.SIGINT, previous_handler)
+
+
 def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
     """Run the main loop without joining an uncooperative handler thread on exit."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     task = loop.create_task(main(region=region, profile=profile, app_name=app_name, env=env))
-    try:
-        loop.run_until_complete(task)
-    finally:
-        pending = asyncio.all_tasks(loop)
-        for future in pending:
-            future.cancel()
+    with _cancel_on_sigint(loop, task):
         try:
-            if pending:
-                loop.run_until_complete(asyncio.wait(pending, timeout=ASYNC_TASK_SHUTDOWN_TIMEOUT))
+            loop.run_until_complete(task)
         finally:
-            loop.close()
-            asyncio.set_event_loop(None)
+            pending = asyncio.all_tasks(loop)
+            for future in pending:
+                future.cancel()
+            try:
+                if pending:
+                    loop.run_until_complete(
+                        asyncio.wait(pending, timeout=ASYNC_TASK_SHUTDOWN_TIMEOUT)
+                    )
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)

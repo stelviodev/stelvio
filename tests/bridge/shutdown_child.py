@@ -3,10 +3,26 @@
 import asyncio
 import importlib
 import json
+import signal
+import sys
 from threading import Event
 
 from stelvio.bridge.local import listener
 from stelvio.bridge.remote.infrastructure import AppSyncResource
+
+handler_started = Event()
+
+
+class InterruptFuture(asyncio.Future):
+    interrupt_on_registration = False
+
+    def add_done_callback(self, callback, *, context=None):
+        if self.interrupt_on_registration:
+            self.interrupt_on_registration = False
+            # The coroutine has yielded, but its task cannot resume until this
+            # callback is registered. A raw KeyboardInterrupt strands the task.
+            signal.raise_signal(signal.SIGINT)
+        return super().add_done_callback(callback, context=context)
 
 
 class WebSocket:
@@ -22,13 +38,18 @@ class WebSocket:
 
 def blocked_handler():
     print("HANDLER_STARTED", flush=True)
+    handler_started.set()
     Event().wait()
     print("HANDLER_FINISHED", flush=True)
 
 
 class BridgeHandler:
     async def handle_bridge_event(self, _data):
-        return await asyncio.get_running_loop().run_in_executor(None, blocked_handler)
+        future = asyncio.get_running_loop().run_in_executor(None, blocked_handler)
+        if isinstance(future, InterruptFuture):
+            assert handler_started.wait(timeout=5), "Handler did not start"
+            future.interrupt_on_registration = True
+        return await future
 
 
 async def connect(_config):
@@ -40,6 +61,8 @@ def run_bridge():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["registration"]:
+        asyncio.BaseEventLoop.create_future = lambda self: InterruptFuture(loop=self)
     listener.discover_or_create_appsync = lambda *_args: AppSyncResource(
         api_id="api-id",
         http_endpoint="https://example.com",
