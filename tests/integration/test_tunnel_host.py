@@ -11,9 +11,7 @@ import subprocess
 import sys
 import time
 from contextlib import ExitStack, suppress
-from ipaddress import IPv4Network
 from pathlib import Path
-from types import SimpleNamespace
 from uuid import uuid4
 
 from pytest import fixture, mark, raises, skip
@@ -32,7 +30,7 @@ from .macos_host import (
     wait_empty,
 )
 from .test_tunnel_dns import _os_lookup
-from .tunnel_dns_fixture import SocksDnsFixture
+from .tunnel_dns_fixture import SocksDnsFixture, native_network, packet_network
 
 pytestmark = mark.integration_macos_privileged
 
@@ -191,17 +189,15 @@ def test_hundred_two_unit_dns_route_cycles(macos_host):
                 scope.callback(proxy.close)
                 domain = f"cycle-{cycle}-{uuid4().hex}.internal"
                 domains.append(domain)
-                network = SimpleNamespace(
-                    cidrs=(IPv4Network(f"10.{octet}.0.0/16"),), dns_domains=(domain,)
-                )
+                network = native_network(octet, domain)
                 unit = f"{index:08x}"
-                forwarding.add(unit, 1, 1, network, proxy.port)
+                forwarding.add(unit, 1, 1, packet_network(network), proxy.port)
                 port = forwarding.configure_dns(unit, 1, 1, 1, network, ())
                 lease.configure(
                     unit=unit,
                     generation=1,
                     vpc_id=f"vpc-{index:08x}",
-                    cidrs=(str(network.cidrs[0]),),
+                    cidrs=tuple(str(cidr) for cidr in network.route_cidrs),
                     resolvers=(ResolverEndpoint(domain, port),),
                 )
                 assert _os_lookup("alias." + domain) == {proxy.server.address}
