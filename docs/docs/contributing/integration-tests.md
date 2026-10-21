@@ -172,3 +172,23 @@ SNS stay near free tier, CloudFront and NAT gateways don't.
 - A bucket that receives objects needs `customize=FORCE_DESTROY_BUCKET`, otherwise destroy
   fails on a non-empty bucket.
 - Sleeps are named module constants with a comment explaining the number.
+
+### Helper control ownership
+
+An active helper accepts control requests only from the process that owns its lease.
+A different process must not inspect the active lease directly. The helper can
+reject a connection before it reads the request. The client preserves a valid
+rejection reply as a typed error. A missing or invalid reply does not imply that
+the helper is busy. Failed requests are not replayed.
+
+Run the owner-rejection lifecycle regression with the privileged tier enabled:
+
+```bash
+uv run pytest tests/integration/test_tunnel_host.py -k owner_lifecycle \
+  --integration-macos-privileged -n 0
+```
+
+Use a validated local image through `STLV_TRAFORO_DEV_BINARY` for local testing.
+The fixture restores the initial helper and host state. Complete any macOS
+authorization dialog needed for restoration. A canceled restoration is not a
+passing acceptance run.
