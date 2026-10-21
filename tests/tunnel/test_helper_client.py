@@ -282,3 +282,94 @@ def test_status_compatibility_is_checked_with_valid_inventory(
     )
     with raises(HelperError, match="incompatible with this package"):
         helper.status()
+
+
+# The same independent 26-byte vector is checked by Go's route diagnostic test.
+ROUTE_CONFLICT_WIRE = bytes.fromhex("4346011452430afe1400fffffc000afe1500ffffff0000000007")
+
+
+def test_route_conflict_reports_both_ranges_and_interface_without_leaking_descriptors():
+    first, second = _pair()
+    source, sentinel = _pair(socket.SOCK_DGRAM)
+    with first, second, source, sentinel:
+        before = len(list(Path("/dev/fd").iterdir()))
+        second.sendmsg(
+            [reply(ROUTE_CONFLICT_WIRE, status=3)],
+            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [source.fileno()]))],
+        )
+        with raises(HelperError, match="configure stage 20") as caught:
+            _receive(first)
+        error = caught.value
+        assert error.status == HelperStatus.UNCERTAIN
+        assert error.configure_stage == 20
+        assert error.route_conflict.requested == "10.254.20.0/22"
+        assert error.route_conflict.conflicting == "10.254.21.0/24"
+        assert error.route_conflict.interface_index == 7
+        assert str(error) == (
+            "Native helper request failed: uncertain (configure stage 20): "
+            "requested route 10.254.20.0/22 conflicts with route 10.254.21.0/24 "
+            "on interface index 7"
+        )
+        assert len(list(Path("/dev/fd").iterdir())) == before
+        source.send(b"still-owned")
+        assert sentinel.recv(32) == b"still-owned"
+
+
+@mark.parametrize(
+    "payload",
+    [ROUTE_CONFLICT_WIRE[:length] for length in range(5, 26)]
+    + [
+        ROUTE_CONFLICT_WIRE + b"x",
+        ROUTE_CONFLICT_WIRE[:4] + b"RX" + ROUTE_CONFLICT_WIRE[6:],
+        b"CF\x02" + ROUTE_CONFLICT_WIRE[3:],
+        b"CF\x01\x00" + ROUTE_CONFLICT_WIRE[4:],
+        b"CF\x01\x18" + ROUTE_CONFLICT_WIRE[4:],
+    ],
+)
+def test_malformed_route_diagnostic_fails_closed_and_closes_descriptors(payload):
+    first, second = _pair()
+    source, sentinel = _pair(socket.SOCK_DGRAM)
+    with first, second, source, sentinel:
+        before = len(list(Path("/dev/fd").iterdir()))
+        second.sendmsg(
+            [reply(payload, status=3)],
+            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [source.fileno()]))],
+        )
+        with raises(HelperError, match="incompatible configure diagnostic") as caught:
+            _receive(first)
+        assert caught.value.status == HelperStatus.UNCERTAIN
+        assert caught.value.route_conflict is None
+        assert len(list(Path("/dev/fd").iterdir())) == before
+
+
+@mark.parametrize("status", [1, 2, 4])
+def test_route_diagnostic_requires_uncertain_status(status):
+    first, second = _pair()
+    with first, second:
+        second.sendall(reply(ROUTE_CONFLICT_WIRE, status=status))
+        with raises(HelperError, match="incompatible configure diagnostic"):
+            _receive(first)
+
+
+@mark.parametrize(
+    ("network", "mask", "expected"),
+    [
+        (0x0A000000, 0xFF000000, "10.0.0.0/8"),
+        (0x0AFE1501, 0xFFFFFFFF, "10.254.21.1/32"),
+        (0x0AFE1501, 0xFFFFFF00, "10.254.21.0/24"),
+        (0x0AFE1501, 0xFF00FF00, "10.254.21.1 mask 255.0.255.0"),
+        (0x0AFE1501, 0x000000FF, "10.254.21.1 mask 0.0.0.255"),
+    ],
+)
+def test_kernel_route_masks_are_displayed_without_assuming_private_subnet_policy(
+    network, mask, expected
+):
+    first, second = _pair()
+    payload = ROUTE_CONFLICT_WIRE[:14] + struct.pack("!III", network, mask, 0xFFFFFFFF)
+    with first, second:
+        second.sendall(reply(payload, status=3))
+        with raises(HelperError) as caught:
+            _receive(first)
+        assert caught.value.route_conflict.conflicting == expected
+        assert caught.value.route_conflict.interface_index == 0xFFFFFFFF
+        assert expected in str(caught.value)

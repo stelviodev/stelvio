@@ -12,6 +12,7 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import IntEnum
+from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
@@ -30,6 +31,8 @@ CARRIER_VERSION = 1
 MAX_REPLY = 256
 CONFIGURE_DIAGNOSTIC = b"CF\x01"
 MAX_CONFIGURE_STAGE = 23
+_CONFIGURE_SIZE = len(CONFIGURE_DIAGNOSTIC) + 1
+_ROUTE_CONFLICT = struct.Struct("!2sIIIII")
 SOCKET_MODE = 0o666
 _STATUS_RESPONSE = struct.Struct("!8sIII")
 _ACQUISITION = struct.Struct("!16sI")
@@ -47,10 +50,12 @@ class HelperError(RuntimeError):
         *,
         status: HelperStatus | None = None,
         configure_stage: int | None = None,
+        route_conflict: HelperRouteConflict | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.configure_stage = configure_stage
+        self.route_conflict = route_conflict
 
 
 class HelperBusyError(HelperError):
@@ -162,27 +167,68 @@ def _header(packet: bytes | bytearray) -> tuple[HelperStatus, int]:
         raise HelperError("The helper returned an unknown status") from error
 
 
-def _success(response: HelperStatus, payload: bytes = b"") -> None:
-    stage = None
-    if response != HelperStatus.OK and payload:
-        if (
-            response != HelperStatus.UNCERTAIN
-            or len(payload) != len(CONFIGURE_DIAGNOSTIC) + 1
-            or payload[:-1] != CONFIGURE_DIAGNOSTIC
-            or not 1 <= payload[-1] <= MAX_CONFIGURE_STAGE
-        ):
+def _route_label(network: int, mask: int) -> str:
+    # Do not interpret a noncontiguous kernel mask as an IPv4 host mask.
+    inverse = mask ^ 0xFFFFFFFF
+    if inverse & (inverse + 1):
+        return f"{IPv4Address(network)} mask {IPv4Address(mask)}"
+    return str(IPv4Network((network, 32 - inverse.bit_length()), strict=False))
+
+
+@dataclass(frozen=True)
+class HelperRouteConflict:
+    requested: str
+    conflicting: str
+    interface_index: int
+
+    def __str__(self) -> str:
+        return (
+            f"requested route {self.requested} conflicts with route {self.conflicting} "
+            f"on interface index {self.interface_index}"
+        )
+
+
+def _configure_diagnostic(
+    response: HelperStatus, payload: bytes
+) -> tuple[int, HelperRouteConflict | None]:
+    if (
+        response != HelperStatus.UNCERTAIN
+        or len(payload) not in (_CONFIGURE_SIZE, _CONFIGURE_SIZE + _ROUTE_CONFLICT.size)
+        or payload[:3] != CONFIGURE_DIAGNOSTIC
+        or not 1 <= payload[3] <= MAX_CONFIGURE_STAGE
+    ):
+        raise HelperError(
+            "The helper returned an incompatible configure diagnostic", status=response
+        )
+    conflict = None
+    if len(payload) != _CONFIGURE_SIZE:
+        tag, requested, requested_mask, existing, existing_mask, index = (
+            _ROUTE_CONFLICT.unpack_from(payload, _CONFIGURE_SIZE)
+        )
+        if tag != b"RC":
             raise HelperError(
                 "The helper returned an incompatible configure diagnostic", status=response
             )
-        stage = payload[3]
+        conflict = HelperRouteConflict(
+            _route_label(requested, requested_mask), _route_label(existing, existing_mask), index
+        )
+    return payload[3], conflict
+
+
+def _success(response: HelperStatus, payload: bytes = b"") -> None:
+    stage, conflict = None, None
+    if response != HelperStatus.OK and payload:
+        stage, conflict = _configure_diagnostic(response, payload)
     if response == HelperStatus.BUSY:
         raise HelperBusyError("Native helper request failed: busy", status=response)
     if response != HelperStatus.OK:
         raise HelperError(
             f"Native helper request failed: {response.name.lower()}"
-            + (f" (configure stage {stage})" if stage else ""),
+            + (f" (configure stage {stage})" if stage else "")
+            + (f": {conflict}" if conflict else ""),
             status=response,
             configure_stage=stage,
+            route_conflict=conflict,
         )
 
 
