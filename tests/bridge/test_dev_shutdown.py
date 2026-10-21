@@ -8,7 +8,7 @@ import signal
 import subprocess
 import sys
 import time
-from threading import Event
+from threading import Event, Thread
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -192,10 +192,107 @@ def test_main_preserves_failure_when_close_times_out(monkeypatch, phase, error_t
     websocket.transport.abort.assert_called_once_with()
 
 
-def test_cli_interrupt_exits_with_blocked_handler():
+@pytest.mark.parametrize("outcome", ["success", "error", "cancel", "interrupt"])
+def test_bridge_restores_sigint_handler(monkeypatch, outcome):
+    handlers = [signal.default_int_handler]
+
+    def install_handler(_signum, handler):
+        previous = handlers[-1]
+        handlers.append(handler)
+        return previous
+
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: handlers[-1])
+    monkeypatch.setattr(signal, "signal", install_handler)
+    cleanup_finished = False
+
+    async def main(**_kwargs):
+        nonlocal cleanup_finished
+        try:
+            if outcome == "interrupt":
+                handlers[-1](signal.SIGINT, None)
+                await asyncio.Future()
+            elif outcome == "cancel":
+                raise asyncio.CancelledError
+            elif outcome == "error":
+                raise ValueError("bridge failed")
+        finally:
+            await asyncio.sleep(0)
+            cleanup_finished = True
+
+    monkeypatch.setattr(listener, "main", main)
+    expected = {
+        "success": None,
+        "error": ValueError,
+        "cancel": asyncio.CancelledError,
+        "interrupt": KeyboardInterrupt,
+    }[outcome]
+    if expected is None:
+        listener.run_bridge_server("us-east-1", "default", "app", "dev")
+    else:
+        with pytest.raises(expected):
+            listener.run_bridge_server("us-east-1", "default", "app", "dev")
+
+    assert cleanup_finished
+    assert len(handlers) == 3
+    assert handlers[-1] is signal.default_int_handler
+
+
+def test_sigint_cancellation_is_deferred_and_second_interrupt_is_immediate(monkeypatch):
+    loop = asyncio.get_event_loop()
+    task = loop.create_task(asyncio.sleep(0))
+    installed = MagicMock(return_value=signal.default_int_handler)
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: signal.default_int_handler)
+    monkeypatch.setattr(signal, "signal", installed)
+
+    with listener._cancel_on_sigint(loop, task):
+        handler = installed.call_args.args[1]
+        handler(signal.SIGINT, None)
+        assert task.cancelling() == 0
+        with pytest.raises(KeyboardInterrupt):
+            handler(signal.SIGINT, None)
+        with pytest.raises(asyncio.CancelledError):
+            loop.run_until_complete(task)
+
+
+def test_bridge_preserves_custom_sigint_handler(monkeypatch):
+    custom_handler = MagicMock()
+    installed = MagicMock()
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: custom_handler)
+    monkeypatch.setattr(signal, "signal", installed)
+    monkeypatch.setattr(listener, "main", AsyncMock())
+
+    listener.run_bridge_server("us-east-1", "default", "app", "dev")
+
+    installed.assert_not_called()
+    custom_handler.assert_not_called()
+
+
+def test_bridge_runs_outside_main_thread(monkeypatch):
+    installed = MagicMock()
+    monkeypatch.setattr(signal, "signal", installed)
+    monkeypatch.setattr(listener, "main", AsyncMock())
+    errors = []
+
+    def run():
+        try:
+            listener.run_bridge_server("us-east-1", "default", "app", "dev")
+        except BaseException as error:
+            errors.append(error)
+
+    thread = Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert not errors
+    installed.assert_not_called()
+
+
+@pytest.mark.parametrize("interrupt_phase", ["parent", "registration"])
+def test_cli_interrupt_exits_with_blocked_handler(interrupt_phase):
     # Exercise main's real os._exit path without deploying or contacting AWS.
     with subprocess.Popen(  # noqa: S603
-        [sys.executable, "-u", "-m", "tests.bridge.shutdown_child"],
+        [sys.executable, "-u", "-m", "tests.bridge.shutdown_child", interrupt_phase],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     ) as child:
@@ -209,15 +306,17 @@ def test_cli_interrupt_exits_with_blocked_handler():
                     assert remaining > 0, "Child did not start its handler"
                     assert selector.select(remaining), "Child did not start its handler"
                     chunk = os.read(child.stdout.fileno(), 4096)
-                    assert chunk, "Child exited before starting its handler"
+                    assert chunk, child.stderr.read().decode()
                     output += chunk
 
-            child.send_signal(signal.SIGINT)
+            if interrupt_phase == "parent":
+                child.send_signal(signal.SIGINT)
             stdout, stderr = child.communicate(timeout=5)
             output += stdout
-            assert child.returncode == 1, stderr.decode()
-            assert b"SOCKET_CLOSED\n" in output
-            assert b"HANDLER_FINISHED\n" not in output
+            diagnostics = f"stdout:\n{output.decode()}\nstderr:\n{stderr.decode()}"
+            assert child.returncode == 1, diagnostics
+            assert b"SOCKET_CLOSED\n" in output, diagnostics
+            assert b"HANDLER_FINISHED\n" not in output, diagnostics
         finally:
             if child.poll() is None:
                 child.kill()
