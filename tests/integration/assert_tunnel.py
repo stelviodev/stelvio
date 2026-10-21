@@ -118,7 +118,7 @@ def _application_resources_remaining(
     return sorted(
         [
             *_ec2_resources(app, sdk=sdk, volume_ids=volume_ids),
-            *_database_resources(prefix, sdk=sdk),
+            *_database_resources(app, env, sdk=sdk),
             *_lambda_resources(prefix, sdk=sdk),
             *_iam_resources(prefix, sdk=sdk),
             *_ssm_resources(prefix, sdk=sdk),
@@ -278,7 +278,9 @@ def _ec2_resources(app: str, *, sdk, volume_ids: Sequence[str] = ()) -> list[str
     return remaining
 
 
-def _database_resources(prefix: str, *, sdk) -> list[str]:
+def _database_resources(app: str, env: str, *, sdk) -> list[str]:
+    prefix = f"{app}-{env}-"
+    expected_tags = {"stelvio:app": app, "stelvio:env": env}
     docdb = sdk.client("docdb")
     remaining = []
     for operation, field, identifier in (
@@ -292,11 +294,22 @@ def _database_resources(prefix: str, *, sdk) -> list[str]:
         ),
     ):
         for page in _pages(docdb, operation):
-            remaining.extend(
-                f"DocumentDB {identifier} {item.get(identifier, 'unknown')}"
-                for item in page.get(field, [])
-                if item.get(identifier, "").startswith(prefix)
-            )
+            for item in page.get(field, []):
+                owned = item.get(identifier, "").startswith(prefix)
+                # Physical cluster/instance names can compact the app/env prefix.
+                # Inspect their tags even when no deployment outputs were produced.
+                if not owned and identifier in {"DBClusterIdentifier", "DBInstanceIdentifier"}:
+                    arn_key = identifier.removesuffix("Identifier") + "Arn"
+                    arn = item.get(arn_key)
+                    if not arn:
+                        raise AssertionError(
+                            f"Cannot inspect DocumentDB ownership: missing {arn_key}"
+                        )
+                    tags = docdb.list_tags_for_resource(ResourceName=arn)["TagList"]
+                    observed = {tag["Key"]: tag["Value"] for tag in tags}
+                    owned = expected_tags.items() <= observed.items()
+                if owned:
+                    remaining.append(f"DocumentDB {identifier} {item.get(identifier, 'unknown')}")
 
     return remaining
 
