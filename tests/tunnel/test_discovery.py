@@ -8,23 +8,51 @@ from types import SimpleNamespace
 import pytest
 
 from stelvio.tunnel.discovery import DiscoveryError, DiscoveryPendingError, ResourceDiscovery
-from stelvio.tunnel.manifest import EndpointNetwork, NetworkManifest, ResourceNetwork, VpcNetwork
+from stelvio.tunnel.manifest import (
+    EndpointNetwork,
+    NetworkManifest,
+    ResourceNetwork,
+    SubnetNetwork,
+    VpcNetwork,
+)
 from stelvio.tunnel.policy import BastionPolicy
 
 
 @pytest.fixture
 def deployed():
     def vpc(name, cidr):
+        cidr = IPv4Network(cidr)
         return VpcNetwork(
-            name,
-            "123456789012",
-            "us-east-1",
-            "vpc-" + name,
-            "provider-" + name,
-            (IPv4Network(cidr),),
-            BastionPolicy.PERSISTENT,
-            (),
-            (),
+            identity=name,
+            account="123456789012",
+            region="us-east-1",
+            vpc_id="vpc-" + name,
+            provider="provider-" + name,
+            cidrs=(cidr,),
+            policy=BastionPolicy.PERSISTENT,
+            dns_domains=(),
+            public_subnets=(
+                SubnetNetwork(
+                    f"subnet-{name}",
+                    "us-east-1a",
+                    IPv4Network((cidr.network_address, 24)),
+                ),
+            ),
+            private_subnets=(
+                SubnetNetwork(
+                    f"subnet-{name}-private",
+                    "us-east-1a",
+                    IPv4Network((cidr.network_address + 256, 24)),
+                ),
+            ),
+            isolated_subnets=(
+                SubnetNetwork(
+                    f"subnet-{name}-isolated",
+                    "us-east-1a",
+                    IPv4Network((cidr.network_address + 512, 24)),
+                ),
+            ),
+            access=None,
         )
 
     def resource(name):
