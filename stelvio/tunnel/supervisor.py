@@ -90,6 +90,9 @@ class VpcWorker:
         self._status = VpcStatus(network.identity)
         self._thread = Thread(target=self._run, name="stelvio-vpc")
         self.unit = sha256(network.identity.encode()).hexdigest()[:8]
+        self._probe_domain = (
+            f"probe-{description.session_id.replace('-', '')}-{self.unit}.stelvio.test"
+        )
         self.transport = SshTransport(
             network,
             session,
@@ -156,6 +159,7 @@ class VpcWorker:
                 (
                     *self._claims,
                     *self.network.dns_domains,
+                    self._probe_domain,
                     *(name for resource in self._resources() for name in resource.hostnames),
                 )
             )
@@ -209,6 +213,7 @@ class VpcWorker:
             revision,
             self.network,
             self._claims,
+            probe_domain=self._probe_domain,
         )
         if previous_port is not None and port != previous_port:
             raise TransportAuthorizationError("VPC DNS listener port changed during its session")
@@ -335,7 +340,7 @@ class VpcWorker:
         if self._claims:
             # Unique negative hostname bypasses OS caches. A generation-bound
             # relay observation, not a cached address, proves actual OS routing.
-            name = f"stlv-{uuid4().hex}.{self._claims[0]}"
+            name = f"stlv-{uuid4().hex}.{self._probe_domain}"
             self._dns("arm", name=name)
             try:
                 subprocess.run(  # noqa: S603 - fixed isolated system-resolver probe
