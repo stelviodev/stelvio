@@ -17,7 +17,11 @@ from stelvio.tunnel.manifest import SessionDescription
 from stelvio.tunnel.plugin import PluginAssetError
 from stelvio.tunnel.policy import BastionPolicy
 from stelvio.tunnel.runtime import NetworkRuntime
-from stelvio.tunnel.wire import MAX_STATUS_DETAIL_LENGTH
+from stelvio.tunnel.wire import (
+    HOST_CONFIGURE_FAILURE_CAUSES,
+    MAX_STATUS_DETAIL_LENGTH,
+    STATUS_DETAIL_CAUSES,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -175,13 +179,15 @@ class NetworkSession:
                             s.get("cause") is not None
                             and (
                                 not isinstance(s.get("cause"), str)
-                                or len(s["cause"]) > MAX_STATUS_CAUSE_LENGTH
+                                or not 0 < len(s["cause"]) <= MAX_STATUS_CAUSE_LENGTH
+                                or not s["cause"].isascii()
+                                or not s["cause"].isprintable()
                             )
                         )
                         or (
                             s.get("detail") is not None
                             and (
-                                s.get("cause") != "ssh-host-key"
+                                s.get("cause") not in STATUS_DETAIL_CAUSES
                                 or s.get("state") != "failed"
                                 or not isinstance(s["detail"], str)
                                 or not 0 < len(s["detail"]) <= MAX_STATUS_DETAIL_LENGTH
@@ -241,13 +247,19 @@ class NetworkSession:
             f"attempt={status.get('attempt', 0)} cause={status.get('cause') or '-'} "
             f"retained_dns={status.get('dns_retained', False)}"
         )
+        if status.get("detail"):
+            self.report("  " + status["detail"])
         if status.get("cause") == "ssh-host-key":
-            if status.get("detail"):
-                self.report("  " + status["detail"])
             self.report(
                 "  Host-key changes are not retried. Restore the original key, "
                 "or stop this instance's tunnels and use "
                 "stlv tunnel trust reset, then restart the command."
+            )
+        elif status.get("cause") in HOST_CONFIGURE_FAILURE_CAUSES and status.get("detail"):
+            self.report(
+                "  Resolve the overlapping LAN or VPN configuration, then restart the command. "
+                "Use stlv tunnel status and stlv tunnel cleanup to check retained ownership; "
+                "do not delete foreign routes or helper journals."
             )
         elif status.get("cause") == "local-artifact":
             self.report(

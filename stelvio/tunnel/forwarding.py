@@ -120,7 +120,9 @@ class Forwarding:
                 raise
             if reply["status"] == "error":
                 if reply.get("code") == "authorization":
-                    raise ValueError("Private DNS returned a resource outside its VPC")
+                    raise ValueError(
+                        "Private DNS returned a resource outside the selected destination subnets"
+                    )
                 raise ConnectionError("Forwarder rejected operation: " + str(reply.get("code")))
             return reply
 
@@ -206,12 +208,14 @@ class Forwarding:
     ) -> None:
         if type(port) is not int or not MIN_PORT <= port <= MAX_PORT:
             raise ValueError("Forwarder SOCKS proxy requires an unprivileged port")
+        if not network.route_cidrs:
+            raise ValueError("VPC has no private or isolated subnet destinations")
         self._command(
             dict(
                 self._identity(unit, host_generation, attempt, 0),
                 operation="add",
                 proxy=f"127.0.0.1:{port}",
-                cidrs=[str(cidr) for cidr in network.cidrs],
+                cidrs=[str(cidr) for cidr in network.route_cidrs],
             )
         )
 
