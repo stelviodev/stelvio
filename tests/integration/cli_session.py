@@ -263,7 +263,7 @@ def run():
         self._start(["tunnel", "start", self.environment_name], mode="standalone")
 
     def start_dev(self) -> None:
-        self._start(["dev", self.environment_name], mode="dev")
+        self._start(["dev", self.environment_name, "--yes"], mode="dev")
 
     def _start(self, arguments: list[str], *, mode: str) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -274,6 +274,7 @@ def run():
             [str(self.cli), *arguments],
             cwd=self.project,
             env=self.environment,
+            stdin=subprocess.DEVNULL,
             stdout=self._log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,
