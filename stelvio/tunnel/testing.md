@@ -298,3 +298,27 @@ handlers usable. Cleanup failure retains the diagnostic and ownership evidence.
 These tests use isolated adapters, not actual LAN or VPN mutations. Native route
 conflict and host-baseline acceptance require the privileged tier in the final
 stack; unit success does not certify that acceptance.
+
+
+## Standalone subnet routing and diagnostics
+
+```bash
+uv run pytest tests/tunnel/test_standalone.py \
+  tests/integration/test_tunnel_audit.py -q
+```
+
+These nonprivileged tests drive the real CLI capture and shared-session status
+path with a controlled runtime boundary. They check two-VPC private/isolated
+selection, complete ownership CIDRs, exclusion of unused components, state-context
+release before startup, bounded conflict diagnostics, nonzero exit, and cleanup.
+They do not substitute for the worker's host-routing tests or native acceptance.
+
+The opt-in standalone AWS test also calls `assert_selected_routes()` after initial
+readiness, transport recovery, and a fresh command start. It reads actual macOS
+route lookups and requires exact private/isolated prefixes on separate per-VPC
+utun interfaces. Public subnets, the primary resolver, and unused VPC space must
+not use those interfaces. Each lookup is retained in
+`standalone-routes.jsonl` inside the temporary proof project. Deterministic tests
+reject whole-VPC routes, missing interfaces, cross-VPC interface reuse, and leaks
+into each excluded address category. Live execution requires both privileged
+and AWS opt-ins above; collection alone is not acceptance.
