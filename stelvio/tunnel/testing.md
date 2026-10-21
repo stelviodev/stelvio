@@ -244,8 +244,10 @@ The suite checks archive contents and installs the wheel into a clean virtual
 environment outside the checkout. It verifies the installed CLI command set,
 checks `tunnel status --help`, and rejects the unsupported `tunnel inspect`
 command. It also checks `tunnel trust --help` and the identity selectors in
-`tunnel trust reset --help`. These CLI checks do not reset trust, contact the
-helper, or access AWS. Pytest does not build Go or Python artifacts.
+`tunnel trust reset --help`. Standalone help must show the optional environment
+argument in `tunnel start --help`. These CLI checks do not start a session,
+reset trust, contact the helper, or access AWS. Pytest does not build Go or Python
+artifacts.
 Distinct-candidate upgrade acceptance remains pending until its candidate and the
 required native authorization are available.
 
