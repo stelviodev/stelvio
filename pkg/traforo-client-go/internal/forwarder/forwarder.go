@@ -37,7 +37,7 @@ type unit struct {
 	id          uint32
 	generation  uint64
 	proxy       string
-	cidrs       []netip.Prefix
+	cidrs       []netip.Prefix // Selected resource destinations, never inferred VPC ownership.
 	packets     chan []byte
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -242,22 +242,14 @@ type manager struct {
 }
 
 func prefixes(values []string) ([]netip.Prefix, error) {
-	if len(values) == 0 || len(values) > 8 {
+	if len(values) == 0 || len(values) > protocol.MaxRanges {
 		return nil, errors.New("invalid CIDR count")
 	}
-	private := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("192.168.0.0/16")}
 	result := []netip.Prefix{}
 	for _, value := range values {
-		prefix, err := netip.ParsePrefix(value)
-		if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != value || prefix.Bits() < 16 || prefix.Bits() > 28 {
+		prefix, err := protocol.Prefix(value)
+		if err != nil {
 			return nil, errors.New("invalid CIDR")
-		}
-		owned := false
-		for _, parent := range private {
-			owned = owned || parent.Contains(prefix.Addr())
-		}
-		if !owned {
-			return nil, errors.New("nonprivate CIDR")
 		}
 		for _, existing := range result {
 			if prefix.Overlaps(existing) {
