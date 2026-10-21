@@ -10,7 +10,7 @@ route and scoped resolver changes so it can recover them after interruption.
 
 Stelvio pins the Traforo `v0.0.7` release for macOS `arm64` and `x86_64`. It checks
 the artifact digest, Mach-O architecture, executable metadata, and reported version
-before it uses the image. The AWS Session Manager plugin is pinned at `1.2.707.0`
+before it uses the image. The AWS Session Manager plugin is pinned at `1.2.835.0`
 and uses a separate private cache.
 
 For local Traforo development, set `STLV_TRAFORO_DEV_BINARY` to an absolute path to
