@@ -11,6 +11,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from ipaddress import IPv4Network
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 STARTUP_TIMEOUT = 900
+DESTROY_TIMEOUT = 3600
 STOP_TIMEOUT = 90
 FAULT_IO = Config(connect_timeout=5, read_timeout=10, retries={"total_max_attempts": 1})
 _SSM_REASON = re.compile(r"stelvio/[0-9a-f]{16}/[0-9a-f]{32}\Z")
@@ -145,19 +147,63 @@ def run():
         self.environment["STLV_TEST_AWS_PROFILE"] = self.profile
         self.environment["STLV_TEST_AWS_REGION"] = self.region
 
-    def command(self, *args: str, timeout: int = 3600) -> str:
-        result = subprocess.run(  # noqa: S603 - selected local Stelvio CLI for proof app ownership
-            [str(self.cli), *args],
-            cwd=self.project,
-            env=self.environment,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+    def _command_evidence(self, directory: Path, metadata: dict, stdout, stderr) -> None:
+        def publish(name, value):
+            descriptor = os.open(directory / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w") as stream:
+                stream.write(value)
+
+        def text(value):
+            return (
+                value.decode("utf-8", errors="replace")
+                if isinstance(value, bytes)
+                else value or ""
+            )
+
+        publish("stdout.log", text(stdout))
+        publish("stderr.log", text(stderr))
+        publish("command.json", json.dumps(metadata, indent=2))
+
+    def _command_failure_context(self, directory: Path, args: tuple[str, ...]) -> str:
+        detail = (
+            f"Proof {self.app}/{self.environment_name}; project {self.project}; "
+            f"command evidence {directory} (stdout.log, stderr.log, command.json)."
         )
+        if args[0] == "destroy":
+            invocation = shlex.join([str(self.cli), "destroy", self.environment_name, "--yes"])
+            unlock = shlex.join([str(self.cli), "unlock", self.environment_name])
+            detail += (
+                f" From {shlex.quote(str(self.project))}, finish cleanup with: {invocation}."
+                " If state is locked, first verify no deployment operation or Pulumi process"
+                f" remains, then run {unlock} and retry destroy."
+                " Preserve ownership evidence and independently verify AWS absence."
+            )
+        return detail
+
+    def command(self, *args: str, timeout: int = 3600) -> str:
+        directory = Path(tempfile.mkdtemp(prefix=f"cli-{args[0]}-", dir=self.project))
+        metadata = {"arguments": list(args), "timeout_seconds": timeout, "timed_out": False}
+        try:
+            result = subprocess.run(  # noqa: S603 - selected local CLI and proof-owned project
+                [str(self.cli), *args],
+                cwd=self.project,
+                env=self.environment,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            metadata.update(timed_out=True, exit_status=None)
+            self._command_evidence(directory, metadata, error.stdout, error.stderr)
+            error.add_note(self._command_failure_context(directory, args))
+            raise
+        metadata["exit_status"] = result.returncode
+        self._command_evidence(directory, metadata, result.stdout, result.stderr)
         if result.returncode:
             raise RuntimeError(
-                f"CLI {args} failed ({result.returncode}); retained project {self.project}: "
+                f"CLI {args} failed ({result.returncode}); "
+                f"{self._command_failure_context(directory, args)} "
                 f"{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
             )
         return result.stdout
@@ -620,7 +666,7 @@ finally:
             error.__cause__ = volume_capture_error
             errors.append(error)
         try:
-            self.command("destroy", self.environment_name, "--yes", timeout=STARTUP_TIMEOUT)
+            self.command("destroy", self.environment_name, "--yes", timeout=DESTROY_TIMEOUT)
         except Exception as error:
             errors.append(error)
         try:
