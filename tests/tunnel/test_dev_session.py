@@ -476,3 +476,95 @@ def test_invalid_route_diagnostics_fail_before_output_or_admission(
         assert "  " + str(detail) not in world.messages
     finally:
         session.close()
+
+
+@mark.parametrize(
+    "unit",
+    [
+        {"unit": "bad", "generation": 1, "status": "active"},
+        {"unit": "00000001", "generation": True, "status": "active"},
+        {"unit": "00000001", "generation": 0, "status": "active"},
+        {"unit": "00000001", "generation": 2**64, "status": "active"},
+        {"unit": "00000001", "generation": 1, "status": "unknown"},
+        [],
+    ],
+)
+def test_invalid_host_observations_are_rejected(unit):
+    from hashlib import sha256
+
+    from stelvio.tunnel.session import _valid_host_unit
+
+    if isinstance(unit, dict) and unit["unit"] == "00000001":
+        unit = dict(unit, unit=sha256(b"vpc-0").hexdigest()[:8])
+    assert not _valid_host_unit({"identity": "vpc-0", "host_unit": unit})
+
+
+def test_host_observation_is_reported_without_conferring_readiness():
+    from hashlib import sha256
+
+    from stelvio.tunnel.session import _valid_host_unit
+
+    messages = []
+    identity = "vpc-0"
+    unit = {"unit": sha256(identity.encode()).hexdigest()[:8], "generation": 3, "status": "active"}
+    status = {"identity": identity, "state": "retrying", "host_unit": unit}
+    assert _valid_host_unit(status)
+    NetworkSession._report_vpc_status(SimpleNamespace(report=messages.append), status)
+    assert "retrying" in messages[0]
+    assert messages[1] == f"  Host unit {unit['unit']} generation=3 status=active"
+    assert status["state"] == "retrying"
+
+
+def test_observed_generation_change_is_reported_without_supervisor_change(world, network_state):
+    from hashlib import sha256
+
+    unit = {"unit": sha256(b"vpc-0").hexdigest()[:8], "generation": 1, "status": "active"}
+    world.statuses[0]["host_unit"] = unit
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: any("generation=1 status=active" in m for m in world.messages))
+        world.statuses[0]["host_unit"] = dict(unit, generation=3)
+        wait_for(lambda: any("generation=3 status=active" in m for m in world.messages))
+        assert session.admit("both") is None
+    finally:
+        session.close()
+
+
+def test_invalid_observed_generation_fails_monitor_closed(world, network_state):
+    from hashlib import sha256
+
+    world.statuses[0]["host_unit"] = {
+        "unit": sha256(b"vpc-0").hexdigest()[:8],
+        "generation": True,
+        "status": "active",
+    }
+    session = world.make(network_state)
+    session.start()
+    try:
+        wait_for(lambda: "Network DEGRADED: runtime status unavailable." in world.messages)
+        assert isinstance(session.admit("both"), VpcUnavailableError)
+    finally:
+        session.close()
+
+
+def test_host_report_survives_dev_console_rendering():
+    import io
+    from hashlib import sha256
+
+    from rich.console import Console
+    from rich.markup import escape
+
+    output = io.StringIO()
+    console = Console(file=output, width=80, color_system=None)
+    identity = "urn:pulumi:environment::application::stelvio:aws:Vpc::" + "long-name" * 15
+    unit_id = sha256(identity.encode()).hexdigest()[:8]
+    unit = {"unit": unit_id, "generation": 2**64 - 1, "status": "retained"}
+    NetworkSession._report_vpc_status(
+        SimpleNamespace(report=lambda message: console.print(escape(message))),
+        {"identity": identity, "state": "retrying", "host_unit": unit},
+    )
+    assert (
+        f"  Host unit {unit_id} generation={2**64 - 1} status=retained"
+        in output.getvalue().splitlines()
+    )
