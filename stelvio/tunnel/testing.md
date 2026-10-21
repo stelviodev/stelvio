@@ -16,6 +16,24 @@ Host-mutating tests use the `integration_macos_privileged` marker. They skip in
 ordinary runs and in `tests/integration/run_all.sh`. Tests that need a binary use
 the checksum-verified image selected by the asset module.
 
+## Subnet protocol and conflict diagnostics
+
+`test_helper_protocol.py` checks 1, 8, 20, and 32 selected subnet ranges without
+expanding them to a VPC block. Empty and oversized sets are rejected. A request
+with 32 longest ranges and 64 longest DNS names has a 17,020-byte body, below the
+32,768-byte limit. The independent shared wire fixtures remain unchanged.
+
+`test_helper_client.py` sends actual socket replies with the fixed 26-byte route
+conflict vector also checked by Go. It verifies both route labels, the interface
+index, the configure stage, and uncertain status. Truncated, extended, unknown,
+or wrong-status diagnostics fail closed. Received descriptors are closed on both
+valid and malformed failure replies. Noncontiguous kernel masks are displayed
+as addresses and masks instead of being interpreted as IPv4 host masks.
+
+These are nonprivileged Python protocol tests. Go owns route conflict detection
+and the encoder. They do not compile Go, install a helper, or change host routes.
+Native routing and conflict acceptance require the separate privileged tier.
+
 ## Unprivileged forwarder smoke test
 
 The optional smoke test starts the installed, verified Traforo image as the current
