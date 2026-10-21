@@ -908,3 +908,109 @@ def test_database_audit_refuses_unverified_ownership(missing_arn):
     client.direct["list_tags_for_resource"] = fail
     with pytest.raises(AssertionError if missing_arn else ClientError):
         assert_tunnel._database_resources("demo", "test", sdk=session)
+
+
+@pytest.fixture
+def command_session(tmp_path):
+    session = cli_session.StandaloneCliSession.__new__(cli_session.StandaloneCliSession)
+    session.project = tmp_path
+    session.app = "proof-app"
+    session.environment_name = "test"
+    session.cli = tmp_path / "stlv"
+    session.environment = {}
+    session.aws = object()
+    return session
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "timeout"])
+def test_cli_command_retains_private_output_and_status(monkeypatch, command_session, outcome):
+    import json
+    import stat
+    import subprocess
+
+    def run(*args, **kwargs):
+        assert kwargs["timeout"] == cli_session.DESTROY_TIMEOUT
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(
+                args[0], kwargs["timeout"], b"partial output", b"partial error"
+            )
+        return SimpleNamespace(
+            returncode=7 if outcome == "failure" else 0, stdout="output", stderr="error"
+        )
+
+    monkeypatch.setattr(cli_session.subprocess, "run", run)
+    if outcome == "success":
+        assert command_session.command("destroy", "test", "--yes") == "output"
+    else:
+        expected = subprocess.TimeoutExpired if outcome == "timeout" else RuntimeError
+        with pytest.raises(expected) as captured:
+            command_session.command("destroy", "test", "--yes")
+        detail = str(captured.value) + " ".join(getattr(captured.value, "__notes__", []))
+        assert "proof-app/test" in detail
+        assert str(command_session.project) in detail
+        assert "unlock test" in detail
+        assert "first verify no deployment operation" in detail
+    directories = list(command_session.project.glob("cli-destroy-*"))
+    assert len(directories) == 1
+    directory = directories[0]
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    for item in directory.iterdir():
+        assert stat.S_IMODE(item.stat().st_mode) == 0o600
+    metadata = json.loads((directory / "command.json").read_text())
+    assert metadata["timed_out"] == (outcome == "timeout")
+    assert metadata["exit_status"] == {"success": 0, "failure": 7, "timeout": None}[outcome]
+    assert metadata["arguments"] == ["destroy", "test", "--yes"]
+    assert (directory / "stdout.log").read_text() == (
+        "partial output" if outcome == "timeout" else "output"
+    )
+    assert (directory / "stderr.log").read_text() == (
+        "partial error" if outcome == "timeout" else "error"
+    )
+
+
+def test_deploy_keeps_startup_deadline(monkeypatch, command_session):
+    calls = []
+
+    def command(*args, **options):
+        calls.append((args, options))
+        raise RuntimeError("stop after deployment command")
+
+    command_session.command = command
+    with pytest.raises(RuntimeError, match="stop after deployment"):
+        command_session.deploy()
+    assert calls == [(("deploy", "test", "--yes"), {"timeout": 900})]
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_destroy_uses_separate_budget_and_audits_failures(monkeypatch, command_session, timeout):
+    import subprocess
+
+    command_session._deployed = True
+    command_session.process = None
+    command_session._outputs = {}
+    calls = []
+    monkeypatch.setattr(
+        cli_session,
+        "NativeHelper",
+        lambda: SimpleNamespace(
+            status=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
+        ),
+    )
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", lambda **kwargs: ())
+
+    def command(*args, **options):
+        calls.append((args, options))
+        if timeout:
+            raise subprocess.TimeoutExpired(args, options["timeout"])
+
+    command_session.command = command
+    command_session._assert_aws_resources_absent = lambda: calls.append("audit")
+    command_session._clear_proof_host_trust = lambda: calls.append("trust-clear")
+    if timeout:
+        with pytest.raises(subprocess.TimeoutExpired):
+            command_session.destroy()
+    else:
+        command_session.destroy()
+    assert calls[:2] == [(("destroy", "test", "--yes"), {"timeout": 3600}), "audit"]
+    assert ("trust-clear" in calls) is not timeout
+    assert all(entry[0][0] == "destroy" for entry in calls if isinstance(entry, tuple))
