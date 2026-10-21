@@ -142,6 +142,28 @@ helper evidence available through `stlv tunnel status`; Stelvio reports the
 existing recovery commands instead of claiming the VPC is ready. This status is
 local helper ownership state and does not verify AWS or database connectivity.
 
+### Dev-mode route conflicts and admission
+
+`stlv dev` uses the same selected private and isolated subnet routes as
+`stlv tunnel start`. The dev bridge has no separate route policy. Public subnets
+and unused VPC space keep their existing host routes; the primary VPC resolver
+uses the separate SOCKS path. Reconnects and member discovery do not expand the
+selection to the whole VPC block.
+
+A terminal route conflict fails that VPC worker. The dev command stays running,
+prints the requested and conflicting ranges and interface index when available,
+and rejects dependent invocations before handler lookup or import. Other ready
+VPCs and handlers without managed VPC dependencies can continue. The public
+invocation response identifies unavailable VPC dependencies; local route details
+remain in the dev console. Invalid runtime diagnostics fail admission for all
+managed VPC dependencies and are not printed.
+
+Fix the LAN or VPN overlap, stop the dev command, inspect retained ownership with
+`stlv tunnel status`, and run `stlv tunnel cleanup` if cleanup is uncertain. Restart
+`stlv dev` to acquire a new session. A terminal configuration failure is not retried
+in place. Keep journals and foreign routes intact so cleanup can prove ownership.
+The standalone command instead exits with an error on a terminal VPC failure.
+
 ### Standalone access
 
 Use `stlv tunnel start [ENV]` to use the same networking session from a deployed
