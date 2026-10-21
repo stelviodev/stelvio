@@ -33,6 +33,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
 
     session.start()
     session.wait_ready()
+    session.assert_selected_routes()
     initial_pins = session.host_pins()
     assert len(initial_pins) == 2
     assert len(session.manifest.resources) == 2
@@ -85,6 +86,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
         first_vpc.identity, "active", after=retained.generation, timeout=STARTUP_TIMEOUT
     )
     assert active.generation == retained.generation + 1
+    session.assert_selected_routes()
     ports_after_reconnect = session.resolver_ports()
     assert all(ports_after_reconnect.get(domain) == port for domain, port in ports_before.items())
 
@@ -103,6 +105,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
 
     session.start()
     session.wait_ready()
+    session.assert_selected_routes()
     assert session.host_pins() == initial_pins
     assert session.check_database(first_cluster)["read_write"]
     abrupt_receipts = session.active_ssm_sessions()
@@ -128,6 +131,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
             session.assert_state_unchanged()
     session.start()
     session.wait_ready()
+    session.assert_selected_routes()
     assert session.host_pins() == initial_pins
     assert session.check_database(first_cluster)["read_write"]
     assert session.terminate(signal.SIGINT) == 0
