@@ -327,6 +327,26 @@ it confirms that no active session owns host state. It uses the installed image 
 does not need a plugin download. If ownership is uncertain, the helper retains its
 ownership evidence for status checks; do not remove resolver files or helper state by hand.
 
+### Route conflicts
+
+A helper configuration can contain 1–32 selected IPv4 destination ranges. The
+helper refuses an overlap with a non-default route on another interface. A LAN
+range outside the selected subnets does not conflict just because it is inside
+the same VPC block.
+
+A route conflict reports the requested range, the existing route, and its
+interface index. For example:
+
+```text
+requested route 10.254.20.0/22 conflicts with route 10.254.21.0/24 on interface index 7
+```
+
+Use this information to identify an overlapping LAN or VPN and choose a network
+configuration that avoids the overlap. The error remains an uncertain helper
+failure; it does not authorize removal of another application's routes. Check
+`stlv tunnel status` and retain ownership evidence until cleanup is confirmed.
+Do not delete helper journals or foreign routes to bypass the check.
+
 ### exit codes
 
 Stelvio currently uses these stable exit codes for automation:
