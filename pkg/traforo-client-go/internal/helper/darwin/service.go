@@ -353,7 +353,7 @@ func (s *service) complete(j jobResult) {
 				replyClose(j.client.fd, Unauthorized)
 			}
 		} else if j.kind == protocol.Configure && j.err != nil && j.stage != 0 {
-			reply(j.client.fd, Uncertain, []byte{'C', 'F', 1, j.stage}, -1)
+			reply(j.client.fd, Uncertain, configureDiagnostic(j.stage, j.err), -1)
 			_ = unix.Close(j.client.fd) // The staged failure reply is sent before client teardown.
 		} else {
 			status := OK

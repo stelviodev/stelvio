@@ -141,6 +141,11 @@ func TestSuccessorRejectsIdentityAndRevisionChanges(t *testing.T) {
 }
 func FuzzSnapshot(f *testing.F) {
 	f.Add(snapshotFixture(f))
+	maximum, err := EncodeSnapshot(maximumSubnetSnapshot(f))
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(maximum)
 	f.Fuzz(func(t *testing.T, p []byte) {
 		s, e := DecodeSnapshot(p)
 		if e == nil {

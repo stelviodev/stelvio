@@ -4,54 +4,15 @@ package helper
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"math"
 	"net"
-	"net/netip"
 	"time"
 
 	"github.com/stelviodev/traforo/internal/darwin"
 	"github.com/stelviodev/traforo/internal/protocol"
 )
 
-func network(p netip.Prefix) (uint32, uint32) {
-	a := p.Addr().As4()
-	return binary.BigEndian.Uint32(a[:]), uint32(math.MaxUint32) << (32 - p.Bits())
-}
-func routeStatus(p netip.Prefix, index uint32) (int, error) {
-	n, m := network(p)
-	routes, e := darwin.Routes()
-	if e != nil {
-		return -1, e
-	}
-	status := 0
-	for _, r := range routes {
-		if r.Mask == m && r.Network == n {
-			if status != 0 || index == 0 || r.Index != index {
-				return 2, nil
-			}
-			status = 1
-		}
-	}
-	return status, nil
-}
-func routeConflict(n, m, index uint32) error {
-	routes, e := darwin.Routes()
-	if e != nil {
-		return e
-	}
-	return routeConflictIn(routes, n, m, index)
-}
-func routeConflictIn(routes []darwin.Route, n, m, index uint32) error {
-	for _, r := range routes {
-		common := m & r.Mask
-		if r.Mask != 0 && n&common == r.Network&common && (index == 0 || r.Index != index) {
-			return errUncertain
-		}
-	}
-	return nil
-}
 func live(u Unit, d darwin.Device) bool { return u.Index == d.Index && d.Current() }
 func savePhase(store Store, state *Snapshot, i int, phase byte, generation uint64, keep bool) error {
 	next := state.Clone()
@@ -79,31 +40,18 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 	}
 	*stage = 4
 	local := uint32(0xc0000201 + 2*i)
-	if routeConflict(local, math.MaxUint32, d.Index) != nil || routeConflict(local+1, math.MaxUint32, d.Index) != nil {
-		return errUncertain
+	for _, address := range []uint32{local, local + 1} {
+		if err := routeConflict(address, math.MaxUint32, d.Index); err != nil {
+			return err
+		}
 	}
 	if e := d.Configure(local); e != nil {
 		return e
 	}
 	*stage = 5
-	for _, p := range u.Request.Ranges {
-		status, e := routeStatus(p, d.Index)
-		if e != nil || status == 2 {
-			return errUncertain
-		}
-		if status == 0 {
-			n, m := network(p)
-			if routeConflict(n, m, d.Index) != nil {
-				return errUncertain
-			}
-			if e = d.AddRoute(n, m); e != nil {
-				return e
-			}
-		}
-		status, e = routeStatus(p, d.Index)
-		if e != nil || status != 1 || !d.Current() {
-			return errUncertain
-		}
+	table := routeTable{index: d.Index, read: darwin.Routes, add: d.AddRoute, current: d.Current}
+	if err := table.install(u.Request.Ranges); err != nil {
+		return err
 	}
 	for j := range u.Request.Resolvers {
 		*stage = 6
@@ -130,11 +78,8 @@ func finishPrepare(store Store, state *Snapshot, devices *[8]darwin.Device, i in
 		}
 	}
 	*stage = 10
-	for _, p := range u.Request.Ranges {
-		status, e := routeStatus(p, d.Index)
-		if e != nil || status != 1 {
-			return errUncertain
-		}
+	if err := table.verify(u.Request.Ranges); err != nil {
+		return err
 	}
 	*stage = 11
 	if e := savePhase(store, state, i, Active, u.Generation, false); e != nil {
@@ -249,11 +194,9 @@ func configureUnit(store Store, state *Snapshot, devices *[8]darwin.Device, pack
 			}
 		}
 		*stage = 18
-		for _, p := range r.Ranges {
-			status, e := routeStatus(p, devices[i].Index)
-			if e != nil || status != 1 {
-				return errUncertain
-			}
+		table := routeTable{index: devices[i].Index, read: darwin.Routes, current: devices[i].Current}
+		if err := table.verify(r.Ranges); err != nil {
+			return err
 		}
 		return retirePreviousResolvers(store, state, i)
 	}
@@ -308,11 +251,9 @@ func detached(u Unit) bool {
 				}
 			}
 		}
-		for _, p := range u.Request.Ranges {
-			status, e := routeStatus(p, 0)
-			if e != nil || status != 0 {
-				absent = false
-			}
+		routes, err := darwin.Routes()
+		if err != nil || !routesAbsent(routes, u.Request.Ranges) {
+			absent = false
 		}
 		if absent {
 			return true
