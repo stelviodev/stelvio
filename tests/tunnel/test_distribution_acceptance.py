@@ -167,3 +167,13 @@ assert assets.TARGETS == json.loads(sys.argv[2])
     assert {"--partition", "--account", "--region", "--instance-id"} <= set(
         reset_help.stdout.split()
     )
+    start_help = run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.cli import main; main()",
+        "tunnel",
+        "start",
+        "--help",
+    )
+    assert "start [OPTIONS] [ENV]" in start_help.stdout
