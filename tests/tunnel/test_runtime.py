@@ -35,16 +35,35 @@ IMAGE_REASON = (
 
 
 def _inventory_network(identity, cidr):
+    cidr = IPv4Network(cidr)
     return VpcNetwork(
-        identity,
-        "123456789012",
-        "us-east-1",
-        f"vpc-{identity}",
-        "provider",
-        (IPv4Network(cidr),),
-        BastionPolicy.PERSISTENT,
-        (),
-        (),
+        identity=identity,
+        account="123456789012",
+        region="us-east-1",
+        vpc_id=f"vpc-{identity}",
+        provider="provider",
+        cidrs=(cidr,),
+        policy=BastionPolicy.PERSISTENT,
+        dns_domains=(),
+        public_subnets=(
+            SubnetNetwork(
+                f"subnet-{identity}", "us-east-1a", IPv4Network((cidr.network_address, 24))
+            ),
+        ),
+        private_subnets=(
+            SubnetNetwork(
+                f"subnet-{identity}-private",
+                "us-east-1a",
+                IPv4Network((cidr.network_address + 256, 24)),
+            ),
+        ),
+        isolated_subnets=(
+            SubnetNetwork(
+                f"subnet-{identity}-isolated",
+                "us-east-1a",
+                IPv4Network((cidr.network_address + 512, 24)),
+            ),
+        ),
     )
 
 
@@ -270,16 +289,24 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
     )
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "HANDLER_KEY")
     network = VpcNetwork(
-        "vpc-owner",
-        "123456789012",
-        "us-east-1",
-        "vpc-12345678",
-        "provider",
-        (IPv4Network("10.254.0.0/16"),),
-        BastionPolicy.PERSISTENT,
-        (),
-        (SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),),
-        AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
+        identity="vpc-owner",
+        account="123456789012",
+        region="us-east-1",
+        vpc_id="vpc-12345678",
+        provider="provider",
+        cidrs=(IPv4Network("10.254.0.0/16"),),
+        policy=BastionPolicy.PERSISTENT,
+        dns_domains=(),
+        public_subnets=(
+            SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),
+        ),
+        private_subnets=(
+            SubnetNetwork("subnet-private", "us-east-1a", IPv4Network("10.254.2.0/24")),
+        ),
+        isolated_subnets=(
+            SubnetNetwork("subnet-isolated", "us-east-1a", IPv4Network("10.254.3.0/24")),
+        ),
+        access=AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
     )
     description = SessionDescription(
         "11111111-1111-4111-8111-111111111111",
