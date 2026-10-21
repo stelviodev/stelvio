@@ -127,14 +127,14 @@ def unreaped_child(pid: int) -> bool:
     return ctypes.cast(info, ctypes.POINTER(ctypes.c_int32))[3] == pid
 
 
-def process_group_empty(group: int) -> bool:
+def process_group_empty(group: int, *, timeout: float = 5) -> bool:
     """Read-only live process inventory, used only for an already fenced child."""
-    return not any(process.group == group for process in _snapshot().values())
+    return not any(process.group == group for process in _snapshot(timeout=timeout).values())
 
 
-def _snapshot() -> dict[int, ProcessIdentity]:
+def _snapshot(*, timeout: float = 5) -> dict[int, ProcessIdentity]:
     output = subprocess.check_output(
-        ["/bin/ps", "-axo", "pid=,ppid=,pgid=,uid="], text=True, timeout=5
+        ["/bin/ps", "-axo", "pid=,ppid=,pgid=,uid="], text=True, timeout=timeout
     )
     processes = {}
     for row in output.splitlines():

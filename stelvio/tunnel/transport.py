@@ -505,10 +505,28 @@ class SshTransport:
                         ):
                             break
                         time.sleep(0.05)
+            self._wait_for_group_shutdown()
             self.process.wait(timeout=3)
             self.process = None
             self._process_identity = None
         self._join_ssh_errors()
+
+    def _wait_for_group_shutdown(self) -> None:
+        # Keep the leader unreaped until every live member is gone. Reaping it
+        # earlier releases the PGID fence while SIGKILL is still taking effect.
+        deadline = time.monotonic() + 3
+        try:
+            while (remaining := deadline - time.monotonic()) > 0:
+                if process_group_empty(self.process.pid, timeout=remaining):
+                    return
+                time.sleep(min(0.01, max(0, deadline - time.monotonic())))
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            raise TransportCleanupError(
+                "SSH process group shutdown could not be verified; retain cleanup ownership"
+            ) from error
+        raise TransportCleanupError(
+            "SSH process group shutdown exceeded its budget; retain cleanup ownership"
+        )
 
     def _join_ssh_errors(self) -> None:
         if self._stderr_thread is not None:
