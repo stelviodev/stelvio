@@ -4,6 +4,7 @@ import time
 from copy import deepcopy
 from threading import Event
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from pytest import fixture, mark, raises
 
@@ -488,3 +489,127 @@ def test_invalid_route_diagnostics_fail_before_output_or_admission(
         assert "  " + str(detail) not in world.messages
     finally:
         session.close()
+
+
+@mark.parametrize(
+    "failure", [None, "host-uncertain-configure-20", "cleanup-incomplete", "invalid-detail"]
+)
+def test_dev_subnet_selection_and_conflict_admission_through_bridge(  # noqa: PLR0915 - command/session/bridge boundary
+    world, network_state, cli_commands, monkeypatch, failure
+):
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock
+
+    from stelvio.bridge.local import listener
+    from stelvio.bridge.local.dtos import BridgeInvocationResult
+    from tests.cli_test_helpers import FakeCommandRun
+
+    detail = (
+        "Native helper request failed: uncertain (configure stage 20): "
+        "requested route 10.0.1.0/24 conflicts with route 10.0.1.128/25 on interface index 7"
+    )
+    if failure:
+        world.statuses[0].update(
+            state="failed",
+            cause="host-uncertain-configure-20" if failure == "invalid-detail" else failure,
+            detail="SECRET\x1b[31m" if failure == "invalid-detail" else detail,
+            dns_retained=True,
+        )
+    events, sessions = [], []
+
+    class Run(FakeCommandRun):
+        def __enter__(self):
+            events.append("capture-context")
+            return self
+
+        def __exit__(self, *_args):
+            events.append("release-context")
+            return False
+
+        def capture_network_session(self, report):
+            session = NetworkSession(
+                state=network_state, app=self.app_name, env="dev", report=report
+            )
+            sessions.append(session)
+            return session
+
+    cli_commands.CommandRun.side_effect = lambda *a, **kw: Run(network_state)
+    monkeypatch.setattr(cli_commands.ProviderStore, "region", lambda: "us-east-1")
+    monkeypatch.setattr(cli_commands, "_clean_stale_caches", lambda: None)
+    dispatch = AsyncMock(
+        return_value=BridgeInvocationResult(
+            success_result={"statusCode": 200},
+            error_result=None,
+            request_path="/",
+            request_method="GET",
+            process_time_local=1,
+            status_code=200,
+        )
+    )
+    lookup = Mock(return_value=[SimpleNamespace(handle_bridge_event=dispatch)])
+    publish = AsyncMock()
+    monkeypatch.setattr(listener.WebsocketHandlers, "all", lookup)
+    monkeypatch.setattr(listener, "publish", publish)
+    monkeypatch.setattr(listener, "log_invocation", lambda result: None)
+
+    def bridge(*, admission, **_options):
+        assert events[-1] == "release-context"
+        session = sessions[-1]
+        assert admission.__self__ is session
+        wait_for(lambda: session._observed or session._runtime_error)
+        for endpoint in ("both", "healthy", "plain"):
+            blocked = (failure == "invalid-detail" and endpoint != "plain") or (
+                bool(failure) and endpoint == "both"
+            )
+            before = dispatch.await_count
+            lookups_before = lookup.call_count
+            event = {
+                "type": "data",
+                "event": json.dumps(
+                    {
+                        "invoke_id": f"invoke-{endpoint}",
+                        "endpointId": endpoint,
+                        "event": {"path": "/", "httpMethod": "GET"},
+                        "context": {"epoch_deadline_time_in_ms": 0},
+                    }
+                ),
+            }
+            asyncio.get_event_loop().run_until_complete(
+                listener._handle_data_message(event, None, "key", "demo", "dev", admission)
+            )
+            result = publish.await_args.args[0]
+            if blocked:
+                assert isinstance(result.error_result, VpcUnavailableError)
+                assert dispatch.await_count == before
+                assert lookup.call_count == lookups_before
+                assert "10.0.1.0/24" not in str(result.error_result)
+                assert "SECRET" not in str(result.error_result)
+            else:
+                assert result.error_result is None
+                assert dispatch.await_count == before + 1
+        events.append("bridge-finished")
+
+    monkeypatch.setattr(cli_commands, "run_bridge_server", bridge)
+    cli_commands.run_dev("dev")
+    assert events == ["capture-context", "release-context", "bridge-finished"]
+    assert world.closed == [True]
+    description = world.launches[0][0]
+    assert [tuple(map(str, n.route_cidrs)) for n in description.manifest.enabled_vpcs] == [
+        ("10.0.1.0/24", "10.0.2.0/24"),
+        ("10.1.1.0/24", "10.1.2.0/24"),
+    ]
+    assert [tuple(map(str, n.cidrs)) for n in description.manifest.enabled_vpcs] == [
+        ("10.0.0.0/16",),
+        ("10.1.0.0/16",),
+    ]
+    output = "\n".join(cli_commands.console.lines)
+    assert "SECRET" not in output
+    if failure and failure != "invalid-detail":
+        assert detail in output
+        assert f"cause={failure}" in output
+        assert "stlv tunnel status" in output
+        assert "stlv tunnel cleanup" in output
+        assert "Network READY" not in output
+    elif failure is None:
+        assert "Network READY" in output
