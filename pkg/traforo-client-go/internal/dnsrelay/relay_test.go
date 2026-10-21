@@ -19,7 +19,7 @@ import (
 )
 
 func config(proxy string, revision uint64) Config {
-	return Config{Revision: revision, Proxy: proxy, Resolver: netip.MustParseAddr("10.254.0.2"), CIDRs: []netip.Prefix{netip.MustParsePrefix("10.254.0.0/16")}, Domains: []string{"private.test"}, Hostnames: []string{"member.docdb.test"}}
+	return Config{Revision: revision, Proxy: proxy, Resolver: netip.MustParseAddr("10.254.0.2"), CIDRs: []netip.Prefix{netip.MustParsePrefix("10.254.1.0/24")}, Domains: []string{"private.test"}, Hostnames: []string{"member.docdb.test"}}
 }
 
 func rawQuery(name string, qtype uint16) []byte {
@@ -51,7 +51,7 @@ func TestConfigValidation(t *testing.T) {
 		name   string
 		change func(*Config)
 	}{
-		{"resolver outside VPC", func(c *Config) { c.Resolver = netip.MustParseAddr("192.0.2.1") }},
+		{"nonprivate resolver", func(c *Config) { c.Resolver = netip.MustParseAddr("192.0.2.1") }},
 		{"non-loopback proxy", func(c *Config) { c.Proxy = "10.254.0.3:1080" }},
 		{"noncanonical domain", func(c *Config) { c.Domains = []string{"Private.test"} }},
 		{"IP hostname", func(c *Config) { c.Hostnames = []string{"10.254.0.3"} }},
@@ -143,6 +143,11 @@ func TestNoDNSAnswerCache(t *testing.T) {
 // A real SOCKS server verifies numeric addressing and DNS-over-TCP framing.
 func proxy(t *testing.T, answer func(*dns.Msg) *dns.Msg) string {
 	t.Helper()
+	return proxyAt(t, "", answer)
+}
+
+func proxyAt(t *testing.T, resolver string, answer func(*dns.Msg) *dns.Msg) string {
+	t.Helper()
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +185,10 @@ func proxy(t *testing.T, answer func(*dns.Msg) *dns.Msg) string {
 				}
 				_, _ = c.Write([]byte{5, 0, 0, 1, 127, 0, 0, 1, 0, 0})
 				if binary.BigEndian.Uint16(req[8:]) != 53 {
+					return
+				}
+				if resolver != "" && net.IP(req[4:8]).String() != resolver {
+					t.Errorf("DNS SOCKS target = %s, want %s", net.IP(req[4:8]), resolver)
 					return
 				}
 				dc := &dns.Conn{Conn: c}
@@ -377,7 +386,7 @@ func TestGenerationsObservationsAndTwoVPCs(t *testing.T) {
 	c.Domains = []string{"second.test"}
 	c.Hostnames = nil
 	c.Resolver = netip.MustParseAddr("10.253.0.2")
-	c.CIDRs = []netip.Prefix{netip.MustParsePrefix("10.253.0.0/16")}
+	c.CIDRs = []netip.Prefix{netip.MustParsePrefix("10.253.1.0/24")}
 	second := newRelay(t, c)
 	if query(t, second, "db.private.test", true).Rcode != dns.RcodeRefused {
 		t.Fatal("cross-VPC DNS")
@@ -599,66 +608,60 @@ func TestSlowTCPOverflowAllowsLegitimateConnectionAfterDeadline(t *testing.T) {
 }
 
 func TestDirectProbeRequiresMatchingPayloadAndResourceConnection(t *testing.T) {
-	for _, fault := range []string{"success", "missing", "wrong-id", "wrong-question", "tc", "rcode", "foreign"} {
+	for _, fault := range []string{"success", "missing", "wrong-id", "wrong-question", "tc", "rcode", "foreign", "resource-offline"} {
 		t.Run(fault, func(t *testing.T) {
-			p := proxy(t, func(q *dns.Msg) *dns.Msg { a := new(dns.Msg); a.SetReply(q); return a })
-			r := newRelay(t, config(p, 1))
-			// SOCKS readiness succeeds independently of the direct-host boundary below.
-			if err := r.Probe(1, "", 0, false); err != nil {
+			p := proxy(t, func(q *dns.Msg) *dns.Msg {
+				a := new(dns.Msg)
+				a.SetReply(q)
+				if q.Question[0].Qtype != dns.TypeA {
+					return a
+				}
+				switch fault {
+				case "missing":
+					return nil
+				case "wrong-id":
+					a.Id++
+				case "wrong-question":
+					a.Question[0].Name = "elsewhere.test."
+				case "tc":
+					a.Truncated = true
+				case "rcode":
+					a.Rcode = dns.RcodeServerFailure
+				}
+				ip := net.IPv4(10, 254, 1, 3)
+				if fault == "foreign" {
+					ip = net.IPv4(192, 0, 2, 1)
+				}
+				a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: 1}, A: ip}}
+				return a
+			})
+			c := config(p, 1)
+			c.CIDRs = []netip.Prefix{netip.MustParsePrefix("10.254.1.0/24")}
+			r := newRelay(t, c)
+			// Resolver-only success cannot mask failure of the ordinary-host path.
+			if err := r.Probe(1, "", 0, true); err != nil {
 				t.Fatal(err)
 			}
-			var workers sync.WaitGroup
-			defer workers.Wait()
 			connections := 0
 			r.current.dialContext = func(ctx context.Context, network, target string) (net.Conn, error) {
 				if network != "tcp4" {
 					t.Fatal(network)
 				}
-				c, peer := net.Pipe()
-				workers.Add(1)
 				connections++
 				switch target {
-				case "10.254.0.2:53":
-					go func() {
-						defer workers.Done()
-						defer func() { _ = peer.Close() }()
-						_ = peer.SetDeadline(time.Now().Add(time.Second))
-						dc := &dns.Conn{Conn: peer}
-						q, e := dc.ReadMsg()
-						if e != nil {
-							return
-						}
-						a := new(dns.Msg)
-						a.SetReply(q)
-						switch fault {
-						case "missing":
-							return
-						case "wrong-id":
-							a.Id++
-						case "wrong-question":
-							a.Question[0].Name = "elsewhere.test."
-						case "tc":
-							a.Truncated = true
-						case "rcode":
-							a.Rcode = dns.RcodeServerFailure
-						}
-						if q.Question[0].Qtype == dns.TypeA {
-							ip := net.IPv4(10, 254, 1, 3)
-							if fault == "foreign" {
-								ip = net.IPv4(192, 0, 2, 1)
-							}
-							a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: 1}, A: ip}}
-						}
-						_ = dc.WriteMsg(a)
-					}()
+				case p:
+					return (&net.Dialer{}).DialContext(ctx, network, target)
 				case "10.254.1.3:27017":
-					go func() { defer workers.Done(); _ = peer.Close() }()
-				default:
-					t.Error("direct probe used SOCKS or a hostname", target)
-					workers.Done()
+					if fault == "resource-offline" {
+						return nil, errors.New("test resource offline")
+					}
+					client, peer := net.Pipe()
 					_ = peer.Close()
+					return client, nil
+				default:
+					t.Errorf("unexpected host destination: %s", target)
+					return nil, errors.New("unexpected destination")
 				}
-				return c, nil
 			}
 			err := r.Probe(1, "db.private.test", 27017, true)
 			if fault == "success" {
@@ -666,7 +669,7 @@ func TestDirectProbeRequiresMatchingPayloadAndResourceConnection(t *testing.T) {
 					t.Fatal("direct resource path not verified", err, connections)
 				}
 			} else if err == nil {
-				t.Fatal("SOCKS success masked failed direct payload", fault)
+				t.Fatal("SOCKS success masked failed direct resource probe", fault)
 			}
 			if fault == "foreign" && err != ErrAuthorization {
 				t.Fatal(err)

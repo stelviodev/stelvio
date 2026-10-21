@@ -10,7 +10,10 @@ route and scoped resolver changes so it can recover them after interruption.
 
 `internal/dnsrelay` provides an isolated DNS view for one VPC. It listens only on
 loopback over UDP and TCP, serves configured exact hostnames and suffix domains,
-and sends upstream DNS over TCP through that view's SOCKS proxy. Each view keeps
+and sends upstream DNS over TCP through that view's SOCKS proxy. The resolver
+is separate from the selected resource subnet ranges and needs no host route.
+Resource readiness checks every A record against those ranges; direct resource
+probes still test ordinary host routing. Each view keeps
 its listener ports across configuration revisions and rejects owned names with
 SERVFAIL while its upstream is unavailable. The relay bounds concurrent requests,
 message sizes, connection query counts, and I/O deadlines; it does not cache answers
