@@ -90,3 +90,22 @@ The distinct-candidate upgrade case needs a verified candidate supplied through
 `STLV_TRAFORO_DEV_BINARY`; Step 9 supplies the local builder. Cross-venv acceptance
 needs a wheel at `STLV_TEST_STELVIO_WHEEL`. Record either check as pending when its
 artifact is not available.
+
+## Native fixture subnet selection
+
+Native DNS and lifecycle fixtures own `10.254.0.0/16` and `10.253.0.0/16`, but
+route only each VPC's `.9.0/24` subnet. The helper and packet forwarder receive
+the same selected destinations, including after generation changes. The test-only
+packet view supplies those destinations to both client API shapes in this stack;
+DNS configuration retains the ownership block to select the resolver at `.0.2`.
+
+Resolver probes use SOCKS. Named database probes use both SOCKS and ordinary host
+TCP, and the fixtures also exchange payloads through the packet carrier. Do not
+add a host route for the VPC resolver to make a readiness check pass.
+
+`tests/tunnel/test_native_network_fixture.py` checks both VPC ranges, resolver
+exclusion, database inclusion, helper request encoding and forwarder controls
+without root access or Go compilation. The 100-cycle lifecycle and scoped-DNS
+scenarios still require the privileged lane above. Record the tested commit,
+platform, binary digest, commands, skips and host restoration for each run;
+nonprivileged success alone does not certify native or AWS acceptance.
