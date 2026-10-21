@@ -135,6 +135,9 @@ func tcpPacket(source, destination uint32) []byte {
 func FuzzRequest(f *testing.F) {
 	f.Add(request(Inspect))
 	f.Add(configure())
+	f.Add(subnetRequest(subnetRanges(20), nil))
+	f.Add(subnetRequest(subnetRanges(32), nil))
+	f.Add(subnetRequest(subnetRanges(33), nil))
 	f.Fuzz(func(t *testing.T, p []byte) {
 		r, e := Decode(p)
 		if e == nil && (r.Operation < Inspect || r.Operation > Reconcile || len(p) > Header+MaxBody) {
