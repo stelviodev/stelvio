@@ -20,6 +20,7 @@ from stelvio.tunnel.evidence import record_transport_event
 from stelvio.tunnel.helper_client import (
     HelperBusyError,
     HelperError,
+    HelperStatus,
     HelperUnitState,
     HelperUnitStatus,
 )
@@ -33,7 +34,7 @@ from stelvio.tunnel.transport import (
     TransportRetryError,
     classify_aws,
 )
-from stelvio.tunnel.wire import MAX_STATUS_DETAIL_LENGTH
+from stelvio.tunnel.wire import MAX_STATUS_DETAIL_LENGTH, STATUS_DETAIL_CAUSES
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -77,6 +78,7 @@ class VpcWorker:
     ) -> None:
         self.description = description
         self.network = network
+        self._route_cidrs = network.route_cidrs
         self.session = session
         self.lease = lease
         self.forwarding = forwarding
@@ -115,7 +117,7 @@ class VpcWorker:
         self._attempt = 0
         self._ever_ready = False
         self._phase = "pending"
-        self._identity_detail: str | None = None
+        self._failure_detail: str | None = None
 
     @property
     def status(self) -> VpcStatus:
@@ -134,7 +136,7 @@ class VpcWorker:
                 retained,
                 "tcp" if state == "ready" and self._resources() else "unverified",
                 self._phase,
-                self._identity_detail if cause == "ssh-host-key" else None,
+                self._failure_detail if cause in STATUS_DETAIL_CAUSES else None,
             )
 
     def start(self) -> None:
@@ -220,7 +222,7 @@ class VpcWorker:
             "unit": self.unit,
             "generation": self._host_generation,
             "vpc_id": self.network.vpc_id,
-            "cidrs": tuple(str(cidr) for cidr in self.network.cidrs),
+            "cidrs": tuple(str(cidr) for cidr in self._route_cidrs),
             "resolvers": tuple(ResolverEndpoint(name, self._dns_port) for name in self._claims),
         }
         self._host_request_confirmed = False
@@ -318,7 +320,6 @@ class VpcWorker:
         if revision != self._dns_revision_current or self._dns_generation != self._host_generation:
             raise ValueError("Stale DNS readiness revision")
         self._dns("probe")
-        self._dns("probe", direct=True)
         state = self.lease.status()
         if state.uncertain or not any(
             unit.unit == self.unit
@@ -395,6 +396,12 @@ class VpcWorker:
             self.network = resolved
         else:
             self.network = self.inventory_check(resolved)
+        if not self._route_cidrs:
+            raise TransportAuthorizationError("VPC has no private or isolated subnet destinations")
+        if self.network.route_cidrs != self._route_cidrs:
+            raise TransportAuthorizationError(
+                "VPC destination subnets changed during this session"
+            )
         self.discovery.begin(self.network.identity, self._attempt)
         self._phase = "resource-discovery"
         self.discovery.refresh(
@@ -456,7 +463,7 @@ class VpcWorker:
                     terminal = "ssh-host-key"
                     # This exception contains only the validated target, fingerprints
                     # and fixed recovery instructions, never raw AWS/plugin output.
-                    self._identity_detail = " ".join(str(error).split())[:MAX_STATUS_DETAIL_LENGTH]
+                    self._failure_detail = " ".join(str(error).split())[:MAX_STATUS_DETAIL_LENGTH]
                 except TransportArtifactError:
                     terminal = "local-artifact"
                 except (TransportAuthorizationError, DiscoveryError, ValueError) as error:
@@ -471,6 +478,16 @@ class VpcWorker:
                     terminal = "host-" + status
                     if error.configure_stage is not None:
                         terminal += f"-configure-{error.configure_stage}"
+                    if (
+                        error.status == HelperStatus.UNCERTAIN
+                        and error.route_conflict is not None
+                        and terminal in STATUS_DETAIL_CAUSES
+                    ):
+                        # Use decoded numeric route facts, never arbitrary exception text.
+                        self._failure_detail = (
+                            f"Native helper request failed: uncertain "
+                            f"(configure stage {error.configure_stage}): {error.route_conflict}"
+                        )[:MAX_STATUS_DETAIL_LENGTH]
                 except Exception as error:
                     terminal = "runtime-boundary-" + type(error).__name__
                 if (
