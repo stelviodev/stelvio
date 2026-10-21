@@ -344,6 +344,19 @@ rules as `stlv dev`. Press `Ctrl+C` to close the session; the deployment and its
 bastion remain in place. If the app has no enabled VPC dependencies, the command
 reports that networking is unnecessary and exits successfully.
 
+Only VPCs linked by deployed handler dependencies are selected. Each selected VPC
+routes its deployed private and isolated subnet CIDRs. Public subnets and unused
+parts of the VPC block stay on the existing local network path. The VPC resolver
+uses a separate SOCKS path; its address need not be inside a routed subnet.
+Standalone access keeps the same production hostnames, ports, and TLS checks.
+
+A route conflict is a terminal startup error. The command prints the configure
+stage, requested and conflicting ranges, and interface index when supplied by the
+helper, then closes the session and exits with an error. If cleanup is uncertain,
+the route diagnostic and ownership evidence remain available. Resolve the LAN or
+VPN overlap, check `stlv tunnel status`, and retry owned cleanup with
+`stlv tunnel cleanup` before restarting. No whole-VPC fallback is attempted.
+
 SSH host trust is shared with `stlv dev` and persists after `Ctrl+C`, command
 restart, and helper uninstall. Restarting `tunnel start` does not accept a changed
 host key. A mismatch exits with an error that names the instance and shows the
