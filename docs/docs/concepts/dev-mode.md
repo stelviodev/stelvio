@@ -80,6 +80,19 @@ revision, discovery state, and retry schedule. A failure in one VPC leaves worke
 for other VPCs running. The worker rejects that VPC's private DNS while its
 transport is down and keeps owned resolver claims and the DNS listener port stable
 while it reconnects to the existing bastion. It does not replace the bastion.
+The worker freezes the deployed private and isolated subnet ranges for the session.
+The forwarder and privileged helper use that same destination set. Reconnection,
+member discovery, and recovery of a lost helper reply cannot widen it to a whole
+VPC block. An empty destination set or a changed subnet selection fails before
+SSH starts; there is no public-subnet or whole-VPC fallback.
+
+If an existing LAN or VPN route overlaps a selected destination, the VPC fails
+closed. Status includes the helper's configure stage, requested range, conflicting
+range, and interface index when the helper supplies those facts. Inspect the
+conflict and restart after resolving it. Other ready VPCs and unrelated handlers
+can continue. Cleanup uncertainty retains the conflict evidence; use
+`stlv tunnel status` and `stlv tunnel cleanup` to inspect and retry owned cleanup.
+Do not delete foreign routes or ownership journals to bypass a refusal.
 
 A changed SSH host key is a terminal failure for that VPC. Status reports
 `cause=ssh-host-key`, the instance identity, and the expected and presented
@@ -92,8 +105,13 @@ persistent pin; restarting alone does not accept a changed key.
 
 `READY` means the scoped resolver answered through the VPC path, the helper's
 routes and resolver files are active, the transport and forwarder are healthy,
-and each discovered resource hostname resolved to an address in that VPC and
-accepted a TCP connection on its declared port. A working SOCKS proxy by itself
+and each discovered resource hostname resolved to an address inside the selected
+private or isolated subnets and accepted a TCP connection on its declared port
+through both SOCKS and ordinary host routing. Resolver queries use TCP through
+SOCKS to the owning VPC's primary resolver; that address need not be routed through
+the virtual interface. A separate system-resolver observation proves macOS scoped
+DNS delivery. A resolver-only direct probe cannot prove resource routing and is
+not used. A working SOCKS proxy by itself
 does not make a VPC ready. New invocations that depend on an unready VPC are
 rejected before handler execution; unrelated VPCs and handlers without a VPC can
 continue.
