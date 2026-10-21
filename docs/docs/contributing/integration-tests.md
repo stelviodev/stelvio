@@ -212,3 +212,23 @@ and retains ownership for a retry. These tests do not deploy AWS resources or
 change host networking.
 
 Set `STLV_TEST_SSH_INTEROP=1` to include the local OpenSSH interoperability test.
+
+### Tunnel acceptance teardown
+
+Tunnel startup has a 900-second limit. Destruction has a separate 3,600-second
+limit because DocumentDB deletion and Lambda VPC interface cleanup can outlast
+startup. A separate, bounded AWS absence audit runs after destruction, including
+when the command fails. Reaching the destroy deadline is a test failure.
+
+Each CLI command saves `stdout.log`, `stderr.log`, and `command.json` under a
+private `cli-<command>-*` directory in the proof project. Timeout records include
+partial output and name the app, environment, project, and recovery commands.
+Retain these files when reporting a failure.
+
+If destruction is interrupted, inspect the proof and verify that no deployment
+operation or Pulumi process remains. Only then use `stlv unlock <env>` from that
+proof project if its deployment state is locked, and run `stlv destroy <env> --yes`
+to finish cleanup. Independently audit AWS absence afterward. Tests never unlock
+or retry automatically, and a cleanup retry does not change a failed acceptance
+result. Do not erase helper journals, force-delete in-use interfaces, or change
+IAM permissions to make the test pass.
