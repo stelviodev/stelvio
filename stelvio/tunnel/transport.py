@@ -97,9 +97,11 @@ def classify_aws(error: ClientError) -> Exception:
 def terminate_owned_session(
     ssm: BaseClient, session_id: str, instance_id: str, reason: str
 ) -> None:
-    """Certify known-session termination, including an external interruption."""
+    """Validate termination acknowledgement or an owned terminal history record."""
     try:
-        ssm.terminate_session(SessionId=session_id)
+        response = ssm.terminate_session(SessionId=session_id)
+        if not isinstance(response, dict) or response.get("SessionId") != session_id:
+            raise TransportRetryError("SSM session termination is not certified")
     except ClientError as error:
         if error.response["Error"]["Code"] not in {"ValidationException", "InvalidSessionId"}:
             raise

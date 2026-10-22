@@ -194,3 +194,15 @@ without root access or Go compilation. The 100-cycle lifecycle and scoped-DNS
 scenarios still require the privileged lane above. Record the tested commit,
 platform, binary digest, commands, skips and host restoration for each run;
 nonprivileged success alone does not certify native or AWS acceptance.
+
+## SSM termination acknowledgements
+
+Transport cleanup validates that a successful `TerminateSession` response names
+the exact owned session. Missing or mismatched responses retain ownership and do
+not produce a completion receipt. An invalid-session response requires an exact
+owned `Terminated` history record. Local transport shutdown and an acknowledged
+termination do not assert that AWS history immediately displays `Terminated`.
+
+Run the local response and ownership regressions with
+`uv run pytest tests/tunnel/test_transport.py -q`. Live AWS acceptance is a
+separate opt-in check; unit results do not certify it.
