@@ -46,16 +46,15 @@ class HttpApiCloudfrontAdapter(ComponentCloudfrontAdapter):
             component_name=self.api.name,
             depends_on=[self.api.resources.api, self.api.resources.stage],
         )
-        cache_behavior = self._api_cache_behavior(
+        cache_behaviors = self._api_cache_behaviors(
             origin_id=origin_dict["origin_id"],
             cf_function=cf_function,
-            forwarded_headers=["*"],
         )
 
         return RouteOriginConfig(
             origin_access_controls=None,
             origins=origin_dict,
-            ordered_cache_behaviors=cache_behavior,
+            ordered_cache_behaviors=cache_behaviors,
             cloudfront_functions=cf_function,
         )
 

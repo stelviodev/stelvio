@@ -1,23 +1,40 @@
 """Scenario tests: AppSync end-to-end.
 
 Verifies that AppSync APIs actually handle GraphQL queries —
-Lambda data source invocation, DynamoDB CRUD via codegen resolvers,
+Lambda authorization, Lambda data source invocation, DynamoDB CRUD via codegen resolvers,
 and linking AppSync to a Function injects correct STLV_ env vars.
 """
 
+import json
 import time
 from collections.abc import Callable
 
 import pytest
 
-from stelvio.aws.appsync import ApiKeyAuth, AppSync, dynamo_get, dynamo_put, dynamo_scan
+from stelvio.aws.appsync import (
+    ApiKeyAuth,
+    AppSync,
+    LambdaAuth,
+    dynamo_get,
+    dynamo_put,
+    dynamo_scan,
+)
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function
 
-from .assert_helpers import assert_lambda_function, assert_lambda_role_permissions, graphql_query
+from .assert_helpers import (
+    assert_lambda_function,
+    assert_lambda_role_permissions,
+    graphql_query,
+    http_request,
+)
 from .export_helpers import export_appsync, export_function
 
 pytestmark = pytest.mark.integration
+
+# AppSync auth configuration and Lambda permissions can take time to propagate.
+_LAMBDA_AUTH_READY_TIMEOUT = 30
+_LAMBDA_AUTH_RETRY_INTERVAL = 2
 
 LAMBDA_SCHEMA = """\
 type Query {
@@ -25,6 +42,16 @@ type Query {
 }
 
 type EchoResult {
+    msg: String
+}
+"""
+
+LAMBDA_AUTH_SCHEMA = """\
+type Query {
+    echo(msg: String): EchoResult @aws_lambda
+}
+
+type EchoResult @aws_lambda {
     msg: String
 }
 """
@@ -73,6 +100,50 @@ def _query_until_no_errors(
     if last_result is None:
         raise AssertionError("No GraphQL response received before timeout")
     raise AssertionError(f"GraphQL errors: {last_result.get('errors')}")
+
+
+@pytest.mark.parametrize("additional_auth", [False, True], ids=["primary", "additional"])
+def test_scenario_appsync_lambda_auth(additional_auth, stelvio_env, project_dir):
+    """Lambda auth must deploy and authorize GraphQL requests with the function ARN."""
+
+    def infra():
+        authorizer = LambdaAuth(handler="handlers/appsync_auth.main", result_ttl=0)
+        auth_options = (
+            {"auth": "iam", "additional_auth": [authorizer]}
+            if additional_auth
+            else {"auth": authorizer}
+        )
+        api = AppSync("lambda-auth", schema=LAMBDA_AUTH_SCHEMA, **auth_options)
+        api.query("echo", None)
+        export_appsync(api)
+
+    outputs = stelvio_env.deploy(infra)
+    url = outputs["appsync_lambda-auth_url"]
+    query = 'query { echo(msg: "hello") { msg } }'
+    expected = {"data": {"echo": {"msg": "hello"}}}
+
+    deadline = time.monotonic() + _LAMBDA_AUTH_READY_TIMEOUT
+    status, result = 0, None
+    while time.monotonic() < deadline:
+        status, body = http_request(
+            url,
+            "POST",
+            body={"query": query},
+            headers={"Authorization": "Bearer allow"},
+        )
+        result = json.loads(body)
+        if (status, result) == (200, expected):
+            break
+        time.sleep(_LAMBDA_AUTH_RETRY_INTERVAL)
+    assert (status, result) == (200, expected)
+
+    status, _ = http_request(
+        url,
+        "POST",
+        body={"query": query},
+        headers={"Authorization": "Bearer deny"},
+    )
+    assert status == 401
 
 
 def test_scenario_appsync_lambda_query(stelvio_env, project_dir):

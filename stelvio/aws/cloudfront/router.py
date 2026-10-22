@@ -15,6 +15,7 @@ from stelvio.aws.cloudfront.js import default_404_function_js
 from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
+from stelvio.aws.s3.s3 import Bucket
 from stelvio.component import Component
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.provider import ProviderStore
@@ -62,7 +63,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:Router", name, tags=tags, customize=customize
         )
-        self.routes = routes or []
+        # Checked like `route()` calls but not sorted: a new order would rename every resource
+        # named by route index on a stack deployed with this one.
+        self.routes: list[Route] = []
+        for route in routes or []:
+            self._add_route(route)
         self.price_class = price_class
         self.custom_domain = custom_domain
         # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
@@ -97,11 +102,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         route_configs = [adapter.get_origin_config() for adapter in adapters]
 
-        root_path_idx = next(
-            (idx for idx, route in enumerate(self.routes) if route.path_pattern == "/"), None
-        )
+        root_idx = next((idx for idx, route in enumerate(self.routes) if route.is_root), None)
 
-        if root_path_idx is None:
+        if root_idx is None:
             # Create a CloudFront Function to return 404 for unmatched routes (default behavior)
             default_404_function_code = default_404_function_js()
 
@@ -131,6 +134,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 "forwarded_values": {
                     "query_string": False,
                     "cookies": {"forward": "none"},
+                    # Clears a removed root route's headers (the provider keeps a missing one).
+                    "headers": [],
                 },
                 "min_ttl": 0,
                 "default_ttl": 0,  # Don't cache 404 responses
@@ -145,32 +150,22 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         else:
             default_404_function = None
-
+            # The root route's own behavior, so it keeps its methods, forwarding and caching.
+            [root_behavior] = route_configs[root_idx].ordered_cache_behaviors
             default_cache_behavior = {
-                "allowed_methods": ["GET", "HEAD", "OPTIONS"],
-                "cached_methods": ["GET", "HEAD"],
-                # Use the root path origin for default cache behavior
-                "target_origin_id": route_configs[root_path_idx].origins["origin_id"],
-                "compress": True,
-                "viewer_protocol_policy": "redirect-to-https",
-                "forwarded_values": {
-                    "query_string": False,
-                    "cookies": {"forward": "none"},
-                },
-                "min_ttl": 0,
-                "default_ttl": 0,  # Don't cache 404 responses
-                "max_ttl": 0,
-                "function_associations": [],
+                k: v for k, v in root_behavior.items() if k != "path_pattern"
             }
 
-        ordered_cache_behaviors = []
-        for rc in route_configs:
-            if rc.ordered_cache_behaviors:
-                if isinstance(rc.ordered_cache_behaviors, list):
-                    ordered_cache_behaviors.extend(rc.ordered_cache_behaviors)
-                else:
-                    ordered_cache_behaviors.append(rc.ordered_cache_behaviors)
+        ordered_cache_behaviors = [
+            behavior
+            for idx, rc in enumerate(route_configs)
+            if idx != root_idx
+            for behavior in rc.ordered_cache_behaviors
+        ]
 
+        root_is_bucket = root_idx is not None and isinstance(
+            self.routes[root_idx].component, Bucket
+        )
         distribution = pulumi_aws.cloudfront.Distribution(
             context().prefix(self.name),
             **self._customizer(
@@ -192,6 +187,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 {
                     "enabled": True,
                     "is_ipv6_enabled": True,
+                    # `GET /` on a bucket is a ListBucket call; its policy allows GetObject: 403.
+                    "default_root_object": "index.html" if root_is_bucket else None,
                     "price_class": "PriceClass_100",
                     "restrictions": {
                         "geo_restriction": {
@@ -240,7 +237,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 if rc.origin_access_controls is not None
             ],
             access_policies=access_policies,
-            cloudfront_functions=[rc.cloudfront_functions for rc in route_configs]
+            cloudfront_functions=[
+                rc.cloudfront_functions
+                for rc in route_configs
+                if rc.cloudfront_functions is not None
+            ]
             + ([default_404_function] if default_404_function else []),
             acm_validated_domain=acm_validated_domain,
             record=record,
@@ -250,6 +251,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
+            if existing_route.is_root and route.is_root:
+                raise ValueError(
+                    f"Route for path pattern {route.path_pattern!r} clashes with "
+                    f"{existing_route.path_pattern!r}: both are the root route."
+                )
             if existing_route.component == route.component:
                 raise ValueError(f"Route for origin {route.component} already exists.")
 
@@ -268,8 +274,6 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 f"Remove the 'url' parameter from the Function to make it Router-compatible."
             )
         self.routes.append(route)
-        # Sort routes by path pattern length in descending order (more specific first)
-        self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
 
     def route(
         self,
@@ -294,3 +298,5 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 tags=self.tags,
             )
         self._add_route(Route(path, component_or_url, function_url))
+        # Sort routes by path pattern length in descending order (more specific first)
+        self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)

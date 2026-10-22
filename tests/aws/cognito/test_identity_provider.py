@@ -6,12 +6,12 @@ from stelvio.aws.cognito.user_pool import UserPool
 
 from ...conftest import TP
 from ..conftest import assert_urn
-from ..pulumi_mocks import tid
+from ..pulumi_mocks import R, tid
 
 
 def _force_idp(pool, idp_result):
-    """Access pool.arn to force _create_resources, then return IdP output for waiting."""
-    pool_arn = pool.arn  # triggers _create_resources, populates idp_result._resources
+    """Create the pool and the IdP (each on its own `.resources`), return Outputs to wait on."""
+    pool_arn = pool.arn
     idp_output = idp_result.resources.identity_provider.provider_name
     return pool_arn, idp_output
 
@@ -21,7 +21,6 @@ def _force_idp(pool, idp_result):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_google_provider_creates_identity_provider(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -30,17 +29,25 @@ def test_google_provider_creates_identity_provider(pulumi_mocks):
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        providers = pulumi_mocks.created_identity_providers()
-        assert len(providers) == 1
-        assert providers[0].typ == "aws:cognito/identityProvider:IdentityProvider"
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google",
+        R.IDENTITY_PROVIDER,
+        {
+            "userPoolId": tid(f"{TP}users"),
+            "providerName": "Google",
+            "providerType": "Google",
+            "providerDetails": {"client_id": "xxx", "client_secret": "yyy"},
+        },
+    )
+    pulumi_mocks.assert_res_counts({R.USER_POOL: 1, R.IDENTITY_PROVIDER: 1})
 
 
-@pulumi.runtime.test
 def test_google_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -49,18 +56,20 @@ def test_google_provider_type_mapping(pulumi_mocks):
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Google"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerName"] == "Google"
-        assert mock.inputs["providerType"] == "Google"
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google",
+        R.IDENTITY_PROVIDER,
+        {"providerName": "Google", "providerType": "Google"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_facebook_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     fb = pool.add_identity_provider(
@@ -69,18 +78,20 @@ def test_facebook_provider_type_mapping(pulumi_mocks):
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
-    pool_arn, idp_output = _force_idp(pool, fb)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, fb.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Facebook"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerName"] == "Facebook"
-        assert mock.inputs["providerType"] == "Facebook"
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Facebook",
+        R.IDENTITY_PROVIDER,
+        {"providerName": "Facebook", "providerType": "Facebook"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_apple_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     apple = pool.add_identity_provider(
@@ -94,18 +105,20 @@ def test_apple_provider_type_mapping(pulumi_mocks):
         },
     )
 
-    pool_arn, idp_output = _force_idp(pool, apple)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, apple.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-SignInWithApple"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerName"] == "SignInWithApple"
-        assert mock.inputs["providerType"] == "SignInWithApple"
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-SignInWithApple",
+        R.IDENTITY_PROVIDER,
+        {"providerName": "SignInWithApple", "providerType": "SignInWithApple"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_amazon_provider_type_mapping(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     amazon = pool.add_identity_provider(
@@ -114,15 +127,18 @@ def test_amazon_provider_type_mapping(pulumi_mocks):
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
-    pool_arn, idp_output = _force_idp(pool, amazon)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, amazon.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-LoginWithAmazon"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerName"] == "LoginWithAmazon"
-        assert mock.inputs["providerType"] == "LoginWithAmazon"
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-LoginWithAmazon",
+        R.IDENTITY_PROVIDER,
+        {"providerName": "LoginWithAmazon", "providerType": "LoginWithAmazon"},
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -130,7 +146,6 @@ def test_amazon_provider_type_mapping(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_oidc_provider_uses_user_provided_name(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     oidc = pool.add_identity_provider(
@@ -143,18 +158,20 @@ def test_oidc_provider_uses_user_provided_name(pulumi_mocks):
         },
     )
 
-    pool_arn, idp_output = _force_idp(pool, oidc)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, oidc.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-my-oidc"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerName"] == "my-oidc"
-        assert mock.inputs["providerType"] == "OIDC"
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-my-oidc",
+        R.IDENTITY_PROVIDER,
+        {"providerName": "my-oidc", "providerType": "OIDC"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_saml_provider_uses_user_provided_name(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     saml = pool.add_identity_provider(
@@ -163,15 +180,18 @@ def test_saml_provider_uses_user_provided_name(pulumi_mocks):
         details={"MetadataURL": "https://idp.example.com/metadata"},
     )
 
-    pool_arn, idp_output = _force_idp(pool, saml)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, saml.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-corp-saml"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerName"] == "corp-saml"
-        assert mock.inputs["providerType"] == "SAML"
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-corp-saml",
+        R.IDENTITY_PROVIDER,
+        {"providerName": "corp-saml", "providerType": "SAML"},
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -179,23 +199,22 @@ def test_saml_provider_uses_user_provided_name(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_provider_details_passed_through(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     details = {"client_id": "my-client-id", "client_secret": "my-secret"}
     google = pool.add_identity_provider("google", provider_type="google", details=details)
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Google"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerDetails"] == details
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google", R.IDENTITY_PROVIDER, {"providerDetails": details}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_attribute_mapping_passed_through(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     attrs = {"email": "email", "name": "name", "picture": "picture"}
@@ -206,17 +225,17 @@ def test_attribute_mapping_passed_through(pulumi_mocks):
         attributes=attrs,
     )
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Google"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["attributeMapping"] == attrs
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google", R.IDENTITY_PROVIDER, {"attributeMapping": attrs}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_no_attribute_mapping_when_none(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -225,14 +244,15 @@ def test_no_attribute_mapping_when_none(pulumi_mocks):
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Google"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert "attributeMapping" not in mock.inputs
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google", R.IDENTITY_PROVIDER, {"attributeMapping": None}, partial=True
+    )
 
 
 # =========================================================================
@@ -240,7 +260,6 @@ def test_no_attribute_mapping_when_none(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_provider_references_pool_id(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -249,14 +268,15 @@ def test_provider_references_pool_id(pulumi_mocks):
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Google"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["userPoolId"] == tid(f"{TP}users")
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google", R.IDENTITY_PROVIDER, {"userPoolId": tid(f"{TP}users")}, partial=True
+    )
 
 
 # =========================================================================
@@ -369,7 +389,6 @@ def test_provider_name_available_after_resources(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_provider_name_can_wire_to_client(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -379,16 +398,19 @@ def test_provider_name_can_wire_to_client(pulumi_mocks):
     )
     client = pool.add_client("web", providers=[google.provider_name, "COGNITO"])
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources, client.resources]
 
-    def check(_):
-        pulumi_mocks.assert_identity_provider_created(f"{TP}users-idp-Google")
-        client_mock = pulumi_mocks.assert_user_pool_client_created(f"{TP}users-web")
-        providers = client_mock.inputs["supportedIdentityProviders"]
-        assert "Google" in providers
-        assert "COGNITO" in providers
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output, client.client_id).apply(check)
+    pulumi_mocks.assert_res("users-idp-Google", R.IDENTITY_PROVIDER)
+    pulumi_mocks.assert_res(
+        "users-web",
+        R.USER_POOL_CLIENT,
+        {"supportedIdentityProviders": ["Google", "COGNITO"]},
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -396,7 +418,6 @@ def test_provider_name_can_wire_to_client(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_multiple_providers_created(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -410,14 +431,15 @@ def test_multiple_providers_created(pulumi_mocks):
         details={"client_id": "f-id", "client_secret": "f-secret"},
     )
 
-    _, google_output = _force_idp(pool, google)
-    fb_output = fb.resources.identity_provider.provider_name
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources, fb.resources]
 
-    def check(_):
-        providers = pulumi_mocks.created_identity_providers()
-        assert len(providers) == 2
+    deploy()
 
-    pulumi.Output.all(pool.arn, google_output, fb_output).apply(check)
+    pulumi_mocks.assert_res("users-idp-Google", R.IDENTITY_PROVIDER)
+    pulumi_mocks.assert_res("users-idp-Facebook", R.IDENTITY_PROVIDER)
+    pulumi_mocks.assert_res_counts({R.USER_POOL: 1, R.IDENTITY_PROVIDER: 2})
 
 
 # =========================================================================
@@ -425,7 +447,6 @@ def test_multiple_providers_created(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_provider_customization(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -435,17 +456,17 @@ def test_provider_customization(pulumi_mocks):
         customize={"identity_provider": {"idp_identifiers": ["custom-id"]}},
     )
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Google"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["idpIdentifiers"] == ["custom-id"]
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google", R.IDENTITY_PROVIDER, {"idpIdentifiers": ["custom-id"]}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_provider_customization_overrides_defaults(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     google = pool.add_identity_provider(
@@ -459,14 +480,18 @@ def test_provider_customization_overrides_defaults(pulumi_mocks):
         },
     )
 
-    pool_arn, idp_output = _force_idp(pool, google)
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, google.resources]
 
-    def check(_):
-        idp_name = f"{TP}users-idp-Google"
-        mock = pulumi_mocks.assert_identity_provider_created(idp_name)
-        assert mock.inputs["providerDetails"] == {"client_id": "overridden"}
+    deploy()
 
-    pulumi.Output.all(pool_arn, idp_output).apply(check)
+    pulumi_mocks.assert_res(
+        "users-idp-Google",
+        R.IDENTITY_PROVIDER,
+        {"providerDetails": {"client_id": "overridden"}},
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -532,7 +557,6 @@ def test_resources_available_after_pool_creation(pulumi_mocks):
     pulumi.Output.all(pool_arn, idp_output).apply(check)
 
 
-@pulumi.runtime.test
 def test_resources_without_pool_creation_create_pool_first(pulumi_mocks):
     """Resources can be accessed independently - they trigger parent creation automatically."""
     pool = UserPool("users", usernames=["email"])
@@ -541,16 +565,15 @@ def test_resources_without_pool_creation_create_pool_first(pulumi_mocks):
         provider_type="google",
         details={"client_id": "xxx", "client_secret": "yyy"},
     )
-    # Accessing IdP resources automatically triggers pool creation first
-    # via lazy evaluation
-    idp_resource = google.resources.identity_provider
 
-    def check(_):
-        # Verify both pool and IdP were created in correct order
-        assert len(pulumi_mocks.created_user_pools()) == 1
-        assert len(pulumi_mocks.created_identity_providers()) == 1
+    # Only the IdP's resources are read: they trigger pool creation first via lazy evaluation
+    @pulumi.runtime.test
+    def deploy():
+        return google.resources
 
-    idp_resource.provider_name.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res_counts({R.USER_POOL: 1, R.IDENTITY_PROVIDER: 1})
 
 
 # `parent=self` lives in ResourceOptions (invisible to input mocks), but it surfaces

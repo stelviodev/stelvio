@@ -123,35 +123,87 @@ def _set_app_context(app: str = "test", env: str = "test", customize=None) -> No
 @mark.parametrize(
     ("opts", "error_type", "error_message"),
     [
-        param(
-            {"instances": 0},
-            ValueError,
-            "`instances` must be between 1 and 16, got 0",
-            id="instances-zero",
+        *(
+            param(
+                {"min_capacity": 1, "max_capacity": 8} | {key: value},
+                TypeError,
+                f"`{key}` must be a number, got {type(value).__name__}",
+                id=f"{key}-{value!r}",
+            )
+            for key in ("min_capacity", "max_capacity")
+            for value in (True, False, "1")
+        ),
+        *(
+            param(
+                {"min_capacity": 1, "max_capacity": 8} | {key: value},
+                ValueError,
+                f"`{key}` must be a finite multiple of 0.5 between {lower} and 256, got {value!r}",
+                id=f"{key}-{value!r}",
+            )
+            for key, lower in (("min_capacity", 0.5), ("max_capacity", 1))
+            for value in (0, -1, 256.5, 1.25, float("nan"), float("inf"), float("-inf"))
         ),
         param(
-            {"instances": True},
+            {"max_capacity": 0.5},
+            ValueError,
+            "`max_capacity` must be a finite multiple of 0.5 between 1 and 256, got 0.5",
+        ),
+        param(
+            {"min_capacity": 8},
+            ValueError,
+            "`min_capacity` must not exceed max_capacity, got min_capacity=8, max_capacity=4",
+        ),
+        param(
+            {"min_capacity": 8, "max_capacity": 1},
+            ValueError,
+            "`min_capacity` must not exceed max_capacity, got min_capacity=8, max_capacity=1",
+        ),
+        param({"replicas": 16}, ValueError, "`replicas` must be between 0 and 15, got 16"),
+        param({"replicas": 1.0}, TypeError, "`replicas` must be an int, got float"),
+        *(
+            param(
+                {"instance": instance, **capacity},
+                ValueError,
+                "`min_capacity` and `max_capacity` require a serverless `instance`, "
+                f"got {'db.' + instance.removeprefix('db.')!r}",
+            )
+            for instance in ("t3.medium", "db.r6g.large")
+            for capacity in (
+                {"min_capacity": 1},
+                {"max_capacity": 8},
+                {"min_capacity": 1, "max_capacity": 8},
+            )
+        ),
+        param(
+            {"replicas": -1},
+            ValueError,
+            "`replicas` must be between 0 and 15, got -1",
+            id="replicas-negative",
+        ),
+        param(
+            {"replicas": True},
             TypeError,
-            "`instances` must be an int, got bool",
-            id="instances-bool",
+            "`replicas` must be an int, got bool",
+            id="replicas-bool",
         ),
         param(
-            {"instance_class": 123},
+            {"instance": 123},
             TypeError,
-            "`instance_class` must be a str, got int",
-            id="instance-class-int",
+            "`instance` must be a str, got int",
+            id="instance-int",
         ),
         param(
-            {"instance_class": "t4g"},
+            {"instance": "t4g"},
             ValueError,
-            "`instance_class` must be family.size (e.g. 't3.medium' or 'db.t3.medium'), got 't4g'",
-            id="instance-class-no-size",
+            "`instance` must be 'serverless' or family.size "
+            "(e.g. 't3.medium' or 'db.t3.medium'), got 't4g'",
+            id="instance-no-size",
         ),
         param(
-            {"instance_class": ""},
+            {"instance": ""},
             ValueError,
-            "`instance_class` must be a non-empty string, got ''",
-            id="instance-class-empty",
+            "`instance` must be a non-empty string, got ''",
+            id="instance-empty",
         ),
         param(
             {"engine": "4.0"},
@@ -276,7 +328,7 @@ def test_document_db_aws_identifiers(  # noqa: PLR0913 — parametrized inputs a
 
     @pulumi.runtime.test
     def deploy():
-        return DocumentDb(name, vpc=Vpc(VPC_NAME), instances=instances).resources
+        return DocumentDb(name, vpc=Vpc(VPC_NAME), replicas=instances - 1).resources
 
     deploy()
     logical_name = f"{app}-{env}-{name}"
@@ -309,7 +361,7 @@ def test_document_db_raises_when_config_and_kwargs_combined():
             "- provide all settings either in 'config' or as separate options"
         ),
     ):
-        DocumentDb(DB_NAME, config=DocumentDbConfig(vpc=vpc), instances=2)
+        DocumentDb(DB_NAME, config=DocumentDbConfig(vpc=vpc), replicas=1)
 
 
 def test_document_db_raises_when_config_type_invalid():
@@ -353,12 +405,16 @@ class DocumentDbTestCase:
     """Public inputs and independently specified resource expectations."""
 
     test_id: str
+    apply_immediately: bool = field(default=True, kw_only=True)
     opts: dict[str, Any] = field(default_factory=dict)
     style: Literal["kwargs", "object", "dict"] = "kwargs"
     tags: dict[str, str] | None = None
     family: str = "docdb8.0"
     engine_version: str = "8.0.0"
-    aws_instance_class: str = "db.t3.medium"
+    aws_instance_class: str = "db.serverless"
+    serverless_scaling: dict[str, float] | None = field(
+        default_factory=lambda: {"min_capacity": 0.5, "max_capacity": 4}
+    )
     expected_instances: tuple[str, ...] = ("todos-1",)
     backup_retention_period: int = 7
     deletion_protection: bool = False
@@ -432,6 +488,16 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
             "engineVersion": tc.engine_version,
             "masterUsername": "stelvio",
             "manageMasterUserPassword": True,
+            **(
+                {
+                    "serverlessV2ScalingConfiguration": {
+                        "minCapacity": tc.serverless_scaling["min_capacity"],
+                        "maxCapacity": tc.serverless_scaling["max_capacity"],
+                    }
+                }
+                if tc.serverless_scaling is not None
+                else {}
+            ),
             "storageEncrypted": True,
             "port": 27017,
             "backupRetentionPeriod": tc.backup_retention_period,
@@ -474,6 +540,7 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
                 "clusterIdentifier": tid(TP + DB_NAME),
                 "identifierPrefix": TP + instance_name + "-",
                 "instanceClass": tc.aws_instance_class,
+                "applyImmediately": tc.apply_immediately,
                 "engine": "docdb",
                 "tags": {"Name": TP + instance_name} | user_tags,
             },
@@ -491,19 +558,66 @@ def verify_document_db(pulumi_mocks, tc: DocumentDbTestCase):
     "tc",
     [
         DEFAULT_TC,
+        *(
+            DocumentDbTestCase(f"serverless-{instance}", {"instance": instance})
+            for instance in ("serverless", "db.serverless")
+        ),
         DocumentDbTestCase(
-            "two-instances", {"instances": 2}, expected_instances=("todos-1", "todos-2")
+            "prefixed-range",
+            {"instance": "db.serverless", "min_capacity": 1, "max_capacity": 8},
+            serverless_scaling={"min_capacity": 1, "max_capacity": 8},
+        ),
+        DocumentDbTestCase(
+            "partial-min",
+            {"min_capacity": 1},
+            serverless_scaling={"min_capacity": 1, "max_capacity": 4},
+        ),
+        DocumentDbTestCase(
+            "partial-max",
+            {"max_capacity": 16},
+            serverless_scaling={"min_capacity": 0.5, "max_capacity": 16},
+        ),
+        DocumentDbTestCase("explicit-none", {"instance": None}),
+        *(
+            DocumentDbTestCase(
+                f"serverless-range-{engine}-{minimum}-{maximum}",
+                {
+                    "instance": "serverless",
+                    "engine": engine,
+                    "replicas": 1,
+                    "min_capacity": minimum,
+                    "max_capacity": maximum,
+                },
+                family=f"docdb{engine}",
+                engine_version=f"{engine}.0",
+                expected_instances=("todos-1", "todos-2"),
+                aws_instance_class="db.serverless",
+                serverless_scaling={"min_capacity": minimum, "max_capacity": maximum},
+            )
+            for engine, minimum, maximum in (
+                ("5.0", 1, 8),
+                ("8.0", 256, 256),
+                ("8.0", 0.5, 1),
+                ("8.0", 1.5, 8.5),
+            )
+        ),
+        DocumentDbTestCase(
+            "two-instances", {"replicas": 1}, expected_instances=("todos-1", "todos-2")
         ),
         DocumentDbTestCase(
             "engine-5", {"engine": "5.0"}, family="docdb5.0", engine_version="5.0.0"
         ),
         DocumentDbTestCase(
-            "instance-class", {"instance_class": "t4g.large"}, aws_instance_class="db.t4g.large"
+            "instance-class",
+            {"instance": "t4g.large"},
+            aws_instance_class="db.t4g.large",
+            serverless_scaling=None,
         ),
         DocumentDbTestCase(
             "instance-class-db-prefix",
-            {"instance_class": "db.t4g.large"},
+            {"instance": "db.t4g.large"},
             aws_instance_class="db.t4g.large",
+            serverless_scaling=None,
         ),
         DocumentDbTestCase(
             "deletion-protection", {"deletion_protection": True}, deletion_protection=True
@@ -583,7 +697,7 @@ def test_document_db_customize_targets_resource(
     @pulumi.runtime.test
     def deploy():
         vpc = Vpc(VPC_NAME)
-        return DocumentDb(DB_NAME, vpc=vpc, instances=2, customize={key: customization}).resources
+        return DocumentDb(DB_NAME, vpc=vpc, replicas=1, customize={key: customization}).resources
 
     deploy()
 
@@ -611,7 +725,7 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
     def deploy():
         vpc = Vpc(VPC_NAME)
         return DocumentDb(
-            DB_NAME, vpc=vpc, instances=2, customize={"instance": bump_first}
+            DB_NAME, vpc=vpc, replicas=1, customize={"instance": bump_first}
         ).resources
 
     deploy()
@@ -621,7 +735,7 @@ def test_document_db_customize_callable_receives_per_instance_props(pulumi_mocks
         f"{DB_NAME}-1", R.DOCDB_INSTANCE, {"instanceClass": "db.t4g.large"}, partial=True
     )
     pulumi_mocks.assert_res(
-        f"{DB_NAME}-2", R.DOCDB_INSTANCE, {"instanceClass": "db.t3.medium"}, partial=True
+        f"{DB_NAME}-2", R.DOCDB_INSTANCE, {"instanceClass": "db.serverless"}, partial=True
     )
     pulumi_mocks.assert_res_counts(
         _counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2})
@@ -800,7 +914,7 @@ def test_document_db_resources_and_parenting(pulumi_mocks):
 
         # Public transformations expose options/URNs of resources absent from .resources.
         pulumi.runtime.register_stack_transformation(capture)
-        r = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), instances=2).resources
+        r = DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), replicas=1).resources
         children = [
             r.cluster,
             hidden[TP + f"{DB_NAME}-1"],
@@ -1380,19 +1494,24 @@ def test_document_db_rejects_output_manage_master_user_password(pulumi_mocks):
 @mark.parametrize(
     ("values", "mode", "expected"),
     [
-        param(None, "global", ("db.r6g.large", True, 14), id="omitted"),
+        param(None, "global", ("db.r6g.large", True, 14, False), id="omitted"),
         param(
             ("t4g.medium", False, 7),
             "callable",
-            ("db.r6g.large", True, 14),
+            ("db.r6g.large", True, 14, False),
             id="global-callable",
         ),
-        param(("t4g.medium", True, 7), "local", ("db.r5.large", False, 1), id="local-overrides"),
+        param(
+            ("t4g.medium", True, 7),
+            "local",
+            ("db.r5.large", False, 1, False),
+            id="local-overrides",
+        ),
     ],
 )
 def test_document_db_customization_precedence(pulumi_mocks, values, mode, expected):
     global_props = {
-        "instance": {"instance_class": "db.r6g.large"},
+        "instance": {"instance_class": "db.r6g.large", "apply_immediately": False},
         "cluster": {"deletion_protection": True, "backup_retention_period": 14},
     }
     if mode == "callable":
@@ -1414,7 +1533,7 @@ def test_document_db_customization_precedence(pulumi_mocks, values, mode, expect
         opts = (
             dict(
                 zip(
-                    ("instance_class", "deletion_protection", "backup_retention_period"),
+                    ("instance", "deletion_protection", "backup_retention_period"),
                     values,
                     strict=True,
                 )
@@ -1425,19 +1544,92 @@ def test_document_db_customization_precedence(pulumi_mocks, values, mode, expect
         return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), customize=local, **opts).resources
 
     deploy()
-    instance, protection, retention = expected
+    instance, protection, retention, immediate = expected
     verify_document_db(
         pulumi_mocks,
         replace(
             DEFAULT_TC,
             aws_instance_class=instance,
+            apply_immediately=immediate,
+            serverless_scaling=DEFAULT_TC.serverless_scaling if values is None else None,
             deletion_protection=protection,
             backup_retention_period=retention,
         ),
     )
 
 
-def test_document_db_cluster_ignores_availability_zones_changes(pulumi_mocks):
+@mark.parametrize(
+    ("opts", "customize", "expected_scaling", "expected_ignored"),
+    [
+        param(
+            {},
+            None,
+            {"minCapacity": 0.5, "maxCapacity": 4},
+            ["availability_zones"],
+            id="omitted-instance",
+        ),
+        param(
+            {"instance": "t3.medium"},
+            None,
+            None,
+            ["availability_zones", "serverless_v2_scaling_configuration"],
+            id="provisioned-without-range",
+        ),
+        param(
+            {"instance": "serverless"},
+            None,
+            {"minCapacity": 0.5, "maxCapacity": 4},
+            ["availability_zones"],
+            id="serverless-default-range",
+        ),
+        *(
+            param(
+                {
+                    "instance": instance_class,
+                    "min_capacity": 1,
+                    "max_capacity": 8,
+                },
+                None,
+                {"minCapacity": 1, "maxCapacity": 8},
+                ["availability_zones"],
+                id=f"{instance_class}-explicit-range",
+            )
+            for instance_class in ("serverless",)
+        ),
+        *(
+            param(
+                {
+                    "instance": "serverless",
+                    "min_capacity": 1,
+                    "max_capacity": 8,
+                },
+                {
+                    "cluster": (
+                        {"serverless_v2_scaling_configuration": scaling}
+                        if style == "dict"
+                        else lambda props, scaling=scaling: props
+                        | {"serverless_v2_scaling_configuration": scaling}
+                    )
+                },
+                expected_scaling,
+                expected_ignored,
+                id=f"custom-{style}-{'range' if scaling is not None else 'none'}",
+            )
+            for style in ("dict", "callable")
+            for scaling, expected_scaling, expected_ignored in (
+                (
+                    {"min_capacity": 2, "max_capacity": 32},
+                    {"minCapacity": 2, "maxCapacity": 32},
+                    ["availability_zones"],
+                ),
+                (None, None, ["availability_zones", "serverless_v2_scaling_configuration"]),
+            )
+        ),
+    ],
+)
+def test_document_db_cluster_ignores_only_unmanaged_changes(
+    pulumi_mocks, opts, customize, expected_scaling, expected_ignored
+):
     seen: list[list[str] | None] = []
 
     @pulumi.runtime.test
@@ -1447,12 +1639,13 @@ def test_document_db_cluster_ignores_availability_zones_changes(pulumi_mocks):
                 seen.append(args.opts.ignore_changes)
 
         pulumi.runtime.register_stack_transformation(capture)
-        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME)).resources
+        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), customize=customize, **opts).resources
 
     deploy()
-    assert seen == [["availability_zones"]]
+    assert seen == [expected_ignored]
     cluster = pulumi_mocks.assert_res(DB_NAME, R.DOCDB_CLUSTER)
     assert "availabilityZones" not in cluster.inputs
+    assert cluster.inputs.get("serverlessV2ScalingConfiguration") == expected_scaling
     pulumi_mocks.assert_res_counts(_counts(VPC_AZ2_COUNTS, APP_SG_COUNTS, DOCDB_COUNTS))
 
 
@@ -1469,7 +1662,7 @@ def test_document_db_secret_rotation_depends_on_instances(pulumi_mocks):
                 rotation_depends.append(args.opts.depends_on)
 
         pulumi.runtime.register_stack_transformation(capture)
-        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), instances=2, secret_rotation=False).resources
+        return DocumentDb(DB_NAME, vpc=Vpc(VPC_NAME), replicas=1, secret_rotation=False).resources
 
     deploy()
 
@@ -1484,3 +1677,81 @@ def test_document_db_secret_rotation_depends_on_instances(pulumi_mocks):
             DOCDB_COUNTS | {R.DOCDB_INSTANCE: 2},
         )
     )
+
+
+@mark.parametrize(
+    ("mode", "explicit", "expected"),
+    [
+        param("global", None, (2, 32), id="global-over-default"),
+        param(
+            "global",
+            {"min_capacity": 1, "max_capacity": 8},
+            (1, 8),
+            id="explicit-over-global-dict",
+        ),
+        param(
+            "callable",
+            {"min_capacity": 1, "max_capacity": 8},
+            (2, 32),
+            id="global-callable-over-explicit",
+        ),
+        param("local", {"min_capacity": 1, "max_capacity": 8}, (4, 64), id="local-over-explicit"),
+        param(
+            "local-callable",
+            {"min_capacity": 1, "max_capacity": 8},
+            (4, 64),
+            id="local-callable-over-explicit",
+        ),
+        param("custom-only", None, (2, 32), id="serverless-through-customize"),
+        param("custom-no-range", None, None, id="customize-does-not-infer-range"),
+    ],
+)
+def test_document_db_serverless_customization_precedence(pulumi_mocks, mode, explicit, expected):
+    global_cluster = {
+        "serverless_v2_scaling_configuration": {"min_capacity": 2, "max_capacity": 32}
+    }
+    global_customize = {"cluster": global_cluster}
+    if mode == "callable":
+        global_customize = {"cluster": lambda props: props | global_cluster}
+    _set_app_context(customize={} if mode == "custom-no-range" else {DocumentDb: global_customize})
+    local = None
+    if mode in ("local", "local-callable"):
+        local_cluster = {
+            "serverless_v2_scaling_configuration": {"min_capacity": 4, "max_capacity": 64}
+        }
+        local = {"cluster": local_cluster}
+        if mode == "local-callable":
+            local = {"cluster": lambda props: props | local_cluster}
+    elif mode in ("custom-only", "custom-no-range"):
+        local = {"instance": {"instance_class": "db.serverless"}}
+
+    @pulumi.runtime.test
+    def deploy():
+        return DocumentDb(
+            DB_NAME,
+            vpc=Vpc(VPC_NAME),
+            instance="t3.medium" if mode in ("custom-only", "custom-no-range") else "serverless",
+            **(explicit or {}),
+            customize=local,
+        ).resources
+
+    deploy()
+    verify_document_db(
+        pulumi_mocks,
+        replace(
+            DEFAULT_TC,
+            aws_instance_class="db.serverless",
+            serverless_scaling=(
+                {"min_capacity": expected[0], "max_capacity": expected[1]}
+                if expected is not None
+                else None
+            ),
+        ),
+    )
+
+
+@mark.parametrize("instance", [None, "serverless", "db.serverless", "t3.medium", "db.t3.medium"])
+def test_document_db_config_preserves_instance(instance):
+    config = DocumentDbConfig(vpc=Vpc(VPC_NAME), instance=instance)
+    assert config.instance == instance
+    assert config.instance_class == ("db." + instance.removeprefix("db.") if instance else None)

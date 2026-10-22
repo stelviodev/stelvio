@@ -4,13 +4,17 @@
 
 ### DocumentDB
 
-- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
+- **New `DocumentDb` component.** Creates a private, TLS-required, encrypted cluster in a Vpc's isolated subnets with an AWS-managed master password. Serverless is the default (0.5–4 DCUs per instance); use `instance` for a provisioned class, `replicas` for read replicas, and `min_capacity`/`max_capacity` for capacity bounds. `secret_rotation` is days (default `7`) or `False` to disable AWS-managed password rotation. Linked Functions must join the same Vpc; linking injects connection properties and IAM, not a network path. The CA bundle is packaged into linked Functions on deploy; in `stlv dev`, `ca_file` and the URI use the absolute cache path.
+
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
 ### Bug Fixes
 
 - **`stlv deploy` does not truncate progress for larger resource trees.** Fix [#313](https://github.com/stelviodev/stelvio/issues/313) by reserving space for the progress footer beneath the resource tree.
+- **AppSync Lambda authorizers use the correct function ARN.** Applies to primary and additional authentication.
+- **Router routes work on `/`, on `/api` without a slash, and for HttpApi.** On `/` an API took only GET and lost its query string, `/api` went to the root route, and HttpApi routes got 403. A Bucket on `/` now serves `index.html` and is cached for a day like other bucket routes: [invalidate](components/aws/cloudfront-router.md#s3-buckets-cache-behavior) after an upload.
+- **Router API and Function routes get the client's headers and cookies.** Every request lost `Accept`, `Referer` and cookies, and a GET lost `Authorization`. Function routes with IAM auth still see CloudFront's signature there. CloudFront no longer compresses their responses, and a `distribution` customize that adds `forwarded_values` to them now fails.
 
 ## 0.10.1b7 (2026-10-09)
 

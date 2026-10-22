@@ -4,33 +4,21 @@ from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig
 
 from ...conftest import TP
-from ..pulumi_mocks import R
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
+
+POOL_ARN = (
+    f"arn:aws:cognito-idp:{DEFAULT_REGION}:{ACCOUNT_ID}:userpool/"
+    f"{DEFAULT_REGION}_{tid(f'{TP}users')}"
+)
+# The pre_sign_up trigger function's name in AWS, as the mock resolves it
+PRE_SIGN_UP_FN_NAME = tn(f"{TP}users-trigger-pre_sign_up")
+PRE_SIGN_UP_FN_ARN = f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{PRE_SIGN_UP_FN_NAME}"
 
 # =========================================================================
 # Single trigger tests
 # =========================================================================
 
 
-@pulumi.runtime.test
-def test_single_trigger_creates_function(pulumi_mocks, project_cwd):
-    pool = UserPool(
-        "users",
-        usernames=["email"],
-        triggers={"pre_sign_up": "functions/auth/validate.handler"},
-    )
-
-    def check(_):
-        fn_name = f"{TP}users-trigger-pre_sign_up"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        assert functions[0].typ == "aws:lambda/function:Function"
-        assert functions[0].inputs["handler"] == "validate.handler"
-
-    fn = pool.resources.trigger_functions["pre_sign_up"]
-    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
-
-
-@pulumi.runtime.test
 def test_single_trigger_creates_permission(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -38,19 +26,31 @@ def test_single_trigger_creates_permission(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": "functions/auth/validate.handler"},
     )
 
-    def check(args):
-        pool_arn, _ = args
-        perm_name = f"{TP}users-trigger-pre_sign_up-perm"
-        permissions = pulumi_mocks.created_permissions(perm_name)
-        assert len(permissions) == 1
-        perm = permissions[0]
-        assert perm.typ == "aws:lambda/permission:Permission"
-        assert perm.inputs["action"] == "lambda:InvokeFunction"
-        assert perm.inputs["principal"] == "cognito-idp.amazonaws.com"
-        assert perm.inputs["sourceArn"] == pool_arn
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    perm = pool.resources.trigger_permissions["pre_sign_up"]
-    pulumi.Output.all(pool.arn, perm.id).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up-perm",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunction",
+            "function": PRE_SIGN_UP_FN_NAME,
+            "principal": "cognito-idp.amazonaws.com",
+            "sourceArn": POOL_ARN,
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.USER_POOL: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.LAMBDA_PERMISSION: 1,
+        }
+    )
 
 
 # =========================================================================
@@ -58,8 +58,7 @@ def test_single_trigger_creates_permission(pulumi_mocks, project_cwd):
 # =========================================================================
 
 
-@pulumi.runtime.test
-def test_multiple_triggers_create_functions(pulumi_mocks, project_cwd):
+def test_multiple_triggers_create_a_function_and_permission_each(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
         usernames=["email"],
@@ -69,38 +68,25 @@ def test_multiple_triggers_create_functions(pulumi_mocks, project_cwd):
         },
     )
 
-    def check(_):
-        pre_fn = pulumi_mocks.created_functions(f"{TP}users-trigger-pre_sign_up")
-        post_fn = pulumi_mocks.created_functions(f"{TP}users-trigger-post_confirmation")
-        assert len(pre_fn) == 1
-        assert len(post_fn) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    fns = pool.resources.trigger_functions
-    pulumi.Output.all(
-        fns["pre_sign_up"].function_name,
-        fns["post_confirmation"].function_name,
-    ).apply(check)
+    deploy()
 
-
-@pulumi.runtime.test
-def test_multiple_triggers_create_permissions(pulumi_mocks, project_cwd):
-    pool = UserPool(
-        "users",
-        usernames=["email"],
-        triggers={
-            "pre_sign_up": "functions/auth/validate.handler",
-            "post_confirmation": "functions/auth/welcome.handler",
-        },
+    pulumi_mocks.assert_res("users-trigger-pre_sign_up", R.FUNCTION)
+    pulumi_mocks.assert_res("users-trigger-post_confirmation", R.FUNCTION)
+    pulumi_mocks.assert_res("users-trigger-pre_sign_up-perm", R.LAMBDA_PERMISSION)
+    pulumi_mocks.assert_res("users-trigger-post_confirmation-perm", R.LAMBDA_PERMISSION)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.USER_POOL: 1,
+            R.FUNCTION: 2,
+            R.ROLE: 2,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.LAMBDA_PERMISSION: 2,
+        }
     )
-
-    def check(_):
-        pre_perm = pulumi_mocks.created_permissions(f"{TP}users-trigger-pre_sign_up-perm")
-        post_perm = pulumi_mocks.created_permissions(f"{TP}users-trigger-post_confirmation-perm")
-        assert len(pre_perm) == 1
-        assert len(post_perm) == 1
-
-    perms = pool.resources.trigger_permissions
-    pulumi.Output.all(perms["pre_sign_up"].id, perms["post_confirmation"].id).apply(check)
 
 
 # =========================================================================
@@ -108,7 +94,6 @@ def test_multiple_triggers_create_permissions(pulumi_mocks, project_cwd):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_trigger_permission_principal(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -116,14 +101,20 @@ def test_trigger_permission_principal(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": "functions/auth/validate.handler"},
     )
 
-    def check(_):
-        perm = pulumi_mocks.created_permissions(f"{TP}users-trigger-pre_sign_up-perm")[0]
-        assert perm.inputs["principal"] == "cognito-idp.amazonaws.com"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.resources.trigger_permissions["pre_sign_up"].id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up-perm",
+        R.LAMBDA_PERMISSION,
+        {"principal": "cognito-idp.amazonaws.com"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_trigger_permission_source_arn(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -131,16 +122,20 @@ def test_trigger_permission_source_arn(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": "functions/auth/validate.handler"},
     )
 
-    def check(args):
-        pool_arn, _ = args
-        perm = pulumi_mocks.created_permissions(f"{TP}users-trigger-pre_sign_up-perm")[0]
-        assert perm.inputs["sourceArn"] == pool_arn
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    perm = pool.resources.trigger_permissions["pre_sign_up"]
-    pulumi.Output.all(pool.arn, perm.id).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up-perm",
+        R.LAMBDA_PERMISSION,
+        {"sourceArn": POOL_ARN},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_trigger_permission_function_reference(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -148,14 +143,18 @@ def test_trigger_permission_function_reference(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": "functions/auth/validate.handler"},
     )
 
-    def check(args):
-        fn_name, _ = args
-        perm = pulumi_mocks.created_permissions(f"{TP}users-trigger-pre_sign_up-perm")[0]
-        assert perm.inputs["function"] == fn_name
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    fn = pool.resources.trigger_functions["pre_sign_up"]
-    perm = pool.resources.trigger_permissions["pre_sign_up"]
-    pulumi.Output.all(fn.function_name, perm.id).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up-perm",
+        R.LAMBDA_PERMISSION,
+        {"function": PRE_SIGN_UP_FN_NAME},
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -163,7 +162,6 @@ def test_trigger_permission_function_reference(pulumi_mocks, project_cwd):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_trigger_function_naming(pulumi_mocks, project_cwd):
     pool = UserPool(
         "auth",
@@ -171,13 +169,13 @@ def test_trigger_function_naming(pulumi_mocks, project_cwd):
         triggers={"post_authentication": "functions/auth/validate.handler"},
     )
 
-    def check(_):
-        fn_name = f"{TP}auth-trigger-post_authentication"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    fn = pool.resources.trigger_functions["post_authentication"]
-    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("auth-trigger-post_authentication", R.FUNCTION)
 
 
 # =========================================================================
@@ -185,7 +183,6 @@ def test_trigger_function_naming(pulumi_mocks, project_cwd):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_handler_string_form(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -193,17 +190,17 @@ def test_handler_string_form(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": "functions/auth/validate.handler"},
     )
 
-    def check(_):
-        fn_name = f"{TP}users-trigger-pre_sign_up"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        assert functions[0].inputs["handler"] == "validate.handler"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    fn = pool.resources.trigger_functions["pre_sign_up"]
-    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up", R.FUNCTION, {"handler": "validate.handler"}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_function_config_form(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -217,20 +214,20 @@ def test_function_config_form(pulumi_mocks, project_cwd):
         },
     )
 
-    def check(_):
-        fn_name = f"{TP}users-trigger-pre_sign_up"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        fn = functions[0]
-        assert fn.inputs["handler"] == "validate.handler"
-        assert fn.inputs["memorySize"] == 512
-        assert fn.inputs["timeout"] == 60
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    fn = pool.resources.trigger_functions["pre_sign_up"]
-    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up",
+        R.FUNCTION,
+        {"handler": "validate.handler", "memorySize": 512, "timeout": 60},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_existing_function_form(pulumi_mocks, project_cwd):
     existing_fn = Function("my-validator", handler="functions/auth/validate.handler")
     pool = UserPool(
@@ -239,21 +236,27 @@ def test_existing_function_form(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": existing_fn},
     )
 
-    def check(_):
-        # The existing function should be reused — no extra function created for the trigger
-        trigger_fn = pool.resources.trigger_functions["pre_sign_up"]
-        assert trigger_fn is existing_fn
+    @pulumi.runtime.test
+    def deploy():
+        return [pool.resources, existing_fn.resources]
 
-        # Only one function with the existing name, none with trigger naming
-        existing_fns = pulumi_mocks.created_functions(f"{TP}my-validator")
-        assert len(existing_fns) == 1
-        trigger_fns = pulumi_mocks.created_functions(f"{TP}users-trigger-pre_sign_up")
-        assert len(trigger_fns) == 0
+    deploy()
 
-    pulumi.Output.all(pool.arn, existing_fn.function_name).apply(check)
+    assert pool.resources.trigger_functions["pre_sign_up"] is existing_fn
+
+    # Only the existing function, none with trigger naming
+    pulumi_mocks.assert_res("my-validator", R.FUNCTION)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.USER_POOL: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.LAMBDA_PERMISSION: 1,
+        }
+    )
 
 
-@pulumi.runtime.test
 def test_dict_handler_form(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -263,16 +266,18 @@ def test_dict_handler_form(pulumi_mocks, project_cwd):
         },
     )
 
-    def check(_):
-        fn_name = f"{TP}users-trigger-pre_sign_up"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        fn = functions[0]
-        assert fn.inputs["handler"] == "validate.handler"
-        assert fn.inputs["memorySize"] == 256
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    fn = pool.resources.trigger_functions["pre_sign_up"]
-    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users-trigger-pre_sign_up",
+        R.FUNCTION,
+        {"handler": "validate.handler", "memorySize": 256},
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -280,25 +285,6 @@ def test_dict_handler_form(pulumi_mocks, project_cwd):
 # =========================================================================
 
 
-@pulumi.runtime.test
-def test_lambda_config_set_on_pool(pulumi_mocks, project_cwd):
-    pool = UserPool(
-        "users",
-        usernames=["email"],
-        triggers={"pre_sign_up": "functions/auth/validate.handler"},
-    )
-
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        lambda_config = mock.inputs["lambdaConfig"]
-        assert lambda_config is not None
-        assert "preSignUp" in lambda_config
-
-    fn = pool.resources.trigger_functions["pre_sign_up"]
-    pulumi.Output.all(pool.arn, fn.function_name).apply(check)
-
-
-@pulumi.runtime.test
 def test_lambda_config_maps_trigger_keys(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -309,21 +295,26 @@ def test_lambda_config_maps_trigger_keys(pulumi_mocks, project_cwd):
         },
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        lambda_config = mock.inputs["lambdaConfig"]
-        assert "preSignUp" in lambda_config
-        assert "postConfirmation" in lambda_config
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    fns = pool.resources.trigger_functions
-    pulumi.Output.all(
-        pool.arn,
-        fns["pre_sign_up"].function_name,
-        fns["post_confirmation"].function_name,
-    ).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {
+            "lambdaConfig": {
+                "preSignUp": PRE_SIGN_UP_FN_ARN,
+                "postConfirmation": f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:"
+                f"{tn(f'{TP}users-trigger-post_confirmation')}",
+            }
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_lambda_config_references_function_arn(pulumi_mocks, project_cwd):
     pool = UserPool(
         "users",
@@ -331,15 +322,15 @@ def test_lambda_config_references_function_arn(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": "functions/auth/validate.handler"},
     )
 
-    def check(fn_arn):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        lambda_config = mock.inputs["lambdaConfig"]
-        assert lambda_config["preSignUp"] == fn_arn
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pulumi.Output.all(
-        pool.resources.trigger_functions["pre_sign_up"].resources.function.arn,
-        pool.arn,
-    ).apply(lambda args: check(args[0]))
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users", R.USER_POOL, {"lambdaConfig": {"preSignUp": PRE_SIGN_UP_FN_ARN}}, partial=True
+    )
 
 
 # =========================================================================
@@ -358,15 +349,16 @@ def test_no_triggers_empty_dicts(pulumi_mocks):
     pool.arn.apply(check)
 
 
-@pulumi.runtime.test
 def test_no_triggers_lambda_config_none(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs.get("lambdaConfig") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"lambdaConfig": None}, partial=True)
 
 
 # =========================================================================

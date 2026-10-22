@@ -66,8 +66,8 @@ Stelvio provides high-level components for the most common AWS services:
 
 - **[Function](https://stelvio.dev/docs/components/aws/lambda/)** (AWS Lambda)
 - **[REST API](https://stelvio.dev/docs/components/aws/rest-api/)** (API Gateway v1)
-- **[HTTP API](https://main.stelvio.dev/docs/components/aws/http-api/)** (API Gateway v2)
-- **[WebSocket API](https://main.stelvio.dev/docs/components/aws/websocket-api/)** (API Gateway v2)
+- **[HTTP API](https://stelvio.dev/docs/components/aws/http-api/)** (API Gateway v2)
+- **[WebSocket API](https://stelvio.dev/docs/components/aws/websocket-api/)** (API Gateway v2)
 - **[Scheduled Tasks](https://stelvio.dev/docs/components/aws/cron/)** (EventBridge Cron)
 - **[Object Storage](https://stelvio.dev/docs/components/aws/s3/)** (S3)
 - **[NoSQL Database](https://stelvio.dev/docs/components/aws/dynamo-db/)** (DynamoDB)
@@ -78,7 +78,7 @@ Stelvio provides high-level components for the most common AWS services:
 - **[AppSync](https://stelvio.dev/docs/components/aws/appsync/)** (AWS AppSync Managed GraphQL APIs)
 - **[Cognito](https://stelvio.dev/docs/components/aws/cognito/)** (Amazon Cognito User Pools & Identity Pools)
 - **[Router](https://stelvio.dev/docs/components/aws/cloudfront-router/)** (CloudFront)
-- **[VPC](https://main.stelvio.dev/docs/components/aws/vpc/)** (Amazon VPC)
+- **[VPC](https://stelvio.dev/docs/components/aws/vpc/)** (Amazon VPC)
 
 ## Give it a try
 

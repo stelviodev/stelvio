@@ -57,7 +57,10 @@ _AWS_NAME_MAX_LENGTH = 255
 _AWS_IDENTIFIER_MAX_LENGTH = 63
 _DOCDB_GENERATED_SUFFIX_LENGTH = 26
 _MIN_ISOLATED_SUBNETS = 2
-_MAX_INSTANCES = 16
+_MAX_REPLICAS = 15
+_DEFAULT_MIN_CAPACITY = 0.5
+_DEFAULT_MAX_CAPACITY = 4
+_MAX_SERVERLESS_CAPACITY = 256
 _MAX_SECRET_ROTATION_DAYS = 1000
 _MIN_BACKUP_RETENTION_DAYS = 1
 _MAX_BACKUP_RETENTION_DAYS = 35
@@ -104,9 +107,11 @@ class DocumentDbConfig:
 
     Args:
         vpc: Existing Vpc whose isolated subnets host the cluster.
-        instances: Number of cluster instances (default: 1).
-        instance_class: Instance class with or without the ``db.`` prefix. None
-            uses ``t3.medium``.
+        replicas: Read replicas beyond the primary (default: 0, maximum: 15).
+        instance: ``serverless`` or family.size, with or without the ``db.``
+            prefix. None uses ``serverless``.
+        min_capacity: Minimum per-instance serverless DCUs (default: 0.5).
+        max_capacity: Maximum per-instance serverless DCUs (default: 4).
         engine: Engine version ``5.0`` or ``8.0`` (default: ``8.0``).
         deletion_protection: Block cluster deletion until flipped off. None uses
             the cluster default of False.
@@ -117,8 +122,10 @@ class DocumentDbConfig:
     """
 
     vpc: Vpc
-    instances: int = 1
-    instance_class: str | None = None
+    replicas: int = 0
+    instance: str | None = None
+    min_capacity: float | None = None
+    max_capacity: float | None = None
     engine: Literal["5.0", "8.0"] = "8.0"
     deletion_protection: bool | None = None
     backup_retention_period: int | None = None
@@ -126,11 +133,10 @@ class DocumentDbConfig:
 
     def __post_init__(self) -> None:
         _validate_vpc(self.vpc)
-        _validate_instances(self.instances)
-        if self.instance_class is not None:
-            object.__setattr__(
-                self, "instance_class", _normalize_instance_class(self.instance_class)
-            )
+        _validate_replicas(self.replicas)
+        if self.instance is not None:
+            _normalize_instance_class(self.instance)
+        _validate_capacity(self.instance_class, self.min_capacity, self.max_capacity)
         _validate_engine(self.engine)
         if self.deletion_protection is not None:
             _validate_deletion_protection(self.deletion_protection)
@@ -138,13 +144,20 @@ class DocumentDbConfig:
             _validate_backup_retention_period(self.backup_retention_period)
         _validate_secret_rotation(self.secret_rotation)
 
+    @property
+    def instance_class(self) -> str | None:
+        """Normalized AWS class, or None to use the default."""
+        return _normalize_instance_class(self.instance) if self.instance is not None else None
+
 
 class DocumentDbConfigDict(TypedDict, total=False):
     """Dict form of `DocumentDbConfig` — see it for field semantics."""
 
     vpc: Vpc
-    instances: int
-    instance_class: str | None
+    replicas: int
+    instance: str | None
+    min_capacity: float | None
+    max_capacity: float | None
     engine: Literal["5.0", "8.0"]
     deletion_protection: bool | None
     backup_retention_period: int | None
@@ -258,6 +271,11 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             {
                 "cluster_identifier_prefix": _identifier_prefix(self.name, suffix="-"),
                 "engine_version": _ENGINE_VERSIONS[self.config.engine],
+                "serverless_v2_scaling_configuration": (
+                    _capacity_range(self.config.min_capacity, self.config.max_capacity)
+                    if self.config.min_capacity is not None or self.config.max_capacity is not None
+                    else None
+                ),
                 "db_subnet_group_name": subnet_group.name,
                 "vpc_security_group_ids": [security_group.id],
                 "db_cluster_parameter_group_name": parameter_group.name,
@@ -266,6 +284,11 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                 "tags": {"Name": cluster_name},
             },
             default_props={
+                **(
+                    {"serverless_v2_scaling_configuration": _capacity_range(None, None)}
+                    if self.config.instance_class in (None, "db.serverless")
+                    else {}
+                ),
                 "engine": "docdb",
                 "master_username": "stelvio",
                 "manage_master_user_password": True,
@@ -283,6 +306,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         # The provider rejects both forms together, so normalize before splatting.
         _prefer_explicit_identifier(cluster_props, "cluster_identifier_prefix")
         _validate_manage_master_user_password(cluster_props.get("manage_master_user_password"))
+        ignore_changes = ["availability_zones"]
+        # AWS cannot remove this block, so its removal replaces the cluster
+        # (hashicorp/terraform-provider-aws#45049). Ignore omission so switching
+        # to a provisioned class keeps the cluster.
+        if cluster_props.get("serverless_v2_scaling_configuration") is None:
+            ignore_changes.append("serverless_v2_scaling_configuration")
         cluster = Cluster(
             cluster_name,
             **cluster_props,
@@ -291,7 +320,7 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             # the pad so a default 2-AZ Vpc does not recreate the database.
             opts=ResourceOptions.merge(
                 self._resource_opts(),
-                ResourceOptions(ignore_changes=["availability_zones"]),
+                ResourceOptions(ignore_changes=ignore_changes),
             ),
         )
         # After the cluster so from_port/to_port follow cluster.port (including customize).
@@ -309,11 +338,9 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         return cluster, cluster_props.get("manage_master_user_password") is True
 
     def _create_instances(self, cluster: Cluster) -> list[ClusterInstance]:
-        instance_class = (
-            f"db.{self.config.instance_class}" if self.config.instance_class is not None else None
-        )
+        instance_class = self.config.instance_class
         instances: list[ClusterInstance] = []
-        for i in range(1, self.config.instances + 1):
+        for i in range(1, self.config.replicas + 2):
             instance_name = self._resource_name(f"-{i}")
             instance_props = self._customizer(
                 "instance",
@@ -323,7 +350,12 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
                     "instance_class": instance_class,
                     "tags": {"Name": instance_name},
                 },
-                default_props={"engine": "docdb", "instance_class": "db.t3.medium"},
+                default_props={
+                    "engine": "docdb",
+                    "instance_class": "db.serverless",
+                    # Otherwise class changes wait for maintenance while state shows the new class.
+                    "apply_immediately": True,
+                },
                 inject_tags=True,
             )
             # The provider rejects both forms together, so normalize before splatting.
@@ -419,25 +451,55 @@ def _validate_vpc(vpc: Vpc) -> None:
         )
 
 
-def _validate_instances(instances: int) -> None:
-    if isinstance(instances, bool) or not isinstance(instances, int):
-        raise TypeError(f"`instances` must be an int, got {type(instances).__name__}")
-    if not 1 <= instances <= _MAX_INSTANCES:
-        raise ValueError(f"`instances` must be between 1 and {_MAX_INSTANCES}, got {instances}")
+def _validate_replicas(replicas: int) -> None:
+    if isinstance(replicas, bool) or not isinstance(replicas, int):
+        raise TypeError(f"`replicas` must be an int, got {type(replicas).__name__}")
+    if not 0 <= replicas <= _MAX_REPLICAS:
+        raise ValueError(f"`replicas` must be between 0 and {_MAX_REPLICAS}, got {replicas}")
 
 
 def _normalize_instance_class(instance_class: str) -> str:
     if not isinstance(instance_class, str):
-        raise TypeError(f"`instance_class` must be a str, got {type(instance_class).__name__}")
+        raise TypeError(f"`instance` must be a str, got {type(instance_class).__name__}")
     if not instance_class:
-        raise ValueError(f"`instance_class` must be a non-empty string, got {instance_class!r}")
+        raise ValueError(f"`instance` must be a non-empty string, got {instance_class!r}")
     normalized = instance_class.removeprefix("db.")
-    if not _INSTANCE_CLASS_RE.fullmatch(normalized):
+    if normalized != "serverless" and not _INSTANCE_CLASS_RE.fullmatch(normalized):
         raise ValueError(
-            f"`instance_class` must be family.size (e.g. 't3.medium' or 'db.t3.medium'), "
+            f"`instance` must be 'serverless' or family.size "
+            f"(e.g. 't3.medium' or 'db.t3.medium'), "
             f"got {instance_class!r}"
         )
-    return normalized
+    return f"db.{normalized}"
+
+
+def _capacity_range(minimum: float | None, maximum: float | None) -> dict[str, float]:
+    return {
+        "min_capacity": _DEFAULT_MIN_CAPACITY if minimum is None else minimum,
+        "max_capacity": _DEFAULT_MAX_CAPACITY if maximum is None else maximum,
+    }
+
+
+def _validate_capacity(instance: str | None, minimum: float | None, maximum: float | None) -> None:
+    if instance not in (None, "db.serverless") and (minimum is not None or maximum is not None):
+        raise ValueError(
+            f"`min_capacity` and `max_capacity` require a serverless `instance`, got {instance!r}"
+        )
+    bounds = _capacity_range(minimum, maximum)
+    for key, lower in (("min_capacity", _DEFAULT_MIN_CAPACITY), ("max_capacity", 1)):
+        value = bounds[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"`{key}` must be a number, got {type(value).__name__}")
+        if not lower <= value <= _MAX_SERVERLESS_CAPACITY or value % 0.5:
+            raise ValueError(
+                f"`{key}` must be a finite multiple of 0.5 between {lower} "
+                f"and {_MAX_SERVERLESS_CAPACITY}, got {value!r}"
+            )
+    if bounds["min_capacity"] > bounds["max_capacity"]:
+        raise ValueError(
+            "`min_capacity` must not exceed max_capacity, "
+            f"got min_capacity={bounds['min_capacity']!r}, max_capacity={bounds['max_capacity']!r}"
+        )
 
 
 def _validate_engine(engine: str) -> None:

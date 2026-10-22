@@ -165,8 +165,9 @@ class LambdaAuth:
         object.__setattr__(self, "identity_validation_expression", identity_validation_expression)
         object.__setattr__(self, "fn_opts", cast("FunctionConfigDict", dict(fn_opts)))
 
-    def to_authorizer_config(self, invoke_arn: Output[str]) -> dict[str, Any]:
-        config: dict[str, Any] = {"authorizer_uri": invoke_arn}
+    def to_authorizer_config(self, function_arn: Output[str]) -> dict[str, Any]:
+        # AppSync's `authorizerUri` takes the Lambda function ARN, not an invoke URI.
+        config: dict[str, Any] = {"authorizer_uri": function_arn}
         if self.result_ttl is not None:
             config["authorizer_result_ttl_in_seconds"] = self.result_ttl
         if self.identity_validation_expression:

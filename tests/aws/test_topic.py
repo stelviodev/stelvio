@@ -19,34 +19,6 @@ FILTER_POLICY_PRIORITY_HIGH = {"priority": ["high"]}
 # ARN templates
 TOPIC_ARN_TEMPLATE = f"arn:aws:sns:{DEFAULT_REGION}:{ACCOUNT_ID}:{{name}}"
 
-# Assertion helpers
-
-
-def assert_field_not_set_or_none(inputs: dict, field: str) -> None:
-    """Assert field is either not present in inputs OR is explicitly None."""
-    if field in inputs:
-        assert inputs[field] is None, f"Field '{field}' should be None but was {inputs[field]}"
-
-
-def assert_subscription_filter(
-    pulumi_mocks, subscription_name: str, expected_filter: dict | None
-) -> None:
-    """Verify subscription has expected filter policy."""
-    subs = pulumi_mocks.created_topic_subscriptions(subscription_name)
-    assert len(subs) == 1, f"Expected 1 subscription named '{subscription_name}'"
-
-    actual_filter_policy = subs[0].inputs.get("filterPolicy")
-
-    if expected_filter is None:
-        assert actual_filter_policy is None, (
-            f"Expected no filter policy, but got: {actual_filter_policy}"
-        )
-    else:
-        assert actual_filter_policy is not None, "Expected filter policy but got None"
-        actual_filter = json.loads(actual_filter_policy)
-        assert actual_filter == expected_filter
-
-
 # Topic creation tests
 
 
@@ -118,276 +90,276 @@ def test_topic_properties(pulumi_mocks, project_cwd):
 # Lambda subscription tests
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_creates_lambda_subscription(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     sub = topic.subscribe("handler", "functions/simple.handler")
 
-    def check_resources(args):
-        topic_arn, fn_arn, _ = args
-        sub_name = f"{TP}notifications-handler-subscription"
-        subs = pulumi_mocks.created_topic_subscriptions(sub_name)
-        assert len(subs) == 1
-        s = subs[0]
-        assert s.typ == "aws:sns/topicSubscription:TopicSubscription"
-        assert s.inputs["protocol"] == "lambda"
-        assert s.inputs["topic"] == topic_arn
-        assert s.inputs["endpoint"] == fn_arn
-        assert_field_not_set_or_none(s.inputs, "filterPolicy")
-        assert_field_not_set_or_none(s.inputs, "rawMessageDelivery")
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    pulumi.Output.all(
-        topic.arn,
-        sub.resources.function.resources.function.arn,
-        sub.resources.subscription.arn,
-    ).apply(check_resources)
+    deploy()
+
+    # Full compare: no filterPolicy, no rawMessageDelivery
+    pulumi_mocks.assert_res(
+        "notifications-handler-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        {
+            "protocol": "lambda",
+            "topic": TOPIC_ARN_TEMPLATE.format(name=tn(TP + "notifications")),
+            "endpoint": (
+                f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:"
+                f"{tn(TP + 'notifications-handler')}"
+            ),
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.TOPIC: 1,
+            R.TOPIC_SUBSCRIPTION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+        }
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_creates_lambda_function(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     sub = topic.subscribe("handler", "functions/simple.handler")
 
-    def check_resources(_):
-        fn_name = f"{TP}notifications-handler"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        fn = functions[0]
-        assert fn.typ == "aws:lambda/function:Function"
-        assert fn.inputs["handler"] == "simple.handler"
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.function.resources.function.arn.apply(check_resources)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "notifications-handler", R.FUNCTION, {"handler": "simple.handler"}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_creates_lambda_permission(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     sub = topic.subscribe("handler", "functions/simple.handler")
 
-    def check_resources(args):
-        topic_arn, fn_name, _ = args
-        perm_name = f"{TP}notifications-handler-subscription-perm"
-        permissions = pulumi_mocks.created_permissions(perm_name)
-        assert len(permissions) == 1
-        perm = permissions[0]
-        assert perm.typ == "aws:lambda/permission:Permission"
-        assert perm.inputs["action"] == "lambda:InvokeFunction"
-        assert perm.inputs["principal"] == "sns.amazonaws.com"
-        assert perm.inputs["sourceArn"] == topic_arn
-        assert perm.inputs["function"] == fn_name
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-        expected_keys = {"action", "principal", "sourceArn", "function"}
-        assert set(perm.inputs.keys()) == expected_keys
+    deploy()
 
-    pulumi.Output.all(
-        topic.arn,
-        sub.resources.function.function_name,
-        sub.resources.permission.id,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res(
+        "notifications-handler-subscription-perm",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunction",
+            "principal": "sns.amazonaws.com",
+            "sourceArn": TOPIC_ARN_TEMPLATE.format(name=tn(TP + "notifications")),
+            "function": tn(TP + "notifications-handler"),
+        },
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_with_function_config(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     config = FunctionConfig(handler="functions/simple.handler", memory=512, timeout=60)
     sub = topic.subscribe("handler", config)
 
-    def check_resources(_):
-        fn_name = f"{TP}notifications-handler"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        fn = functions[0]
-        assert fn.typ == "aws:lambda/function:Function"
-        assert fn.inputs["memorySize"] == 512
-        assert fn.inputs["timeout"] == 60
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.function.resources.function.arn.apply(check_resources)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "notifications-handler", R.FUNCTION, {"memorySize": 512, "timeout": 60}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_with_function_options(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     sub = topic.subscribe("handler", "functions/simple.handler", memory=256, timeout=30)
 
-    def check_resources(_):
-        fn_name = f"{TP}notifications-handler"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        fn = functions[0]
-        assert fn.typ == "aws:lambda/function:Function"
-        assert fn.inputs["memorySize"] == 256
-        assert fn.inputs["timeout"] == 30
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.function.resources.function.arn.apply(check_resources)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "notifications-handler", R.FUNCTION, {"memorySize": 256, "timeout": 30}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_with_function_config_dict(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     config_dict = {"handler": "functions/simple.handler", "memory": 512, "timeout": 60}
     sub = topic.subscribe("handler", config_dict)
 
-    def check_resources(_):
-        fn_name = f"{TP}notifications-handler"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        fn = functions[0]
-        assert fn.typ == "aws:lambda/function:Function"
-        assert fn.inputs["memorySize"] == 512
-        assert fn.inputs["timeout"] == 60
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.function.resources.function.arn.apply(check_resources)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "notifications-handler", R.FUNCTION, {"memorySize": 512, "timeout": 60}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_with_handler_in_opts(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     sub = topic.subscribe("handler", handler="functions/simple.handler", memory=256)
 
-    def check_resources(_):
-        fn_name = f"{TP}notifications-handler"
-        functions = pulumi_mocks.created_functions(fn_name)
-        assert len(functions) == 1
-        fn = functions[0]
-        assert fn.typ == "aws:lambda/function:Function"
-        assert fn.inputs["memorySize"] == 256
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.function.resources.function.arn.apply(check_resources)
+    deploy()
+
+    pulumi_mocks.assert_res("notifications-handler", R.FUNCTION, {"memorySize": 256}, partial=True)
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_with_filter(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     sub = topic.subscribe(
         "handler", "functions/simple.handler", filter_=FILTER_POLICY_ORDER_SHIPMENT
     )
 
-    def check_resources(_):
-        sub_name = f"{TP}notifications-handler-subscription"
-        assert_subscription_filter(pulumi_mocks, sub_name, FILTER_POLICY_ORDER_SHIPMENT)
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.subscription.arn.apply(check_resources)
+    deploy()
+
+    recorded = pulumi_mocks.assert_res("notifications-handler-subscription", R.TOPIC_SUBSCRIPTION)
+    assert json.loads(recorded.inputs["filterPolicy"]) == FILTER_POLICY_ORDER_SHIPMENT
 
 
-@pulumi.runtime.test
 def test_topic_multiple_lambda_subscriptions(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     sub1 = topic.subscribe("email-handler", "functions/simple.handler")
     sub2 = topic.subscribe("sms-handler", "functions/simple.handler")
 
-    def check_resources(_):
-        all_subs = pulumi_mocks.created_topic_subscriptions()
-        lambda_subs = [s for s in all_subs if s.inputs["protocol"] == "lambda"]
-        assert len(lambda_subs) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return [sub1.resources, sub2.resources]
 
-    pulumi.Output.all(
-        sub1.resources.subscription.arn,
-        sub2.resources.subscription.arn,
-    ).apply(check_resources)
+    deploy()
+
+    subs = pulumi_mocks.created(R.TOPIC_SUBSCRIPTION)
+    assert [s.inputs["protocol"] for s in subs] == ["lambda", "lambda"]
 
 
 # SQS queue subscription tests
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_queue_with_queue_component(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue = Queue("analytics")
     sub = topic.subscribe_queue("analytics", queue)
 
-    def check_resources(args):
-        topic_arn, queue_arn, _ = args
-        sub_name = f"{TP}notifications-analytics-queue-subscription"
-        subs = pulumi_mocks.created_topic_subscriptions(sub_name)
-        assert len(subs) == 1
-        s = subs[0]
-        assert s.typ == "aws:sns/topicSubscription:TopicSubscription"
-        assert s.inputs["protocol"] == "sqs"
-        assert s.inputs["topic"] == topic_arn
-        assert s.inputs["endpoint"] == queue_arn
-        assert_field_not_set_or_none(s.inputs, "filterPolicy")
-        assert s.inputs["rawMessageDelivery"] is False
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    pulumi.Output.all(
-        topic.arn,
-        queue.arn,
-        sub.resources.subscription.arn,
-    ).apply(check_resources)
+    deploy()
+
+    # Full compare: no filterPolicy
+    pulumi_mocks.assert_res(
+        "notifications-analytics-queue-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        {
+            "protocol": "sqs",
+            "topic": TOPIC_ARN_TEMPLATE.format(name=tn(TP + "notifications")),
+            "endpoint": f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{tn(TP + 'analytics')}",
+            "rawMessageDelivery": False,
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {R.TOPIC: 1, R.TOPIC_SUBSCRIPTION: 1, R.QUEUE: 1, R.QUEUE_POLICY: 1}
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_queue_creates_queue_policy(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue = Queue("analytics")
     sub = topic.subscribe_queue("analytics", queue)
 
-    def check_resources(args):
-        queue_url, _ = args
-        policies = pulumi_mocks.created_queue_policies()
-        assert len(policies) == 1
-        policy = policies[0]
-        assert policy.typ == "aws:sqs/queuePolicy:QueuePolicy"
-        assert policy.inputs["queueUrl"] == queue_url
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    pulumi.Output.all(
-        queue.url,
-        sub.resources.subscription.arn,
-    ).apply(check_resources)
+    deploy()
+
+    assert len(pulumi_mocks.created(R.QUEUE_POLICY)) == 1
+    queue_url = f"https://sqs.{DEFAULT_REGION}.amazonaws.com/{ACCOUNT_ID}/{tn(TP + 'analytics')}"
+    pulumi_mocks.assert_res(
+        "analytics-notifications-sns-policy",
+        R.QUEUE_POLICY,
+        {"queueUrl": queue_url},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_queue_with_arn_string(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue_arn = f"arn:aws:sqs:us-east-1:{ACCOUNT_ID}:external-queue"
     sub = topic.subscribe_queue("external", queue_arn)
 
-    def check_resources(args):
-        topic_arn, _ = args
-        sub_name = f"{TP}notifications-external-queue-subscription"
-        subs = pulumi_mocks.created_topic_subscriptions(sub_name)
-        assert len(subs) == 1
-        s = subs[0]
-        assert s.inputs["endpoint"] == queue_arn
-        assert s.inputs["topic"] == topic_arn
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-        policies = pulumi_mocks.created_queue_policies()
-        assert len(policies) == 0
+    deploy()
 
-    pulumi.Output.all(
-        topic.arn,
-        sub.resources.subscription.arn,
-    ).apply(check_resources)
+    pulumi_mocks.assert_res(
+        "notifications-external-queue-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        {"endpoint": queue_arn, "topic": TOPIC_ARN_TEMPLATE.format(name=tn(TP + "notifications"))},
+        partial=True,
+    )
+    pulumi_mocks.assert_no_res(R.QUEUE_POLICY)
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_queue_with_filter(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue = Queue("analytics")
     sub = topic.subscribe_queue("analytics", queue, filter_=FILTER_POLICY_PRIORITY_HIGH)
 
-    def check_resources(_):
-        sub_name = f"{TP}notifications-analytics-queue-subscription"
-        assert_subscription_filter(pulumi_mocks, sub_name, FILTER_POLICY_PRIORITY_HIGH)
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.subscription.arn.apply(check_resources)
+    deploy()
+
+    recorded = pulumi_mocks.assert_res(
+        "notifications-analytics-queue-subscription", R.TOPIC_SUBSCRIPTION
+    )
+    assert json.loads(recorded.inputs["filterPolicy"]) == FILTER_POLICY_PRIORITY_HIGH
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_queue_with_raw_message_delivery(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue = Queue("analytics")
     sub = topic.subscribe_queue("analytics", queue, raw_message_delivery=True)
 
-    def check_resources(_):
-        sub_name = f"{TP}notifications-analytics-queue-subscription"
-        subs = pulumi_mocks.created_topic_subscriptions(sub_name)
-        assert len(subs) == 1
-        assert subs[0].inputs["rawMessageDelivery"] is True
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.subscription.arn.apply(check_resources)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "notifications-analytics-queue-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        {"rawMessageDelivery": True},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_topic_subscribe_queue_with_filter_and_raw_message_delivery(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue = Queue("analytics")
@@ -395,46 +367,62 @@ def test_topic_subscribe_queue_with_filter_and_raw_message_delivery(pulumi_mocks
         "analytics", queue, filter_=FILTER_POLICY_PRIORITY_HIGH, raw_message_delivery=True
     )
 
-    def check_resources(_):
-        sub_name = f"{TP}notifications-analytics-queue-subscription"
-        assert_subscription_filter(pulumi_mocks, sub_name, FILTER_POLICY_PRIORITY_HIGH)
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-        subs = pulumi_mocks.created_topic_subscriptions(sub_name)
-        assert subs[0].inputs["rawMessageDelivery"] is True
+    deploy()
 
-    sub.resources.subscription.arn.apply(check_resources)
+    recorded = pulumi_mocks.assert_res(
+        "notifications-analytics-queue-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        {"rawMessageDelivery": True},
+        partial=True,
+    )
+    assert json.loads(recorded.inputs["filterPolicy"]) == FILTER_POLICY_PRIORITY_HIGH
 
 
-@pulumi.runtime.test
 def test_topic_fifo_subscribe_fifo_queue(pulumi_mocks, project_cwd):
     topic = Topic("orders", fifo=True)
     queue = Queue("processing", fifo=True)
     sub = topic.subscribe_queue("processor", queue)
 
-    def check_resources(_):
-        subs = pulumi_mocks.created_topic_subscriptions()
-        assert len(subs) == 1
-        assert subs[0].inputs["protocol"] == "sqs"
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.subscription.arn.apply(check_resources)
+    deploy()
+
+    assert len(pulumi_mocks.created(R.TOPIC_SUBSCRIPTION)) == 1
+    pulumi_mocks.assert_res(
+        "orders-processor-queue-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        {"protocol": "sqs"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_topic_fifo_subscribe_standard_queue(pulumi_mocks, project_cwd):
     """Verify FIFO topic can subscribe to standard queue (AWS allows this)."""
     topic = Topic("orders", fifo=True)
     queue = Queue("processing")  # Standard queue
     sub = topic.subscribe_queue("processor", queue)
 
-    def check_resources(_):
-        subs = pulumi_mocks.created_topic_subscriptions()
-        assert len(subs) == 1
-        assert subs[0].inputs["protocol"] == "sqs"
+    @pulumi.runtime.test
+    def deploy():
+        return sub.resources
 
-    sub.resources.subscription.arn.apply(check_resources)
+    deploy()
+
+    assert len(pulumi_mocks.created(R.TOPIC_SUBSCRIPTION)) == 1
+    pulumi_mocks.assert_res(
+        "orders-processor-queue-subscription",
+        R.TOPIC_SUBSCRIPTION,
+        {"protocol": "sqs"},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_topic_multiple_queue_subscriptions(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue1 = Queue("analytics")
@@ -442,59 +430,40 @@ def test_topic_multiple_queue_subscriptions(pulumi_mocks, project_cwd):
     sub1 = topic.subscribe_queue("analytics", queue1)
     sub2 = topic.subscribe_queue("archival", queue2)
 
-    def check_resources(args):
-        queue1_arn, queue2_arn, _, _ = args
-        all_subs = pulumi_mocks.created_topic_subscriptions()
-        sqs_subs = [s for s in all_subs if s.inputs["protocol"] == "sqs"]
-        assert len(sqs_subs) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return [sub1.resources, sub2.resources]
 
-        policies = pulumi_mocks.created_queue_policies()
-        assert len(policies) == 2
+    deploy()
 
-        policy_resources = set()
-        for policy in policies:
-            policy_doc = json.loads(policy.inputs["policy"])
-            policy_resources.add(policy_doc["Statement"][0]["Resource"])
-
-        assert queue1_arn in policy_resources
-        assert queue2_arn in policy_resources
-
-    pulumi.Output.all(
-        queue1.arn,
-        queue2.arn,
-        sub1.resources.subscription.arn,
-        sub2.resources.subscription.arn,
-    ).apply(check_resources)
+    subs = pulumi_mocks.created(R.TOPIC_SUBSCRIPTION)
+    assert [s.inputs["protocol"] for s in subs] == ["sqs", "sqs"]
+    policy_resources = sorted(
+        json.loads(p.inputs["policy"])["Statement"][0]["Resource"]
+        for p in pulumi_mocks.created(R.QUEUE_POLICY)
+    )
+    assert policy_resources == [
+        f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{tn(TP + 'analytics')}",
+        f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{tn(TP + 'archival')}",
+    ]
 
 
-@pulumi.runtime.test
 def test_topic_mixed_lambda_and_queue_subscriptions(pulumi_mocks, project_cwd):
     topic = Topic("notifications")
     queue = Queue("analytics")
     lambda_sub = topic.subscribe("processor", "functions/simple.handler")
     queue_sub = topic.subscribe_queue("analytics", queue)
 
-    def check_resources(_):
-        all_subs = pulumi_mocks.created_topic_subscriptions()
-        assert len(all_subs) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return [lambda_sub.resources, queue_sub.resources]
 
-        lambda_subs = [s for s in all_subs if s.inputs["protocol"] == "lambda"]
-        sqs_subs = [s for s in all_subs if s.inputs["protocol"] == "sqs"]
-        assert len(lambda_subs) == 1
-        assert len(sqs_subs) == 1
+    deploy()
 
-        permissions = pulumi_mocks.created_permissions()
-        assert len(permissions) == 1
-
-        policies = pulumi_mocks.created_queue_policies()
-        assert len(policies) == 1
-
-    pulumi.Output.all(
-        lambda_sub.resources.subscription.arn,
-        lambda_sub.resources.permission.id,
-        queue_sub.resources.subscription.arn,
-        queue_sub.resources.queue_policy.id,
-    ).apply(check_resources)
+    subs = pulumi_mocks.created(R.TOPIC_SUBSCRIPTION)
+    assert sorted(s.inputs["protocol"] for s in subs) == ["lambda", "sqs"]
+    assert len(pulumi_mocks.created(R.LAMBDA_PERMISSION)) == 1
+    assert len(pulumi_mocks.created(R.QUEUE_POLICY)) == 1
 
 
 # Validation error tests

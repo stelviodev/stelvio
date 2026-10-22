@@ -12,6 +12,12 @@ from stelvio.context import context
 
 API_ALLOWED_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
 API_CACHED_METHODS = ["GET", "HEAD"]
+# AWS managed policies. Their IDs are the same in every account, so no lookup on each preview:
+# https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html
+# https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-origin-request-policies.html
+CACHING_DISABLED_POLICY_ID = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+# Every viewer header but Host: API Gateway picks the API by Host, a foreign one gets 403.
+ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 
 # (customize key, computed props, default props) -> props: the owning Router's `_customizer`
 type Customizer = Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]]
@@ -66,56 +72,63 @@ class ComponentCloudfrontAdapter(ABC):
             },
         }
 
-    def _api_cache_behavior(
+    def _api_cache_behaviors(
         self,
         *,
         origin_id: pulumi.Input[str],
-        cf_function: pulumi_aws.cloudfront.Function,
-        forwarded_headers: list[str] | None = None,
-    ) -> dict:
-        forwarded_values = {
-            "query_string": True,
-            "cookies": {"forward": "none"},
-        }
-        if forwarded_headers is not None:
-            forwarded_values["headers"] = forwarded_headers
+        cf_function: pulumi_aws.cloudfront.Function | None,
+    ) -> list[dict]:
+        return self._cache_behaviors(
+            {
+                "allowed_methods": API_ALLOWED_METHODS,
+                "cached_methods": API_CACHED_METHODS,
+                "target_origin_id": origin_id,
+                "viewer_protocol_policy": "redirect-to-https",
+                # Legacy `forwarded_values` drop `Authorization` on GET and every cookie.
+                "cache_policy_id": CACHING_DISABLED_POLICY_ID,
+                "origin_request_policy_id": ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
+                "function_associations": self._function_associations(cf_function),
+            }
+        )
 
-        return {
-            "path_pattern": self._path_pattern(),
-            "allowed_methods": API_ALLOWED_METHODS,
-            "cached_methods": API_CACHED_METHODS,
-            "target_origin_id": origin_id,
-            "compress": True,
-            "viewer_protocol_policy": "redirect-to-https",
-            "forwarded_values": forwarded_values,
-            "min_ttl": 0,
-            "default_ttl": 0,
-            "max_ttl": 0,
-            "function_associations": [
-                {
-                    "event_type": "viewer-request",
-                    "function_arn": cf_function.arn,
-                }
-            ],
-        }
+    def _cache_behaviors(self, behavior: dict) -> list[dict]:
+        """`behavior` for the exact path and for everything under it: `/api/*` alone sends
+        `/api` to the default behavior. Root and wildcard routes have no exact path."""
+        patterns = [self._path_pattern()]
+        if not (self.route.is_root or self.route.path_pattern.endswith("*")):
+            patterns.insert(0, self.route.path_pattern)
+        return [{"path_pattern": pattern, **behavior} for pattern in patterns]
+
+    @staticmethod
+    def _function_associations(cf_function: pulumi_aws.cloudfront.Function | None) -> list[dict]:
+        if cf_function is None:
+            return []
+        return [{"event_type": "viewer-request", "function_arn": cf_function.arn}]
 
     def _uri_rewrite_function(
         self,
         *,
         component_name: str,
         depends_on: list[pulumi.Resource],
-    ) -> pulumi_aws.cloudfront.Function:
+    ) -> pulumi_aws.cloudfront.Function | None:
+        defaults = {
+            "runtime": "cloudfront-js-2.0",
+            "code": strip_path_pattern_function_js(self.route.path_pattern),
+            "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}",
+        }
+        props = self.customize("cloudfront_functions", {}, defaults)
+        # The root route has no prefix to strip, and its function would run on every request
+        # that reaches the default behavior (billed per invocation). A wildcard route's
+        # function compares the `*` literally and never matches a real path. Only the
+        # generated code is skipped: a customized `code` is the user's own function (a guard,
+        # a redirect) and keeps its association.
+        if (self.route.is_root or self.route.path_pattern.endswith("*")) and props.get(
+            "code"
+        ) == defaults["code"]:
+            return None
         return pulumi_aws.cloudfront.Function(
             context().prefix(f"{component_name}-uri-rewrite-{self.idx}"),
-            **self.customize(
-                "cloudfront_functions",
-                {},
-                {
-                    "runtime": "cloudfront-js-2.0",
-                    "code": strip_path_pattern_function_js(self.route.path_pattern),
-                    "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}",
-                },
-            ),
+            **props,
             opts=pulumi.ResourceOptions.merge(
                 self.resource_opts,
                 pulumi.ResourceOptions(depends_on=depends_on),

@@ -134,9 +134,6 @@ the input you didn't mean to send, so prefer it. JSON-string inputs compare pars
 all the resources, not just the ones you're testing**, otherwise everything outside your three
 assertions is unguarded. `assert_no_res(*types)` is the negative form.
 
-Older suites use `created_*` helpers returning lists you count by hand. Read them, don't write
-them.
-
 ## Parametrize what varies
 
 Tests that differ only in inputs and expected values are one parametrized test:
