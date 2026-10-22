@@ -518,3 +518,17 @@ uv run pytest tests/integration/test_ssm_cleanup.py tests/integration/test_tunne
 
 These local tests do not certify live acceptance. Record privileged and AWS
 results for each new candidate; previous failed runs retain their original result.
+
+
+### Worker-status checks in CLI acceptance
+
+Rich can wrap a worker-status message between fields in captured CLI output.
+The acceptance fixture reads one complete record across at most four lines and
+4096 characters. It requires the requested VPC identity, state, numeric attempt,
+exact cause, and DNS-retention flag in that record. A cause from another VPC or
+an unrelated message cannot satisfy the check. Incomplete records remain pending
+until more output arrives; command exit and timeout still fail the check.
+
+`tests/integration/test_tunnel_audit.py` covers unwrapped and wrapped records,
+partial output, neighboring VPCs, invalid fields, bounds, and command exit. The
+privileged AWS host-key scenario verifies the full rejection and restart path.

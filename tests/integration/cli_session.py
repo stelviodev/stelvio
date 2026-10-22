@@ -690,17 +690,28 @@ finally:
         self, identity: str, cause: str, *, state: str = "failed", timeout: float = 180
     ) -> None:
         deadline = time.monotonic() + timeout
-        needle = f"{identity}: {state} "
+        needle = f"{identity}: {state}"
+        record = re.compile(
+            rf"{re.escape(needle)}\s+attempt=[0-9]+\s+"
+            rf"cause={re.escape(cause)}\s+retained_dns=(?:True|False)"
+        )
         while time.monotonic() < deadline:
             if self.process is None or self.process.poll() is not None:
                 raise RuntimeError(
                     f"Dev CLI exited before {identity} reported {cause}: {self.log()}"
                 )
-            if any(
-                line.lstrip().startswith(needle) and f"cause={cause}" in line
-                for line in self.log().splitlines()
-            ):
-                return
+            lines = self.log().splitlines()
+            for index, line in enumerate(lines):
+                if not line.lstrip().startswith(needle):
+                    continue
+                # Rich may wrap between status fields. Match one complete,
+                # bounded record; never borrow a cause from another VPC.
+                for end in range(index + 1, min(index + 4, len(lines)) + 1):
+                    candidate = "\n".join(lines[index:end]).strip()
+                    if len(candidate) > 4096:
+                        break
+                    if record.fullmatch(candidate):
+                        return
             time.sleep(1)
         raise TimeoutError(f"VPC {identity} did not report {state} cause={cause}")
 

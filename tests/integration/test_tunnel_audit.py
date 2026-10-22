@@ -1262,3 +1262,97 @@ def test_destroy_requires_certified_host_state(monkeypatch, command_session, no_
         helper.assert_not_called()
     else:
         helper.assert_called_once_with()
+
+
+@pytest.fixture
+def worker_status_session(command_session, monkeypatch):
+    session = command_session
+    session.process = Mock()
+    session.process.poll.return_value = None
+    session.log = Mock(return_value="")
+    clock = SimpleNamespace(now=0)
+
+    def sleep(delay):
+        clock.now += delay
+
+    monkeypatch.setattr(
+        cli_session, "time", SimpleNamespace(monotonic=lambda: clock.now, sleep=sleep)
+    )
+    return session
+
+
+_WORKER_ID = "urn:pulumi:tunnel-proof::stlv-tunnel-04a1caa5::stelvio:aws:Vpc::net1"
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "{identity}: failed attempt=2 cause=ssh-host-key retained_dns=True",
+        "  {identity}: failed \nattempt=2 cause=ssh-host-key retained_dns=True",
+        "  {identity}: failed\n  attempt=2\n  cause=ssh-host-key\n  retained_dns=True",
+        "  {identity}: failed attempt=2\n cause=ssh-host-key retained_dns=False\n",
+    ],
+    ids=["unwrapped", "captured-rich-wrap", "four-lines", "cause-wrap"],
+)
+def test_worker_cause_accepts_complete_wrapped_record(worker_status_session, record):
+    session = worker_status_session
+    session.log.return_value = record.format(identity=_WORKER_ID)
+    session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "{identity}-other: failed attempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: ready attempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed attempt=2 cause=ssh-host-key-other retained_dns=True",
+        "{identity}: failed attempt=2 cause=ssh-host-key",
+        "{identity}: failed attempt=2 cause=ssh-host-key retained_dns=Maybe",
+        "{identity}: failed attempt=bad cause=ssh-host-key retained_dns=True",
+        "{identity}: failed\nNetwork DEGRADED\nattempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed attempt=2\n"
+        "{identity}-other: failed attempt=3 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed attempt=2 cause=transport retained_dns=True\n"
+        "{identity}-other: failed attempt=3 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed\n\n\n\nattempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed " + " " * 4096 + "attempt=2 cause=ssh-host-key retained_dns=True",
+    ],
+    ids=[
+        "wrong-vpc",
+        "wrong-state",
+        "wrong-cause",
+        "incomplete",
+        "invalid-dns",
+        "invalid-attempt",
+        "unrelated-message",
+        "neighbor-continuation",
+        "neighbor-cause",
+        "too-many-lines",
+        "oversized",
+    ],
+)
+def test_worker_cause_rejects_unmatched_records(worker_status_session, record):
+    session = worker_status_session
+    session.log.return_value = record.format(identity=_WORKER_ID)
+    with pytest.raises(TimeoutError, match="did not report failed cause=ssh-host-key"):
+        session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
+
+
+def test_worker_cause_waits_for_complete_output(worker_status_session):
+    session = worker_status_session
+    session.log.side_effect = [
+        f"{_WORKER_ID}: failed\nattempt=2 cause=ssh-host-key",
+        f"{_WORKER_ID}: failed\nattempt=2 cause=ssh-host-key retained_dns=True",
+    ]
+    session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
+    assert session.log.call_count == 2
+
+
+def test_worker_cause_rejects_exited_process(worker_status_session):
+    session = worker_status_session
+    session.process.poll.return_value = 1
+    session.log.return_value = (
+        f"{_WORKER_ID}: failed attempt=2 cause=ssh-host-key retained_dns=True"
+    )
+    with pytest.raises(RuntimeError, match="exited before"):
+        session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
