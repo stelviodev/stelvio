@@ -43,7 +43,11 @@ from stelvio.tunnel.installation import INSTALLED_HELPER
 from .assert_tunnel import (
     AbsenceAuditOptions,
     assert_application_absent,
+    assert_proof_lambda_namespace_empty,
+    capture_proof_lambda_log_groups,
     capture_proof_volume_ids,
+    delete_proof_lambda_log_groups,
+    validate_proof_lambda_function_names,
 )
 
 if TYPE_CHECKING:
@@ -80,6 +84,12 @@ class StandaloneCliSession:
                 "Configured AWS credentials do not match STLV_TEST_TUNNEL_AWS_ACCOUNT; "
                 "no proof resources were created"
             )
+        try:
+            assert_proof_lambda_namespace_empty(
+                sdk=self.aws, app=self.app, env=self.environment_name
+            )
+        except RuntimeError as error:
+            pytest.fail(str(error), pytrace=False)
         if require_helper and not INSTALLED_HELPER.is_file():
             pytest.skip("Install the approved native helper before standalone acceptance")
         if require_helper:
@@ -100,6 +110,7 @@ class StandaloneCliSession:
         self._deployed = False
         self._state_hash: str | None = None
         self._outputs: dict[str, object] = {}
+        self._proof_lambda_function_names: tuple[str, ...] = ()
         self._manifest = None
         self._proof_trust_targets: list[HostIdentity] = []
         self._fault_command_uncertain: str | None = None
@@ -152,6 +163,7 @@ def run():
             source += """
     function = Function('plain', handler='handlers/plain.handler', url='public')
     export_output('function1_url', function.url)
+    export_output('function1_name', function.resources.function.name)
 """
         else:
             source += """
@@ -174,7 +186,9 @@ def run():
     plain_function = Function('plain', handler='handlers/plain.handler', url='public')
     export_output('vpc3_id', disabled.resources.vpc.id)
     export_output('function3_url', disabled_function.url)
+    export_output('function3_name', disabled_function.resources.function.name)
     export_output('function4_url', plain_function.url)
+    export_output('function4_name', plain_function.resources.function.name)
 """
         source = source.replace("APP_NAME", repr(self.app))
         (self.project / "stlv_app.py").write_text(source)
@@ -257,6 +271,16 @@ def run():
         self.command("deploy", self.environment_name, "--yes", timeout=STARTUP_TIMEOUT)
         outputs = json.loads(self.command("outputs", self.environment_name, "--json"))
         self._outputs = outputs["user_defined"]
+        function_name_keys = (
+            ("function1_name",)
+            if self.no_vpc
+            else tuple(f"function{number}_name" for number in range(1, 5))
+        )
+        self._proof_lambda_function_names = validate_proof_lambda_function_names(
+            app=self.app,
+            env=self.environment_name,
+            function_names=tuple(self._outputs[key] for key in function_name_keys),
+        )
         state = self.state()
         self._state_hash = hashlib.sha256(state).hexdigest()
         self._manifest = read_network_manifest(json.loads(state))
@@ -864,12 +888,44 @@ finally:
         elif not self.no_vpc:
             raise RuntimeError("Retaining VPC proof deployment because the helper is unavailable")
 
+    def _capture_dev_lambda_log_groups(self) -> tuple[tuple[str, ...], list[Exception]]:
+        if getattr(self, "_mode", "standalone") != "dev":
+            return (), []
+        try:
+            groups = capture_proof_lambda_log_groups(
+                sdk=self.aws,
+                app=self.app,
+                env=self.environment_name,
+                function_names=getattr(self, "_proof_lambda_function_names", ()),
+            )
+        except Exception as error:
+            failure = RuntimeError("Proof Lambda log groups could not be captured before destroy")
+            failure.__cause__ = error
+            return (), [failure]
+        return groups, []
+
+    def _remove_dev_lambda_log_groups(self, names: tuple[str, ...]) -> list[Exception]:
+        if getattr(self, "_mode", "standalone") != "dev" or not names:
+            return []
+        try:
+            delete_proof_lambda_log_groups(
+                sdk=self.aws,
+                app=self.app,
+                env=self.environment_name,
+                function_names=getattr(self, "_proof_lambda_function_names", ()),
+                log_group_names=names,
+            )
+        except Exception as error:
+            return [error]
+        return []
+
     def destroy(self) -> None:
         if not self._deployed:
             return
         if self.process is not None and self.process.poll() is None:
             self.terminate()
         self._require_idle_host()
+        proof_lambda_log_groups, log_group_errors = self._capture_dev_lambda_log_groups()
         volume_capture_error = None
         try:
             bastion_ids = [
@@ -891,10 +947,12 @@ finally:
             error = RuntimeError("Bastion block-device absence could not be certified")
             error.__cause__ = volume_capture_error
             errors.append(error)
+        errors.extend(log_group_errors)
         try:
             self.command("destroy", self.environment_name, "--yes", timeout=DESTROY_TIMEOUT)
         except Exception as error:
             errors.append(error)
+        errors.extend(self._remove_dev_lambda_log_groups(proof_lambda_log_groups))
         try:
             self._assert_aws_resources_absent()
         except Exception as error:
