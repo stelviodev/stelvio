@@ -1,6 +1,5 @@
 """Opt-in standalone CLI → deployed DocumentDB acceptance."""
 
-import hashlib
 import signal
 import time
 
@@ -154,8 +153,6 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     session.start_dev()
     session.wait_ready()
     session.assert_selected_routes()
-    # Dev mode deploys its stub bridge. Compare state from that point through session exit.
-    session._state_hash = hashlib.sha256(session.state()).hexdigest()
     first_vpc = next(vpc for vpc in session.manifest.enabled_vpcs if vpc.identity.endswith("net1"))
     second_vpc = next(
         vpc for vpc in session.manifest.enabled_vpcs if vpc.identity.endswith("net2")
@@ -307,7 +304,6 @@ def test_dev_host_key_rotation_is_terminal_until_a_new_session(standalone_cli_se
     session.start_dev()
     session.wait_ready()
     session.assert_selected_routes()
-    session._state_hash = hashlib.sha256(session.state()).hexdigest()
     vpc = next(vpc for vpc in session.manifest.enabled_vpcs if vpc.identity.endswith("net1"))
     marker = f"{session.app}-host-key-proof"
     assert session.wait_function_marker(1, marker)["read_write"]

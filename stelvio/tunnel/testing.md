@@ -471,6 +471,24 @@ the subprocess arguments, captured local-binary selection, and real CLI
 confirmation behavior before the opt-in AWS run. Standalone acceptance still uses
 `stlv tunnel start ENV` without deployment confirmation flags.
 
+## Deployment state baselines
+
+Standalone acceptance captures the deployed checkpoint before `stlv tunnel start`.
+Startup and shutdown must leave those exact bytes unchanged because the command
+does not deploy.
+
+Each `stlv dev` startup deploys fresh endpoint IDs. The acceptance fixture discards
+the previous baseline when it starts a dev command and captures a new one after
+both networking and the invocation bridge are ready. It compares exact checkpoint
+bytes from that point through shutdown. Later readiness checks do not refresh the
+baseline, and failed startup cannot reuse an earlier command's checkpoint.
+
+The reconnect/SIGKILL and host-key restart scenarios both use this lifecycle. Do
+not compare raw checkpoints across separate dev deployments or normalize away
+changes during a running session. Mocked regressions in
+`tests/integration/test_tunnel_audit.py` check baseline capture, restart, startup
+failure, and unexpected state changes without AWS or host mutations.
+
 ## SSM cleanup and history finalization
 
 Each shutdown check requires matching production start, observed-session, and
