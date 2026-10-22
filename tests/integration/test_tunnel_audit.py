@@ -987,6 +987,149 @@ def command_session(tmp_path, monkeypatch):
     return session
 
 
+@pytest.fixture
+def baseline_session(command_session, monkeypatch):
+    import hashlib
+
+    session = command_session
+    session.log_path = session.project / "tunnel-start.log"
+    session._log_file = None
+    session._state_hash = hashlib.sha256(b"deployed checkpoint").hexdigest()
+    current = SimpleNamespace(
+        state=b"deployed checkpoint",
+        output="Network READY\nStelvio local dev server connected to AppSync.",
+    )
+    session.state = Mock(side_effect=lambda: current.state)
+    session.log = lambda: current.output
+
+    def start_process(*args, **kwargs):
+        process = Mock()
+        process.poll.return_value = None
+
+        def wait(**kwargs):
+            if process.poll.return_value is None:
+                process.poll.return_value = 0
+            return process.poll.return_value
+
+        process.wait.side_effect = wait
+        return process
+
+    monkeypatch.setattr(cli_session.subprocess, "Popen", start_process)
+    try:
+        yield session, current
+    finally:
+        if session._log_file is not None:
+            session._log_file.close()
+
+
+@pytest.mark.parametrize(
+    "ready_commands", [(True, True, True), (True, False, True)], ids=["reconnect", "host-key"]
+)
+def test_dev_restarts_capture_each_ready_deployment(baseline_session, ready_commands):
+    session, current = baseline_session
+    for index, ready in enumerate(ready_commands):
+        current.state = f"dev deployment {index}".encode()
+        session.state.reset_mock()
+        session.start_dev()
+        assert session._state_hash is None
+        session.state.assert_not_called()
+        if ready:
+            session.wait_ready()
+            session.state.assert_called_once_with()
+            session.assert_state_unchanged()
+        else:
+            current.output = "Network DEGRADED: ssh-host-key"
+            session.process.poll.return_value = 1
+            with pytest.raises(RuntimeError, match="exited before readiness"):
+                session.wait_ready()
+            with pytest.raises(AssertionError, match="No valid checkpoint baseline"):
+                session.assert_state_unchanged()
+            session.state.assert_not_called()
+            current.output = "Network READY\nStelvio local dev server connected to AppSync."
+        session.terminate()
+
+
+@pytest.mark.parametrize(
+    "output", ["Network READY", "Network DEGRADED\nlocal dev server connected to AppSync"]
+)
+def test_dev_baseline_waits_for_network_and_bridge(baseline_session, monkeypatch, output):
+    session, current = baseline_session
+    session.start_dev()
+    current.output = output
+
+    def become_ready(_delay):
+        assert session._state_hash is None
+        session.state.assert_not_called()
+        current.output = "Network READY\nlocal dev server connected to AppSync"
+
+    monkeypatch.setattr(
+        cli_session,
+        "time",
+        SimpleNamespace(monotonic=cli_session.time.monotonic, sleep=become_ready),
+    )
+    session.wait_ready()
+    session.state.assert_called_once_with()
+    session.assert_state_unchanged()
+
+
+def test_repeated_dev_readiness_does_not_hide_state_changes(baseline_session):
+    session, current = baseline_session
+    session.start_dev()
+    session.wait_ready()
+    session.wait_ready()
+    session.state.assert_called_once_with()
+    baseline = session._state_hash
+    current.state = b"unexpected write after readiness"
+    with pytest.raises(AssertionError):
+        session.assert_state_unchanged()
+    session.wait_ready()
+    assert session._state_hash == baseline
+    with pytest.raises(AssertionError):
+        session.assert_state_unchanged()
+
+
+@pytest.mark.parametrize("failure", ["launch", "exit", "timeout", "state-read"])
+def test_failed_dev_startup_cannot_reuse_baseline(baseline_session, monkeypatch, failure):
+    session, current = baseline_session
+    if failure == "launch":
+        monkeypatch.setattr(cli_session.subprocess, "Popen", Mock(side_effect=OSError("launch")))
+        with pytest.raises(OSError, match="launch"):
+            session.start_dev()
+    else:
+        session.start_dev()
+        if failure == "exit":
+            session.process.poll.return_value = 1
+            expected = RuntimeError
+        elif failure == "timeout":
+            current.output = "Network STARTING"
+            monkeypatch.setattr(
+                cli_session,
+                "time",
+                SimpleNamespace(monotonic=Mock(side_effect=[0, 0, 2]), sleep=lambda _: None),
+            )
+            expected = TimeoutError
+        else:
+            session.state.side_effect = RuntimeError("state read failed")
+            expected = RuntimeError
+        with pytest.raises(expected):
+            session.wait_ready(timeout=1)
+    assert session._state_hash is None
+    with pytest.raises(AssertionError, match="No valid checkpoint baseline"):
+        session.assert_state_unchanged()
+
+
+def test_standalone_readiness_preserves_deployment_baseline(baseline_session):
+    session, current = baseline_session
+    baseline = session._state_hash
+    session.start()
+    current.state = b"unexpected write during tunnel startup"
+    session.wait_ready()
+    session.state.assert_not_called()
+    assert session._state_hash == baseline
+    with pytest.raises(AssertionError):
+        session.assert_state_unchanged()
+
+
 @pytest.mark.parametrize("outcome", ["success", "failure", "timeout"])
 def test_cli_command_retains_private_output_and_status(monkeypatch, command_session, outcome):
     import json
