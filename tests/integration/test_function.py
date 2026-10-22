@@ -1,9 +1,11 @@
+import time
+
 import pytest
 
 from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionUrlConfig
 from stelvio.aws.layer import Layer
-from stelvio.aws.vpc import Vpc
+from stelvio.aws.vpc import NatConfig, Vpc
 
 from .assert_helpers import (
     assert_lambda_function,
@@ -227,3 +229,29 @@ def test_function_in_vpc(stelvio_env, project_dir):
     assert [
         (r["IpProtocol"], r["IpRanges"], r["Ipv6Ranges"]) for r in app_sg["IpPermissionsEgress"]
     ] == [("-1", [{"CidrIp": "0.0.0.0/0"}], [])]
+
+
+@pytest.mark.integration_vpc
+def test_function_in_vpc_with_nat(stelvio_env, project_dir):
+    def infra():
+        vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))
+        private = Function("private", handler="handlers/net_probe.main", vpc=vpc)
+        isolated = Function(
+            "isolated", handler="handlers/net_probe.main", vpc={"vpc": vpc, "subnets": "isolated"}
+        )
+        export_function(private)
+        export_function(isolated)
+
+    outputs = stelvio_env.deploy(infra)
+
+    # behavior: the NAT serves the private subnets only; isolated stays cut off.
+    # Right after a fresh deploy AWS can drop the first egress with the NAT available and
+    # every route active (2 of 4 runs, open by +30 s), so poll instead of asserting once.
+    deadline = time.monotonic() + 120
+    egress = invoke_lambda(outputs["function_private_arn"])
+    while egress != {"egress": True} and time.monotonic() < deadline:
+        time.sleep(10)
+        egress = invoke_lambda(outputs["function_private_arn"])
+    assert egress == {"egress": True}
+    # only once the NAT path is open does False here mean routing, not timing
+    assert invoke_lambda(outputs["function_isolated_arn"]) == {"egress": False}
