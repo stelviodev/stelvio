@@ -72,6 +72,9 @@ def transport_world(tmp_path, monkeypatch):
     monkeypatch.setattr("stelvio.tunnel.host_trust._acl", lambda *args: None)
     clients = {service: Mock() for service in ("ec2", "ssm", "sts")}
     session.client.side_effect = lambda name, **kwargs: clients[name]
+    clients["ssm"].terminate_session.side_effect = lambda **kwargs: {
+        "SessionId": kwargs["SessionId"]
+    }
     clients["sts"].get_caller_identity.return_value = {"Account": "123456789012"}
     tags = [{"Key": "stelvio:app", "Value": "app"}]
     node = {
@@ -773,3 +776,64 @@ def test_actual_openssh_first_trust_restart_mismatch_and_reset(  # noqa: PLR0915
                 server.terminate()
                 server.wait(timeout=5)
             stream.close()
+
+
+@mark.parametrize(
+    "response",
+    [None, [], "known", {}, {"SessionId": None}, {"SessionId": 1}, {"SessionId": "foreign"}],
+)
+def test_termination_rejects_invalid_acknowledgement(response):
+    ssm = Mock()
+    ssm.terminate_session.return_value = response
+    with raises(TransportRetryError, match="not certified"):
+        terminate_owned_session(ssm, "known", "i-owned", "reason-owned")
+    ssm.get_paginator.assert_not_called()
+
+
+def test_termination_accepts_exact_acknowledgement_without_waiting_for_history():
+    ssm = Mock()
+    ssm.terminate_session.return_value = {"SessionId": "known"}
+    terminate_owned_session(ssm, "known", "i-owned", "reason-owned")
+    ssm.terminate_session.assert_called_once_with(SessionId="known")
+    ssm.get_paginator.assert_not_called()
+
+
+@mark.parametrize("failure", ["invalid-response", "api-error"])
+def test_failed_termination_retains_owner_and_never_records_completion(transport_world, failure):
+    transport, clients, *_ = transport_world
+    transport.session_id = "known"
+    transport._reason = "reason-owned"
+    transport._receipt = "receipt-owned"
+    transport._session_start_attempted = True
+    transport.record = Mock()
+    if failure == "api-error":
+        clients["ssm"].terminate_session.side_effect = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "denied"}}, "TerminateSession"
+        )
+    else:
+        clients["ssm"].terminate_session.side_effect = None
+        clients["ssm"].terminate_session.return_value = {"SessionId": "foreign"}
+    with raises(TransportCleanupError):
+        transport.close()
+    assert transport.session_id == "known"
+    assert transport._reason == "reason-owned"
+    assert transport._receipt == "receipt-owned"
+    assert transport._session_start_attempted
+    assert not transport._terminated
+    transport.record.assert_not_called()
+
+
+def test_valid_termination_records_completion_and_releases_owner(transport_world):
+    transport, *_ = transport_world
+    transport.session_id = "known"
+    transport._reason = "reason-owned"
+    transport._receipt = "receipt-owned"
+    transport._session_start_attempted = True
+    transport.record = Mock()
+    transport.close()
+    transport.record.assert_called_once_with(
+        "transport-stop-receipt-owned.json", {"complete": True}
+    )
+    assert transport.session_id is None
+    assert transport._reason is None
+    assert transport._receipt is None
