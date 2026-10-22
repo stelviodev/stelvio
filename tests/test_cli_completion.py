@@ -65,7 +65,8 @@ def test_click_completion_includes_nested_commands_and_options(
 
 
 def test_shell_detection_prefers_parent_over_login_shell(
-    completion_module, monkeypatch: pytest.MonkeyPatch,
+    completion_module,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(completion_module, "_get_parent_process_name", lambda: "/bin/zsh")
 
@@ -73,7 +74,8 @@ def test_shell_detection_prefers_parent_over_login_shell(
 
 
 def test_shell_detection_uses_environment_marker_before_shell_fallback(
-    completion_module, monkeypatch: pytest.MonkeyPatch,
+    completion_module,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(completion_module, "_get_parent_process_name", lambda: "python3")
 
@@ -81,7 +83,8 @@ def test_shell_detection_uses_environment_marker_before_shell_fallback(
 
 
 def test_shell_detection_returns_ambiguous_for_conflicting_current_signals(
-    completion_module, monkeypatch: pytest.MonkeyPatch,
+    completion_module,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(completion_module, "_get_parent_process_name", lambda: "fish")
 
@@ -89,7 +92,8 @@ def test_shell_detection_returns_ambiguous_for_conflicting_current_signals(
 
 
 def test_shell_detection_uses_shell_environment_as_fallback(
-    completion_module, monkeypatch: pytest.MonkeyPatch,
+    completion_module,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(completion_module, "_get_parent_process_name", lambda: "python3")
 
@@ -106,7 +110,8 @@ def test_ambiguous_shell_prompts_interactively(
 
 
 def test_ambiguous_shell_requires_shell_in_noninteractive_use(
-    completion_module, monkeypatch: pytest.MonkeyPatch,
+    completion_module,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(completion_module, "_detect_shell", lambda: None)
 
@@ -126,9 +131,7 @@ def test_install_fails_before_writing_when_profile_choice_is_missing(
     assert not (tmp_path / ".local/share/bash-completion/completions").exists()
 
 
-def test_profile_choice_defaults_to_no(
-    completion_module, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_profile_choice_defaults_to_no(completion_module, monkeypatch: pytest.MonkeyPatch) -> None:
     confirm_args: dict[str, object] = {}
 
     def confirm(*args: object, **kwargs: object) -> bool:

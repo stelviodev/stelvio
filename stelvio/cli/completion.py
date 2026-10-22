@@ -288,7 +288,7 @@ def _insert_profile_block(profile: Path, shell: str) -> bool:
 def _manual_activation(shell: str) -> str:
     if shell == "bash":
         return (
-            'Add this to ~/.bashrc:\n'
+            "Add this to ~/.bashrc:\n"
             'for f in "$HOME/.local/share/bash-completion/completions/stlv" '
             '"$HOME/.local/share/bash-completion/completions/stelvio"; do\n'
             '  [ -r "$f" ] && . "$f"\n'

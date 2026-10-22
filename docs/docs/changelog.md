@@ -9,6 +9,10 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### CLI
+
+- **`stlv install-completion` sets up shell completions.** Generates completions for both `stlv` and `stelvio` in Bash, Zsh, Fish, and PowerShell, with optional profile setup.
+
 ### Bug Fixes
 
 - **AppSync Lambda authorizers use the correct function ARN.** Applies to primary and additional authentication.
