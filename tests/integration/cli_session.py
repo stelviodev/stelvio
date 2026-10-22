@@ -767,34 +767,22 @@ finally:
             values.extend(owned)
         return values
 
-    def assert_sessions_terminated(self, receipts: list[dict], timeout: float = 60) -> None:
-        ssm = self.aws.client("ssm")
-        expected = {item["SessionId"] for item in receipts}
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            active = {
-                item["SessionId"]
-                for vpc in self.manifest.enabled_vpcs
-                for item in ssm.describe_sessions(
-                    State="Active",
-                    Filters=[{"key": "Target", "value": vpc.access.instance_id}],
-                )["Sessions"]
-                if item["SessionId"] in expected
-            }
-            histories = {
-                session_id: ssm.describe_sessions(
-                    State="History", Filters=[{"key": "SessionId", "value": session_id}]
-                )["Sessions"]
-                for session_id in expected
-            }
-            if not active and all(
-                len(values) == 1 and values[0]["Status"] == "Terminated"
-                for values in histories.values()
-            ):
-                return
-            time.sleep(1)
-        raise AssertionError(
-            f"Owned SSM sessions were not certified terminated: {sorted(expected)}"
+    def assert_sessions_terminated(self, receipts: list[dict], timeout: float = 60) -> Path:
+        from stelvio.pulumi import get_bin_path
+
+        from .ssm_cleanup import assert_ssm_cleanup
+
+        return assert_ssm_cleanup(
+            self.aws.client(
+                "ssm",
+                config=Config(
+                    connect_timeout=2, read_timeout=2, retries={"total_max_attempts": 1}
+                ),
+            ),
+            receipts,
+            get_bin_path() / "tunnel-evidence",
+            self.project,
+            timeout=timeout,
         )
 
     def resolver_ports(self) -> dict[str, int]:
