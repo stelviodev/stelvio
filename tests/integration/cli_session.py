@@ -319,6 +319,10 @@ def run():
     def _start(self, arguments: list[str], *, mode: str) -> None:
         if self.process is not None and self.process.poll() is None:
             raise RuntimeError("Tunnel or dev command is already running")
+        if mode == "dev":
+            # Dev startup deploys fresh endpoints; an earlier checkpoint is not
+            # a baseline for this command, even if startup fails.
+            self._state_hash = None
         self._mode = mode
         self._log_file = self.log_path.open("wb")
         self.process = subprocess.Popen(  # noqa: S603 - selected local Stelvio CLI, explicit project cwd
@@ -342,6 +346,8 @@ def run():
                 raise RuntimeError(f"Tunnel or dev CLI exited before readiness: {output[-5000:]}")
             bridge_ready = self._mode != "dev" or "local dev server connected to AppSync" in output
             if "Network READY" in output and bridge_ready:
+                if self._mode == "dev" and self._state_hash is None:
+                    self._state_hash = hashlib.sha256(self.state()).hexdigest()
                 return
             time.sleep(1)
         raise TimeoutError(f"Tunnel or dev network did not become ready: {self.log_path}")
@@ -833,6 +839,7 @@ finally:
         assert observed == dict.fromkeys(ids, "running")
 
     def assert_state_unchanged(self) -> None:
+        assert self._state_hash is not None, "No valid checkpoint baseline for this command"
         assert hashlib.sha256(self.state()).hexdigest() == self._state_hash
 
     def _require_idle_host(self) -> None:
