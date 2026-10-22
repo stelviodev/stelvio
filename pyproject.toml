@@ -26,7 +26,7 @@ dependencies = [
     "pulumi==3.263.0",
     "pulumi-aws==7.47.0",
     "pulumi-cloudflare==6.21.0",
-    "click>=8.0,<9",
+    "click>=8.5,<9",
     "requests>=2.33,<3",
     "rich>=14.0,<15",
     "boto3>=1.0,<2",
