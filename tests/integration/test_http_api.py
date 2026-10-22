@@ -16,6 +16,7 @@ from .assert_helpers import (
     assert_lambda_tags,
     http_request,
 )
+from .assert_logs import assert_log_group
 from .export_helpers import export_function, export_http_api, export_user_pool
 
 pytestmark = mark.integration
@@ -42,10 +43,13 @@ def test_http_api_basic(stelvio_env, project_dir):
     assert event["version"] == "2.0"
     assert event["routeKey"] == "GET /hello"
 
+    # read-back: access logging is invisible to the client; the default retention is 30 days
+    assert_log_group(outputs["http_api_myapi_log_group_name"], retention_days=30)
+
 
 def test_http_api_multiple_routes_and_default(stelvio_env, project_dir):
     def infra():
-        api = HttpApi("routes")
+        api = HttpApi("routes", access_log_retention_days="forever")
         api.route(["GET", "DELETE"], "/users/{id}", "handlers/echo.main")
         api.route("ANY", "$default", "handlers/echo.main")
         export_http_api(api)
@@ -56,6 +60,9 @@ def test_http_api_multiple_routes_and_default(stelvio_env, project_dir):
         outputs["http_api_routes_id"],
         expected_route_keys={"GET /users/{id}", "DELETE /users/{id}", "$default"},
     )
+    # read-back: "forever" must reach AWS as "no retention policy", not as an omitted key that
+    # lets the 30-day default win
+    assert_log_group(outputs["http_api_routes_log_group_name"], retention_days="forever")
 
 
 def test_http_api_cors(stelvio_env, project_dir):
