@@ -459,3 +459,33 @@ confirmation remains enabled when `--yes` is omitted. Deterministic tests check
 the subprocess arguments, captured local-binary selection, and real CLI
 confirmation behavior before the opt-in AWS run. Standalone acceptance still uses
 `stlv tunnel start ENV` without deployment confirmation flags.
+
+## SSM cleanup and history finalization
+
+Each shutdown check requires matching production start, observed-session, and
+completion receipts. It reads only those exact private files and retains the
+original receipts. Missing or unsafe evidence fails acceptance. A completion
+receipt establishes the production cleanup acknowledgement; separate helper,
+host-baseline, and local-process checks remain hard gates.
+
+The audit paginates active-session inventory and requires three consecutive
+observations without the captured sessions, one second apart, within its
+60-second observation budget. It also verifies exact session, target, and reason
+in history. `Terminated` finalizes history. An inactive, acknowledged session
+with an owned `Terminating` history record and a valid end time may pass
+functional cleanup with a visible delayed-finalization diagnostic. Other history
+states, mismatched ownership, API failures, or active sessions still fail.
+
+Every check saves a unique private `ssm-cleanup-*.json` file in the generated
+proof project, including observations, completion receipts, and the separate
+functional-cleanup and history-finalization results. No credentials or session
+tokens are recorded. Failed audits retain their evidence too.
+
+Run the mocked regressions without AWS or host changes:
+
+```bash
+uv run pytest tests/integration/test_ssm_cleanup.py tests/integration/test_tunnel_audit.py -n 0
+```
+
+These local tests do not certify live acceptance. Record privileged and AWS
+results for each new candidate; previous failed runs retain their original result.
