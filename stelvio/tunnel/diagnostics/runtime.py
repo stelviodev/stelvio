@@ -12,7 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from threading import BoundedSemaphore, Event, Lock, Thread
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from stelvio.tunnel.diagnostics.protocol import (
     STALE_SECONDS,
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 DIRECTORY_MODE = 0o700
 SOCKET_MODE = 0o600
 MAX_ENDPOINTS = 64
+MAX_VPCS = 8
 MAX_DIRECTORY_ENTRIES = 4096
 
 
@@ -96,6 +97,24 @@ def snapshot(path: Path, after_sequence: int = 0) -> dict:
             value.get("sources"), dict
         ):
             raise TypeError("Malformed session diagnostics")
+        session = value["session"]
+        if str(UUID(session.get("session_id", ""))) != path.stem:
+            raise ValueError("Diagnostics session identity differs from its endpoint")
+        vpcs = session.get("vpcs")
+        if (
+            not isinstance(vpcs, list)
+            or len(vpcs) > MAX_VPCS
+            or any(not isinstance(vpc, dict) for vpc in vpcs)
+        ):
+            raise TypeError("Malformed diagnostics VPC observations")
+        for source in value["sources"].values():
+            if (
+                not isinstance(source, dict)
+                or source.get("status") not in {"collected", "unavailable", "skipped", "failed"}
+                or not isinstance(source.get("data"), (dict, type(None)))
+                or type(source.get("stale")) is not bool
+            ):
+                raise TypeError("Malformed diagnostics source")
         return value
 
 
