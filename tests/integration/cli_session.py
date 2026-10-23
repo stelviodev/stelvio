@@ -63,8 +63,8 @@ class StandaloneCliSession:
                 "Set STLV_TEST_AWS_PROFILE and STLV_TEST_TUNNEL_AWS_ACCOUNT for tunnel acceptance"
             )
         self.region = os.environ.get("STLV_TEST_AWS_REGION", "us-east-1")
-        self.environment_name = "tunnel-proof"
-        self.app = f"stlv-tunnel-{os.urandom(4).hex()}"
+        self.environment_name = "proof"
+        self.app = f"stlv-t-{os.urandom(4).hex()}"
         self.aws = boto3.Session(profile_name=self.profile, region_name=self.region)
         self.account = self.aws.client("sts").get_caller_identity()["Account"]
         if self.account != self.expected_account:
@@ -118,7 +118,7 @@ def config(env):
     return StelvioAppConfig(
         aws=AwsConfig(profile=os.environ['STLV_TEST_AWS_PROFILE'],
                       region=os.environ['STLV_TEST_AWS_REGION']),
-        environments=['tunnel-proof'],
+        environments=[ENVIRONMENT_NAME],
     )
 
 def relocate(octet):
@@ -139,7 +139,7 @@ def run():
         export_output(f'bastion{number}_id', vpc.resources.bastion.id)
         export_output(f'cluster{number}_id', database.resources.cluster.id)
         export_output(f'function{number}_name', function.resources.function.name)
-""".replace("APP_NAME", repr(self.app))
+""".replace("APP_NAME", repr(self.app)).replace("ENVIRONMENT_NAME", repr(self.environment_name))
         (self.project / "stlv_app.py").write_text(source)
         (self.project / ".stelvio").mkdir()
         (self.project / ".stelvio" / "userenv").write_text(self.environment_name)
