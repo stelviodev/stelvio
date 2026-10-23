@@ -445,8 +445,15 @@ stlv tunnel diagnose --json > tunnel-report.json
 ```
 
 Run the command from any directory as your ordinary user. Both forms collect the
-same local data, including partial results when a source is unavailable. The
-command does not start networking, query AWS, install artifacts, or change host
+same local data, including partial results when a source is unavailable.
+System observations use structured records for interfaces, addresses, routes,
+DNS, proxy settings, and service status. JSON report schema version 2 contains
+these records instead of raw command output. The human report displays all
+collected rows in tables. Wide records use multiple tables with the row identity
+repeated. Parse errors and incomplete results are marked without discarding other
+valid records.
+
+The command does not start networking, query AWS, install artifacts, or change host
 routes and DNS. Statistics need a compatible Traforo image; older images remain
 usable with those fields unavailable. Local reports include network addresses
 and resource identities. Review the report before sharing it. Uploads are not

@@ -10,7 +10,7 @@
 
 ### Dev Mode
 
-- **Tunnel diagnostics collect local support information.** Use `stlv tunnel diagnose` for a formatted report or add `--json` for machine-readable output. The shared read-only interface provides session state and packet, TCP, and DNS statistics when a compatible Traforo image is installed. The command does not change networking or contact AWS.
+- **Tunnel diagnostics collect local support information.** Use `stlv tunnel diagnose` for complete tables of parsed observations or add `--json` for structured report schema version 2. System command text is not included in either format. The shared read-only interface provides session state and packet, TCP, and DNS statistics when a compatible Traforo image is installed. The command does not change networking or contact AWS.
 
 - **`stlv dev` starts managed networking for private handler dependencies.** It captures deployed VPC metadata, starts the shared session before the AppSync bridge, and rejects expired or unready dependent invocations before handler import. A failure in one VPC does not block independent Functions. Managed routes cover the deployed private and isolated subnets. Route conflicts show both ranges in the local console and block dependent handlers without widening routes to the whole VPC.
 

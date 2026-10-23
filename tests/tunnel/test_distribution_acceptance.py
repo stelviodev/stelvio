@@ -196,14 +196,25 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         "--json",
     )
     diagnostic_report = json.loads(diagnostic_result.stdout)
-    assert diagnostic_report["schema_version"] == 1
+    assert diagnostic_report["schema_version"] == 2
     assert {"versions", "artifacts", "helper", "sessions"} <= set(diagnostic_report["sections"])
+    assert '"output":' not in json.dumps(diagnostic_report)
+    table_result = run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.cli import main; main()",
+        "tunnel",
+        "diagnose",
+    )
+    assert "Stelvio tunnel diagnostics" in table_result.stdout
+    assert "'data':" not in table_result.stdout
     run(
         python,
         "-I",
         "-c",
         "from pathlib import Path; "
-        "from stelvio.tunnel.diagnostics import protocol, runtime, report; "
+        "from stelvio.tunnel.diagnostics import protocol, runtime, report, parsers, rendering; "
         "from stelvio.pulumi import get_stelvio_config_dir; "
         "assert Path(runtime.__file__).with_name('README.md').is_file(); "
         "assert not (get_stelvio_config_dir() / 'bin').exists()",

@@ -6,6 +6,14 @@ Go 1.27.3; GoReleaser v2.18.3; Apple SDK 15.5.
 
 ## Local checks
 
+- Structured report schema 2 update: full Python suite 4,498 passed, 258 skipped.
+  Diagnostics parser, IPC, and table tests: 69 passed. Fixtures cover every system
+  collector, partial parsing, truncation, nested lookups, private data exclusion,
+  and complete tables at widths 40, 100, and 180. Ruff and whitespace checks passed.
+- Read-only macOS CLI smoke check: both output modes passed outside a project.
+  The host supplied 25 interfaces, 647 routes, and nine DNS resolvers; all parsed
+  without warnings. Packet-filter access was reported unavailable. Raw host
+  reports are local evidence and are not included in the repository.
 - Python tunnel, CLI, dev admission, and Function dev-mode regression suite:
   840 passed, 13 opt-in/platform cases skipped.
 - Explicit isolated runtime/forwarder interoperability: 3 passed. Covers normal
