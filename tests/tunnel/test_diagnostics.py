@@ -18,7 +18,9 @@ from click.testing import CliRunner
 from rich.console import Console
 
 from stelvio.cli.tunnel import tunnel
-from stelvio.tunnel.diagnostics import protocol, report, runtime
+from stelvio.tunnel.diagnostics import parsers, protocol, report, runtime
+
+from .diagnostics_fixtures import SYSTEM_OUTPUTS
 
 
 @pytest.fixture
@@ -183,25 +185,27 @@ def test_command_bounds_output_and_stops_stalled_subprocess():
 
 
 def test_system_sanitizers_exclude_environment_and_proxy_secrets():
-    value = report._sanitize_system(
+    value = parsers.parse_observation(
         "helper_service",
         protocol.observation(
-            {"output": "state = running\n AWS_SECRET_ACCESS_KEY = secret\n pid = 42\n"}
+            {"output": SYSTEM_OUTPUTS["helper_service"], "exit_code": 0, "truncated": False}
         ),
     )
     assert "secret" not in json.dumps(value)
-    value = report._sanitize_system(
+    value = parsers.parse_observation(
         "proxies",
         protocol.observation(
             {
                 "output": "HTTPEnable : 1\n HTTPProxy : user:password@proxy\n"
-                " ProxyAutoConfigURLString : https://user:secret@proxy/pac?token=secret\n"
+                " ProxyAutoConfigURLString : https://user:secret@proxy/pac?token=secret\n",
+                "exit_code": 0,
+                "truncated": False,
             }
         ),
     )
     assert "secret" not in json.dumps(value)
     assert "password" not in json.dumps(value)
-    assert "HTTPEnable: 1" in value["data"]["output"]
+    assert value["data"]["settings"]["HTTPEnable"] is True
 
 
 def test_report_size_bound_preserves_errors(monkeypatch):
@@ -228,12 +232,7 @@ def test_artifact_inspection_never_executes_or_creates_cache(tmp_path, monkeypat
 def test_route_findings_expose_existing_vpn_conflicts():
     value = {
         "sections": {
-            "routes": protocol.observation(
-                {
-                    "output": "192.0.2/23 utun7 Uc utun7\n10.254/16 utun7 Uc utun7\n"
-                    "default 192.168.1.1 UGSc en0\n"
-                }
-            )
+            "routes": protocol.observation(parsers.routes(SYSTEM_OUTPUTS["routes"]).data)
         },
         "findings": [],
     }

@@ -18,22 +18,19 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from rich.console import Console
-
+from stelvio.tunnel.diagnostics import parsers
 from stelvio.tunnel.diagnostics.protocol import observation, timestamp
+from stelvio.tunnel.diagnostics.rendering import render  # noqa: F401 - public report renderer
 from stelvio.tunnel.diagnostics.runtime import discover, snapshot
 from stelvio.tunnel.helper_client import NativeHelper
 
 REPORT_LIMIT = 8 * 1024 * 1024
 OUTPUT_LIMIT = 128 * 1024
 RESOLVER_LIMIT = 4096
-IPV4_OCTETS = 4
-ROUTE_MIN_COLUMNS = 4
 MAX_ROUTE_FINDINGS = 256
 MAX_FINDINGS = 512
 MAX_ARTIFACT_BYTES = 32 * 1024 * 1024
@@ -269,41 +266,6 @@ SYSTEM_COMMANDS = {
 }
 
 
-def _sanitize_system(name: str, value: dict) -> dict:  # noqa: C901 - explicit allowlists
-    data = value.get("data")
-    if not data:
-        return value
-    text = data["output"]
-    if name == "proxies":
-        # Keep only routing-relevant scalars. PAC URLs can carry tokens or userinfo.
-        clean = []
-        for line in text.splitlines():
-            key, separator, item = line.partition(" : ")
-            key = key.strip()
-            if not separator:
-                continue
-            if key.endswith(("Enable", "Port")):
-                if item.strip().isdigit():
-                    clean.append(f"{key}: {item.strip()}")
-            elif key in {"HTTPProxy", "HTTPSProxy", "SOCKSProxy", "FTPProxy"}:
-                host = item.strip()
-                if re.fullmatch(r"[a-zA-Z0-9.:[\]-]{1,253}", host):
-                    clean.append(f"{key}: {host}")
-            elif key == "ProxyAutoConfigURLString":
-                parsed = urlsplit(item.strip())
-                clean.append(f"PAC configured: {parsed.scheme or 'unknown'}")
-        data["output"] = "\n".join(clean)
-    elif name == "helper_service":
-        # launchctl print can include inherited environment variables. Never retain them.
-        allowed = {"state", "pid", "runs", "last exit code", "type", "program"}
-        data["output"] = "\n".join(
-            line.strip()
-            for line in text.splitlines()
-            if line.strip().partition(" = ")[0] in allowed
-        )
-    return value
-
-
 def _resolver_files(sections: dict) -> dict:
     candidates = set()
     helper_data = sections.get("helper", {}).get("data") or {}
@@ -330,25 +292,22 @@ def _resolver_files(sections: dict) -> dict:
                 if not stat.S_ISREG(info.st_mode):
                     raise ValueError("Resolver is not a regular file")  # noqa: TRY301
                 text = stream.read(RESOLVER_LIMIT + 1)
-            lines = [
-                line
-                for line in text.decode(errors="replace").splitlines()
-                if re.fullmatch(
-                    (
-                        r"(?:nameserver [0-9a-fA-F.:]+|port [0-9]+|domain [a-zA-Z0-9.-]+|"
-                        r"search_order [0-9]+|timeout [0-9]+)"
-                    ),
-                    line,
-                )
-            ]
+            truncated = len(text) > RESOLVER_LIMIT
+            configuration = text[:RESOLVER_LIMIT].decode(errors="replace")
+            if truncated and not configuration.endswith("\n"):
+                configuration = configuration.rpartition("\n")[0]
+            parsed = parsers.resolver_file(configuration)
             result.append(
                 {
                     "name": name,
                     "owner_uid": info.st_uid,
                     "inode": info.st_ino,
                     "mode": oct(stat.S_IMODE(info.st_mode)),
-                    "configuration": lines,
-                    "truncated": len(text) > RESOLVER_LIMIT,
+                    "configuration": parsed.data,
+                    "parse_warnings": parsed.warnings,
+                    "error": None if parsed.recognized else {"code": "parse-unrecognized"},
+                    "incomplete": truncated or bool(parsed.warnings),
+                    "truncated": truncated,
                 }
             )
         except (OSError, ValueError) as error:
@@ -366,7 +325,7 @@ def _source_result(collect: Callable[[], dict]) -> dict:
 def collect() -> dict:
     started = time.monotonic()
     deadline = started + 15
-    report = {"schema_version": 1, "generated_at": timestamp(), "sections": {}, "findings": []}
+    report = {"schema_version": 2, "generated_at": timestamp(), "sections": {}, "findings": []}
     sections = report["sections"]
     collectors = {
         "versions": versions,
@@ -375,7 +334,7 @@ def collect() -> dict:
     }
     if sys.platform == "darwin":
         for name, args in SYSTEM_COMMANDS.items():
-            collectors[name] = lambda name=name, args=args: _sanitize_system(
+            collectors[name] = lambda name=name, args=args: parsers.parse_observation(
                 name, command(args, deadline)
             )
     else:
@@ -426,25 +385,9 @@ def _helper_observation(sections: dict, deadline: float) -> dict:
     return helper()
 
 
-def _route_network(destination: str) -> ipaddress.IPv4Network | None:
-    if destination == "default" or ":" in destination:
-        return None
-    address, _, bits = destination.partition("/")
-    pieces = address.split(".")
-    if not 1 <= len(pieces) <= IPV4_OCTETS or any(not part.isdigit() for part in pieces):
-        return None
-    try:
-        prefix = int(bits) if bits else len(pieces) * 8
-        return ipaddress.IPv4Network(
-            ".".join(pieces + ["0"] * (IPV4_OCTETS - len(pieces))) + f"/{prefix}", strict=False
-        )
-    except ValueError:
-        return None
-
-
 def _route_findings(report: dict, ranges: list) -> None:  # noqa: C901 - bounded route comparisons
     sections = report["sections"]
-    rows = (sections.get("routes", {}).get("data") or {}).get("output", "").splitlines()
+    rows = (sections.get("routes", {}).get("data") or {}).get("routes", [])
     known_interfaces = set()
     expected_interfaces = {}
     for item in (sections.get("sessions", {}).get("data") or {}).get("sessions", []):
@@ -462,17 +405,10 @@ def _route_findings(report: dict, ranges: list) -> None:  # noqa: C901 - bounded
     known_interfaces.update(unit.get("interface_name") for unit in direct.get("units", []))
     conflicts = []
     for row in rows[:2048]:
-        columns = row.split()
-        if len(columns) < ROUTE_MIN_COLUMNS:
+        if row["family"] != "ipv4" or row["destination"] == "default" or not row["network"]:
             continue
-        network = _route_network(columns[0])
-        if network is None:
-            continue
-        interface = next(
-            (part for part in columns[3:] if re.fullmatch(r"[a-z]+[0-9]+", part)), None
-        )
-        if not interface:
-            continue
+        network = ipaddress.IPv4Network(row["network"])
+        interface = row["interface"]
         # The helper requires these point-to-point addresses even without an active session.
         if interface not in known_interfaces and (
             network.overlaps(ipaddress.IPv4Network("192.0.2.1/32"))
@@ -524,8 +460,11 @@ def _network_details(report: dict, deadline: float) -> None:  # noqa: C901 - bou
                 "session": session_id,
                 "vpc": vpc,
                 "range": str(network),
-                "observation": command(
-                    ["/sbin/route", "-n", "get", str(network.network_address + 1)], deadline
+                "observation": parsers.parse_observation(
+                    "selected_route",
+                    command(
+                        ["/sbin/route", "-n", "get", str(network.network_address + 1)], deadline
+                    ),
                 ),
             }
         )
@@ -542,19 +481,20 @@ def _network_details(report: dict, deadline: float) -> None:  # noqa: C901 - bou
                 report["findings"].append(
                     {"code": "selected-range-overlap", "ranges": [str(first[2]), str(second[2])]}
                 )
-    services = (
-        (sections.get("network_services", {}).get("data") or {}).get("output", "").splitlines()[1:]
-    )
+    services = (sections.get("network_services", {}).get("data") or {}).get("services", [])
     settings = []
     for service in services[:16]:
         if time.monotonic() >= deadline:
             break
-        if service and not service.startswith("*"):
+        if service["enabled"]:
             settings.append(
                 {
-                    "service": service[:256],
-                    "dns": command(
-                        ["/usr/sbin/networksetup", "-getdnsservers", service], deadline
+                    "service": service["name"],
+                    "dns": parsers.parse_observation(
+                        "service_dns",
+                        command(
+                            ["/usr/sbin/networksetup", "-getdnsservers", service["name"]], deadline
+                        ),
                     ),
                 }
             )
@@ -608,26 +548,3 @@ def bound_report(report: dict) -> dict:
         if len(json.dumps(report, allow_nan=False, indent=2).encode()) + 1 <= REPORT_LIMIT:
             return report
     raise ValueError("Diagnostic report exceeds size bound")
-
-
-def render(report: dict, console: Console) -> None:
-    from rich.pretty import Pretty  # noqa: PLC0415
-    from rich.table import Table  # noqa: PLC0415
-    from rich.text import Text  # noqa: PLC0415
-
-    console.print(Text("Stelvio tunnel diagnostics", style="bold"))
-    console.print(
-        Text(f"Generated {report['generated_at']} | {report['duration_seconds']} seconds")
-    )
-    console.print(Text("Local report: resource identities and network addresses are included."))
-    for name, section in sorted(report["sections"].items()):
-        table = Table(title=Text(name.replace("_", " ").title()), show_header=False)
-        table.add_column("Field", overflow="fold")
-        table.add_column("Value", overflow="fold")
-        table.add_row("Status", Text(section["status"] + (" (stale)" if section["stale"] else "")))
-        if section.get("error"):
-            table.add_row("Error", Pretty(section["error"]))
-        table.add_row("Data", Pretty(section["data"], max_string=4096))
-        console.print(table)
-    if report["findings"]:
-        console.print(Pretty(report["findings"]))
