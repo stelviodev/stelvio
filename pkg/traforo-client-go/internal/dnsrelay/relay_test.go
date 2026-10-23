@@ -14,12 +14,85 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
+	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnsutil"
 	"github.com/stelviodev/traforo/internal/protocol"
 )
 
 func config(proxy string, revision uint64) Config {
 	return Config{Revision: revision, Proxy: proxy, Resolver: netip.MustParseAddr("10.254.0.2"), CIDRs: []netip.Prefix{netip.MustParsePrefix("10.254.1.0/24")}, Domains: []string{"private.test"}, Hostnames: []string{"member.docdb.test"}}
+}
+
+func packDNS(m *dns.Msg) ([]byte, error) {
+	if err := m.Pack(); err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), m.Data...), nil
+}
+
+func unpackDNS(m *dns.Msg, wire []byte) error {
+	m.Data = wire
+	return m.Unpack()
+}
+
+func mustRR(t *testing.T, text string) dns.RR {
+	t.Helper()
+	rr, err := dns.New(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rr
+}
+
+func mustA(t *testing.T, name string, ttl uint32, ip netip.Addr) *dns.A {
+	t.Helper()
+	rr := mustRR(t, fmt.Sprintf("%s %d IN A %s", name, ttl, ip))
+	return rr.(*dns.A)
+}
+
+func questionName(m *dns.Msg) string { return m.Question[0].Header().Name }
+
+type dnsTestConn struct{ net.Conn }
+
+func (c *dnsTestConn) WriteMsg(m *dns.Msg) error {
+	wire, err := packDNS(m)
+	if err != nil {
+		return err
+	}
+	var prefix [2]byte
+	binary.BigEndian.PutUint16(prefix[:], uint16(len(wire)))
+	if _, err := c.Write(prefix[:]); err != nil {
+		return err
+	}
+	_, err = c.Write(wire)
+	return err
+}
+
+func (c *dnsTestConn) ReadMsg() (*dns.Msg, error) {
+	var prefix [2]byte
+	if _, err := io.ReadFull(c, prefix[:]); err != nil {
+		return nil, err
+	}
+	wire := make([]byte, binary.BigEndian.Uint16(prefix[:]))
+	if _, err := io.ReadFull(c, wire); err != nil {
+		return nil, err
+	}
+	m := &dns.Msg{Data: wire}
+	if err := m.Unpack(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func exchangeDNS(t *testing.T, network, address string, q *dns.Msg) *dns.Msg {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	a, _, err := dns.NewClient().Exchange(ctx, q, network, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
 }
 
 func rawQuery(name string, qtype uint16) []byte {
@@ -96,7 +169,7 @@ func TestAnswerAcceptsMaximumTCPMessage(t *testing.T) {
 		t.Fatalf("maximum-sized valid DNS message rejected: %v", err)
 	}
 	a := new(dns.Msg)
-	if err = a.Unpack(answer); err != nil || !a.Response || a.Rcode != dns.RcodeServerFailure {
+	if err = unpackDNS(a, answer); err != nil || !a.Response || a.Rcode != dns.RcodeServerFailure {
 		t.Fatalf("unexpected bounded reply: %v, %v", a, err)
 	}
 }
@@ -104,8 +177,8 @@ func TestAnswerAcceptsMaximumTCPMessage(t *testing.T) {
 func TestServiceDiscoveryQuestionUsesOwnedSuffix(t *testing.T) {
 	p := proxy(t, func(q *dns.Msg) *dns.Msg {
 		a := new(dns.Msg)
-		a.SetReply(q)
-		a.Answer = []dns.RR{&dns.SRV{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: 21}, Port: 27017, Target: "member.private.test."}}
+		dnsutil.SetReply(a, q)
+		a.Answer = []dns.RR{mustRR(t, fmt.Sprintf("%s 21 IN SRV 0 0 27017 member.private.test.", q.Question[0].Header().Name))}
 		return a
 	})
 	r := newRelay(t, config(p, 1))
@@ -114,10 +187,10 @@ func TestServiceDiscoveryQuestionUsesOwnedSuffix(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := new(dns.Msg)
-	if err := a.Unpack(answer); err != nil {
+	if err := unpackDNS(a, answer); err != nil {
 		t.Fatal(err)
 	}
-	if a.Rcode != dns.RcodeSuccess || len(a.Answer) != 1 || a.Answer[0].Header().Ttl != 21 {
+	if a.Rcode != dns.RcodeSuccess || len(a.Answer) != 1 || a.Answer[0].Header().TTL != 21 {
 		t.Fatalf("service-discovery answer was not relayed: %v", a)
 	}
 }
@@ -127,14 +200,14 @@ func TestNoDNSAnswerCache(t *testing.T) {
 	p := proxy(t, func(q *dns.Msg) *dns.Msg {
 		call := calls.Add(1)
 		a := new(dns.Msg)
-		a.SetReply(q)
-		a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: uint32(call)}, A: net.IPv4(10, 254, 1, byte(call))}}
+		dnsutil.SetReply(a, q)
+		a.Answer = []dns.RR{mustA(t, q.Question[0].Header().Name, uint32(call), netip.AddrFrom4([4]byte{10, 254, 1, byte(call)}))}
 		return a
 	})
 	r := newRelay(t, config(p, 1))
 	for i := 1; i <= 2; i++ {
 		a := query(t, r, "db.private.test", false)
-		if calls.Load() != int32(i) || len(a.Answer) != 1 || a.Answer[0].Header().Ttl != uint32(i) {
+		if calls.Load() != int32(i) || len(a.Answer) != 1 || a.Answer[0].Header().TTL != uint32(i) {
 			t.Fatalf("query %d was served from cache or changed: calls=%d answer=%v", i, calls.Load(), a)
 		}
 	}
@@ -191,7 +264,7 @@ func proxyAt(t *testing.T, resolver string, answer func(*dns.Msg) *dns.Msg) stri
 					t.Errorf("DNS SOCKS target = %s, want %s", net.IP(req[4:8]), resolver)
 					return
 				}
-				dc := &dns.Conn{Conn: c}
+				dc := &dnsTestConn{Conn: c}
 				q, e := dc.ReadMsg()
 				if e != nil {
 					return
@@ -218,14 +291,14 @@ func newRelay(t *testing.T, c Config) *Relay {
 func query(t *testing.T, r *Relay, name string, udp bool) *dns.Msg {
 	t.Helper()
 	q := new(dns.Msg)
-	q.SetQuestion(dns.Fqdn(name), dns.TypeA)
-	wire, _ := q.Pack()
+	dnsutil.SetQuestion(q, dnsutil.Fqdn(name), dns.TypeA)
+	wire, _ := packDNS(q)
 	wire, e := r.Answer(wire, udp)
 	if e != nil {
 		t.Fatal(e)
 	}
 	a := new(dns.Msg)
-	if a.Unpack(wire) != nil {
+	if unpackDNS(a, wire) != nil {
 		t.Fatal("invalid answer")
 	}
 	return a
@@ -233,38 +306,29 @@ func query(t *testing.T, r *Relay, name string, udp bool) *dns.Msg {
 func TestWireRecordsAndListenerFallback(t *testing.T) {
 	p := proxy(t, func(q *dns.Msg) *dns.Msg {
 		a := new(dns.Msg)
-		a.SetReply(q)
+		dnsutil.SetReply(a, q)
 		a.Answer = []dns.RR{
-			&dns.CNAME{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeCNAME, Class: 1, Ttl: 30}, Target: "member.private.test."},
-			&dns.A{Hdr: dns.RR_Header{Name: "member.private.test.", Rrtype: dns.TypeA, Class: 1, Ttl: 12}, A: net.IPv4(10, 254, 1, 3)},
-			&dns.RFC3597{Hdr: dns.RR_Header{Name: "member.private.test.", Rrtype: 65280, Class: 1, Ttl: 9}, Rdata: strings.Repeat("ab", 900)},
+			mustRR(t, fmt.Sprintf("%s 30 IN CNAME member.private.test.", questionName(q))),
+			mustA(t, "member.private.test.", 12, netip.AddrFrom4([4]byte{10, 254, 1, 3})),
+			mustRR(t, fmt.Sprintf(`member.private.test. 9 IN TYPE65280 \# 900 %s`, strings.Repeat("ab", 900))),
 		}
 		return a
 	})
 	r := newRelay(t, config(p, 1))
 	q := new(dns.Msg)
-	q.SetQuestion("db.private.test.", dns.TypeA)
-	client := &dns.Client{Net: "udp", Timeout: time.Second}
-	a, _, err := client.Exchange(q, r.udp.LocalAddr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	dnsutil.SetQuestion(q, "db.private.test.", dns.TypeA)
+	a := exchangeDNS(t, "udp", r.udp.LocalAddr().String(), q)
 	if !a.Truncated {
 		t.Fatal("oversized UDP answer was not truncated")
 	}
-	client.Net = "tcp"
-	a, _, err = client.Exchange(q, r.tcp.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.Truncated || len(a.Answer) != 3 || a.Answer[1].Header().Ttl != 12 {
+	a = exchangeDNS(t, "tcp", r.tcp.Addr().String(), q)
+	if a.Truncated || len(a.Answer) != 3 || a.Answer[1].Header().TTL != 12 {
 		t.Fatalf("records/TTLs lost: %v", a)
 	}
-	q.SetEdns0(MaxUDP, false)
-	client.Net = "udp"
-	a, _, err = client.Exchange(q, r.udp.LocalAddr().String())
-	if err != nil || a.Truncated || len(a.Answer) != 3 {
-		t.Fatalf("EDNS: %v %v", a, err)
+	q.UDPSize = MaxUDP
+	a = exchangeDNS(t, "udp", r.udp.LocalAddr().String(), q)
+	if a.Truncated || len(a.Answer) != 3 {
+		t.Fatalf("EDNS: %v", a)
 	}
 }
 func TestOwnershipFailureAndValidation(t *testing.T) {
@@ -272,14 +336,14 @@ func TestOwnershipFailureAndValidation(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			p := proxy(t, func(q *dns.Msg) *dns.Msg {
 				a := new(dns.Msg)
-				a.SetReply(q)
+				dnsutil.SetReply(a, q)
 				switch fault {
 				case "nxdomain":
 					a.Rcode = dns.RcodeNameError
 				case "wrong-id":
-					a.Id++
+					a.ID++
 				case "wrong-question":
-					a.Question[0].Name = "other.test."
+					a.Question[0].Header().Name = "other.test."
 				case "tc":
 					a.Truncated = true
 				case "not-response":
@@ -287,7 +351,7 @@ func TestOwnershipFailureAndValidation(t *testing.T) {
 				case "rcode":
 					a.Rcode = dns.RcodeServerFailure
 				case "outside":
-					a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: 1}, A: net.IPv4(192, 0, 2, 1)}}
+					a.Answer = []dns.RR{mustA(t, questionName(q), 0, netip.MustParseAddr("192.0.2.1"))}
 				}
 				return a
 			})
@@ -298,7 +362,7 @@ func TestOwnershipFailureAndValidation(t *testing.T) {
 				}
 			}
 			a := query(t, r, "db.private.test", false)
-			want := dns.RcodeServerFailure
+			want := uint16(dns.RcodeServerFailure)
 			if fault == "nxdomain" {
 				want = dns.RcodeNameError
 			}
@@ -323,7 +387,13 @@ func TestOwnershipFailureAndValidation(t *testing.T) {
 func TestGenerationsObservationsAndTwoVPCs(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	p := proxy(t, func(q *dns.Msg) *dns.Msg { close(started); <-release; a := new(dns.Msg); a.SetReply(q); return a })
+	p := proxy(t, func(q *dns.Msg) *dns.Msg {
+		close(started)
+		<-release
+		a := new(dns.Msg)
+		dnsutil.SetReply(a, q)
+		return a
+	})
 	r := newRelay(t, config(p, 1))
 	port := r.Port()
 	if _, e := r.Observe("arm", "stlv.private.test", 1); e != nil {
@@ -336,8 +406,8 @@ func TestGenerationsObservationsAndTwoVPCs(t *testing.T) {
 	result := make(chan answerResult, 1)
 	go func() {
 		q := new(dns.Msg)
-		q.SetQuestion("stlv.private.test.", dns.TypeA)
-		wire, err := q.Pack()
+		dnsutil.SetQuestion(q, "stlv.private.test.", dns.TypeA)
+		wire, err := packDNS(q)
 		if err != nil {
 			result <- answerResult{err: err}
 			return
@@ -348,7 +418,7 @@ func TestGenerationsObservationsAndTwoVPCs(t *testing.T) {
 			return
 		}
 		a := new(dns.Msg)
-		if err = a.Unpack(wire); err != nil {
+		if err = unpackDNS(a, wire); err != nil {
 			result <- answerResult{err: err}
 			return
 		}
@@ -358,7 +428,12 @@ func TestGenerationsObservationsAndTwoVPCs(t *testing.T) {
 	if seen, e := r.Observe("check", "stlv.private.test", 1); e != nil || !seen {
 		t.Fatal("query not observed")
 	}
-	p2 := proxy(t, func(q *dns.Msg) *dns.Msg { a := new(dns.Msg); a.SetReply(q); a.Rcode = dns.RcodeNameError; return a })
+	p2 := proxy(t, func(q *dns.Msg) *dns.Msg {
+		a := new(dns.Msg)
+		dnsutil.SetReply(a, q)
+		a.Rcode = dns.RcodeNameError
+		return a
+	})
 	if e := r.Reject(1); e != nil {
 		t.Fatal(e)
 	}
@@ -397,7 +472,7 @@ func TestGenerationsObservationsAndTwoVPCs(t *testing.T) {
 	}
 }
 func TestBoundsAndConcurrentShutdown(t *testing.T) {
-	p := proxy(t, func(q *dns.Msg) *dns.Msg { a := new(dns.Msg); a.SetReply(q); return a })
+	p := proxy(t, func(q *dns.Msg) *dns.Msg { a := new(dns.Msg); dnsutil.SetReply(a, q); return a })
 	r := newRelay(t, config(p, 1))
 	for i := 0; i < MaxRequests; i++ {
 		r.slots <- struct{}{}
@@ -432,7 +507,7 @@ func FuzzAnswer(f *testing.F) {
 		answer, e := r.Answer(wire, true)
 		if e == nil {
 			a := new(dns.Msg)
-			if len(answer) > MaxUDP || a.Unpack(answer) != nil || !a.Response {
+			if len(answer) > MaxUDP || unpackDNS(a, answer) != nil || !a.Response {
 				t.Fatal("invalid bounded DNS reply")
 			}
 		}
@@ -443,15 +518,15 @@ func TestOverloadUsesIdenticalPolicy(t *testing.T) {
 	r := newRelay(t, config("127.0.0.1:65534", 1))
 	for _, name := range []string{"db.private.test.", "outside.test."} {
 		q := new(dns.Msg)
-		q.SetQuestion(name, dns.TypeA)
-		wire, _ := q.Pack()
+		dnsutil.SetQuestion(q, name, dns.TypeA)
+		wire, _ := packDNS(q)
 		answer, err := r.answer(wire, true, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		a := new(dns.Msg)
-		_ = a.Unpack(answer)
-		expected := dns.RcodeServerFailure
+		_ = unpackDNS(a, answer)
+		expected := uint16(dns.RcodeServerFailure)
 		if name == "outside.test." {
 			expected = dns.RcodeRefused
 		}
@@ -459,7 +534,7 @@ func TestOverloadUsesIdenticalPolicy(t *testing.T) {
 			t.Fatal("overload ownership policy", a)
 		}
 		q.Response = true
-		wire, _ = q.Pack()
+		wire, _ = packDNS(q)
 		if _, err = r.answer(wire, true, false); err == nil {
 			t.Fatal("answered a response packet")
 		}
@@ -474,7 +549,7 @@ func TestTCPOverloadReturnsPolicyResponse(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		want int
+		want uint16
 	}{
 		{name: "owned", want: dns.RcodeServerFailure},
 		{name: "unowned.test.", want: dns.RcodeRefused},
@@ -491,11 +566,12 @@ func TestTCPOverloadReturnsPolicyResponse(t *testing.T) {
 			defer func() { _ = c.Close() }()
 			_ = c.SetDeadline(time.Now().Add(Timeout))
 			q := new(dns.Msg)
-			q.SetQuestion(name, dns.TypeA)
-			if err := (&dns.Conn{Conn: c}).WriteMsg(q); err != nil {
+			dnsutil.SetQuestion(q, name, dns.TypeA)
+			dc := &dnsTestConn{Conn: c}
+			if err := dc.WriteMsg(q); err != nil {
 				t.Fatal(err)
 			}
-			a, err := (&dns.Conn{Conn: c}).ReadMsg()
+			a, err := dc.ReadMsg()
 			if err != nil {
 				t.Fatalf("overloaded TCP connection received no DNS response: %v", err)
 			}
@@ -509,11 +585,8 @@ func TestTCPOverloadReturnsPolicyResponse(t *testing.T) {
 func TestSlowTCPOverflowAllowsLegitimateConnectionAfterDeadline(t *testing.T) {
 	p := proxy(t, func(q *dns.Msg) *dns.Msg {
 		a := new(dns.Msg)
-		a.SetReply(q)
-		a.Answer = []dns.RR{&dns.A{
-			Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30},
-			A:   net.IPv4(10, 254, 0, 9),
-		}}
+		dnsutil.SetReply(a, q)
+		a.Answer = []dns.RR{mustA(t, questionName(q), 30, netip.MustParseAddr("10.254.0.9"))}
 		return a
 	})
 	r := newRelay(t, config(p, 1))
@@ -573,12 +646,13 @@ func TestSlowTCPOverflowAllowsLegitimateConnectionAfterDeadline(t *testing.T) {
 	defer func() { _ = legitimate.Close() }()
 	_ = legitimate.SetDeadline(time.Now().Add(2 * Timeout))
 	q := new(dns.Msg)
-	q.SetQuestion("db.private.test.", dns.TypeA)
-	if err := (&dns.Conn{Conn: legitimate}).WriteMsg(q); err != nil {
+	dnsutil.SetQuestion(q, "db.private.test.", dns.TypeA)
+	dc := &dnsTestConn{Conn: legitimate}
+	if err := dc.WriteMsg(q); err != nil {
 		t.Fatalf("write legitimate DNS request: %v", err)
 	}
 	_ = legitimate.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	if _, err := (&dns.Conn{Conn: legitimate}).ReadMsg(); err == nil {
+	if _, err := dc.ReadMsg(); err == nil {
 		t.Fatal("accept loop served a queued connection before the overflow deadline")
 	} else {
 		var netErr net.Error
@@ -594,7 +668,7 @@ func TestSlowTCPOverflowAllowsLegitimateConnectionAfterDeadline(t *testing.T) {
 	waitFor("worker capacity", func() bool { return len(r.tcpSlots) < cap(r.tcpSlots) })
 
 	_ = legitimate.SetDeadline(time.Now().Add(2 * Timeout))
-	a, err := (&dns.Conn{Conn: legitimate}).ReadMsg()
+	a, err := dc.ReadMsg()
 	if err != nil {
 		t.Fatalf("legitimate request was not served after overflow deadline: %v", err)
 	}
@@ -602,7 +676,7 @@ func TestSlowTCPOverflowAllowsLegitimateConnectionAfterDeadline(t *testing.T) {
 		t.Fatalf("legitimate DNS response = %v", a)
 	}
 	got, ok := a.Answer[0].(*dns.A)
-	if !ok || !got.A.Equal(net.IPv4(10, 254, 0, 9)) {
+	if !ok || got.Addr != netip.MustParseAddr("10.254.0.9") {
 		t.Fatalf("legitimate DNS answer = %v, want 10.254.0.9", a.Answer)
 	}
 }
@@ -612,27 +686,27 @@ func TestDirectProbeRequiresMatchingPayloadAndResourceConnection(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			p := proxy(t, func(q *dns.Msg) *dns.Msg {
 				a := new(dns.Msg)
-				a.SetReply(q)
-				if q.Question[0].Qtype != dns.TypeA {
+				dnsutil.SetReply(a, q)
+				if dns.RRToType(q.Question[0]) != dns.TypeA {
 					return a
 				}
 				switch fault {
 				case "missing":
 					return nil
 				case "wrong-id":
-					a.Id++
+					a.ID++
 				case "wrong-question":
-					a.Question[0].Name = "elsewhere.test."
+					a.Question[0].Header().Name = "elsewhere.test."
 				case "tc":
 					a.Truncated = true
 				case "rcode":
 					a.Rcode = dns.RcodeServerFailure
 				}
-				ip := net.IPv4(10, 254, 1, 3)
+				ip := netip.MustParseAddr("10.254.1.3")
 				if fault == "foreign" {
-					ip = net.IPv4(192, 0, 2, 1)
+					ip = netip.MustParseAddr("192.0.2.1")
 				}
-				a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: 1}, A: ip}}
+				a.Answer = []dns.RR{mustA(t, questionName(q), 0, ip)}
 				return a
 			})
 			c := config(p, 1)
@@ -687,9 +761,9 @@ func TestTCPConnectionQueryLimitAndDeadline(t *testing.T) {
 	}
 	defer func() { _ = c.Close() }()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	dc := &dns.Conn{Conn: c}
+	dc := &dnsTestConn{Conn: c}
 	q := new(dns.Msg)
-	q.SetQuestion("db.private.test.", dns.TypeA)
+	dnsutil.SetQuestion(q, "db.private.test.", dns.TypeA)
 	for i := 0; i < 8; i++ {
 		if dc.WriteMsg(q) != nil {
 			t.Fatal("early TCP close")
@@ -733,7 +807,7 @@ func TestWireSaturationKeepsOwnershipAndResponsePolicy(t *testing.T) {
 		started <- struct{}{}
 		<-release
 		a := new(dns.Msg)
-		a.SetReply(q)
+		dnsutil.SetReply(a, q)
 		return a
 	})
 	r := newRelay(t, config(p, 1))
@@ -744,8 +818,8 @@ func TestWireSaturationKeepsOwnershipAndResponsePolicy(t *testing.T) {
 	defer func() { _ = client.Close() }()
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 	q := new(dns.Msg)
-	q.SetQuestion("db.private.test.", dns.TypeA)
-	wire, _ := q.Pack()
+	dnsutil.SetQuestion(q, "db.private.test.", dns.TypeA)
+	wire, _ := packDNS(q)
 	for i := 0; i < MaxRequests; i++ {
 		if _, e = client.Write(wire); e != nil {
 			t.Fatal(e)
@@ -760,10 +834,10 @@ func TestWireSaturationKeepsOwnershipAndResponsePolicy(t *testing.T) {
 	}
 	for _, test := range []struct {
 		name string
-		code int
+		code uint16
 	}{{"db.private.test.", dns.RcodeServerFailure}, {"outside.test.", dns.RcodeRefused}} {
-		q.SetQuestion(test.name, dns.TypeA)
-		wire, _ = q.Pack()
+		dnsutil.SetQuestion(q, test.name, dns.TypeA)
+		wire, _ = packDNS(q)
 		if _, e = client.Write(wire); e != nil {
 			t.Fatal(e)
 		}
@@ -773,12 +847,12 @@ func TestWireSaturationKeepsOwnershipAndResponsePolicy(t *testing.T) {
 			t.Fatal(e)
 		}
 		a := new(dns.Msg)
-		if a.Unpack(b[:n]) != nil || a.Rcode != test.code {
+		if unpackDNS(a, b[:n]) != nil || a.Rcode != test.code {
 			t.Fatal("wire overload policy", a)
 		}
 	}
 	q.Response = true
-	wire, _ = q.Pack()
+	wire, _ = packDNS(q)
 	_, _ = client.Write(wire)
 	_ = client.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
 	if _, e = client.Read(make([]byte, MaxUDP)); e == nil {
