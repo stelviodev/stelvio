@@ -19,7 +19,7 @@
 
 ### Security fixes
 
-- **Update your tools following the eMudhra/emSign certificate compromise.** Upgrade your own uv to **0.13.4 or later** and pip to **26.2.2 or later**, following the [Python advisory's upgrade instructions](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576). Stelvio requires `certifi>=2026.10.19` and `uv>=0.13.5`; upgrade pip separately.
+- **Update your tools following the eMudhra/emSign certificate compromise.** Upgrade your own uv to **0.13.5 or later** and pip to **26.2.2 or later**, following the [Python advisory's upgrade instructions](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576). Stelvio requires `certifi>=2026.10.19` and `uv>=0.13.5`; upgrade pip separately.
 - **Update deployed Lambda dependencies.** Bump certifi to **2026.10.19 or later** in your Lambda requirements, rebuild affected packages or layers, and redeploy.
 - **New `stlv init` projects require uv 0.13.5 or later.** The base template enforces this minimum with `tool.uv.required-version`.
 
