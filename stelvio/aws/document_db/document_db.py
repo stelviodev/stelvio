@@ -417,6 +417,7 @@ def _identifier_prefix(name: str, *, suffix: str) -> str:
         limit=_AWS_IDENTIFIER_MAX_LENGTH,
         suffix=suffix,
         pulumi_suffix_length=_DOCDB_GENERATED_SUFFIX_LENGTH,
+        compact_prefix=True,
     )
     return _CONSECUTIVE_HYPHENS_RE.sub("-", raw)
 

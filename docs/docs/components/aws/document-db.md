@@ -391,6 +391,15 @@ provider appends a unique suffix. You can override
 `identifier_prefix` through customize. The identifier and prefix forms are
 mutually exclusive for each AWS resource.
 
+### Resource names
+
+Cluster and instance identifiers normally include the application, environment, and
+component names. If the application and environment prefix leaves too little space,
+Stelvio replaces it with `stlv-<hash>-`, using a stable hash of both names. Instance
+numbers and space for the provider-generated suffix are preserved. Names that
+already fit do not change. Explicit identifiers or prefixes set through `customize`
+still take precedence.
+
 ### Resource Keys
 
 | Resource Key | Pulumi Args Type | Description |
