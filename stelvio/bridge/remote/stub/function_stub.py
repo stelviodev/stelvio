@@ -239,6 +239,24 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
 
     # Publish invocation to local dev server
     request_channel = f"/stelvio/{APP_SEGMENT}/{STAGE_SEGMENT}/in"
+    client_context = None
+    runtime_client_context = getattr(context, "client_context", None)
+    if runtime_client_context is not None:
+        runtime_client = getattr(runtime_client_context, "client", None)
+        client = None
+        if runtime_client is not None:
+            client = {
+                "installation_id": getattr(runtime_client, "installation_id", None),
+                "app_title": getattr(runtime_client, "app_title", None),
+                "app_version_name": getattr(runtime_client, "app_version_name", None),
+                "app_version_code": getattr(runtime_client, "app_version_code", None),
+                "app_package_name": getattr(runtime_client, "app_package_name", None),
+            }
+        client_context = {
+            "custom": getattr(runtime_client_context, "custom", None),
+            "env": getattr(runtime_client_context, "env", None),
+            "client": client,
+        }
     cognito_identity = None
     if getattr(context, "identity", None) is not None:
         cognito_identity = {
@@ -255,7 +273,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         "event": event,
         "context": {
             "invoke_id": getattr(context, "aws_request_id", None),
-            "client_context": getattr(context, "client_context", None),
+            "client_context": client_context,
             "cognito_identity": cognito_identity,
             "epoch_deadline_time_in_ms": context._epoch_deadline_time_in_ms,  # noqa: SLF001
             "invoked_function_arn": getattr(context, "invoked_function_arn", None),

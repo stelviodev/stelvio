@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
+from stelvio.bridge.local.lambda_context import LambdaContext
 
 TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
 
@@ -28,6 +29,95 @@ def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
         _epoch_deadline_time_in_ms=0,
         tenant_id=None,
     )
+
+
+class SlottedClient:
+    __slots__ = (
+        "app_package_name",
+        "app_title",
+        "app_version_code",
+        "app_version_name",
+        "installation_id",
+    )
+
+
+class SlottedClientContext:
+    __slots__ = ("client", "custom", "env")
+
+
+@pytest.mark.parametrize(
+    "client_context_data",
+    [
+        None,
+        {},
+        {"custom": {}, "env": {}, "client": None},
+        {"custom": {"key": "value"}, "client": {}},
+        {"client": {"installation_id": "install-1"}},
+        {
+            "custom": {"key": "value", "nested": {"items": [1, True, None]}},
+            "env": {"platform": "iOS"},
+            "client": {
+                "installation_id": "install-1",
+                "app_title": "Test app",
+                "app_version_name": "1.0",
+                "app_version_code": "10",
+                "app_package_name": "com.example.app",
+            },
+        },
+    ],
+    ids=["absent", "empty", "no-client", "empty-client", "partial-client", "full"],
+)
+def test_client_context_survives_json_transport(client_context_data, reset_global_state):
+    stub = reset_global_state
+    context = make_lambda_context()
+    expected = None
+    if client_context_data is not None:
+        context.client_context = SlottedClientContext()
+        for name, value in client_context_data.items():
+            if name == "client" and value is not None:
+                client = SlottedClient()
+                for field, field_value in value.items():
+                    setattr(client, field, field_value)
+                context.client_context.client = client
+            else:
+                setattr(context.client_context, name, value)
+        client_data = client_context_data.get("client")
+        expected = {
+            "custom": client_context_data.get("custom"),
+            "env": client_context_data.get("env"),
+            "client": (
+                {field: client_data.get(field) for field in SlottedClient.__slots__}
+                if client_data is not None
+                else None
+            ),
+        }
+
+    ws = AsyncMock()
+    response = {"requestId": "req-123", "success": True, "result": {"statusCode": 200}}
+    with (
+        patch.object(stub, "get_or_create_connection", AsyncMock(return_value=(ws, False))),
+        patch.object(stub, "ensure_subscribed", AsyncMock()),
+        patch.object(stub, "wait_for_response", AsyncMock(return_value=response)),
+    ):
+        result = _run(stub.async_handler({"hello": "world"}, context))
+
+    assert result["statusCode"] == 200
+    ws.send.assert_awaited_once()
+    envelope = json.loads(ws.send.call_args.args[0])
+    message = json.loads(envelope["events"][0])
+    assert message["context"]["client_context"] == expected
+
+    local_context = LambdaContext(**message["context"])
+    if expected is None:
+        assert local_context.client_context is None
+    else:
+        assert local_context.client_context.custom == expected["custom"]
+        assert local_context.client_context.env == expected["env"]
+        if expected["client"] is None:
+            assert local_context.client_context.client is None
+        else:
+            for field, value in expected["client"].items():
+                assert getattr(local_context.client_context.client, field) == value
 
 
 # We need to set up environment variables before importing the module
