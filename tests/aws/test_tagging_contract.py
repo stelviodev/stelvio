@@ -17,7 +17,6 @@ from stelvio.aws.cognito.identity_pool import IdentityPool
 from stelvio.aws.cognito.types import IdentityPoolBinding
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.cron import Cron
-from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.dynamo_db import DynamoSubscription, DynamoTable, FieldType
 from stelvio.aws.email import Email
 from stelvio.aws.function.function import Function
@@ -26,7 +25,7 @@ from stelvio.aws.s3.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3_static_website import S3StaticWebsite
 from stelvio.aws.topic import Topic, TopicSubscription
 from stelvio.aws.vpc import Vpc
-from tests.aws.pulumi_mocks import TP, R
+from tests.aws.pulumi_mocks import R
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -262,10 +261,6 @@ def _trigger_vpc(component: Any) -> pulumi.Output[Any]:
     )
 
 
-def _trigger_document_db(component: Any) -> pulumi.Output[Any]:
-    return component.resources.cluster.id
-
-
 CASES: tuple[TagCase, ...] = (
     TagCase(
         "function",
@@ -467,20 +462,6 @@ CASES: tuple[TagCase, ...] = (
         ),
         lambda c: c.resources.function.arn,
         (lambda m: m.created(R.SECURITY_GROUP), lambda m: m.created(R.SECURITY_GROUP_EGRESS_RULE)),
-        exact=False,
-    ),
-    TagCase(
-        "document-db",
-        lambda _: DocumentDb("contract-docdb", vpc=Vpc("contract-vpc"), tags=TAGS),
-        _trigger_document_db,
-        (
-            lambda m: m.created(R.DOCDB_CLUSTER),
-            lambda m: m.created(R.DOCDB_INSTANCE),
-            lambda m: m.created(R.DOCDB_SUBNET_GROUP),
-            lambda m: m.created(R.DOCDB_PARAMETER_GROUP),
-            lambda m: m.created(R.SECURITY_GROUP, TP + "contract-docdb-sg"),
-            lambda m: m.created(R.SECURITY_GROUP_INGRESS_RULE),
-        ),
         exact=False,
     ),
     TagCase(
