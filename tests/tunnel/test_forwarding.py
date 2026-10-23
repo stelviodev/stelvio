@@ -254,7 +254,7 @@ def test_empty_destination_set_never_writes_forwarder_control():
 
 def test_older_forwarder_without_statistics_keeps_mutation_control(control_peer):
     with closing(control_peer("ok")) as forwarding:
-        with raises(OSError, match="file descriptor"):
+        with raises(NotImplementedError, match="unsupported"):
             forwarding.diagnostics()
         forwarding.remove("00000001", 1, 1)
         assert forwarding.healthy()
