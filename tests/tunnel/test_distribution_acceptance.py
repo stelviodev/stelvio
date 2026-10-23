@@ -122,7 +122,7 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         for line in help_result.stdout.split("Commands:\n", 1)[-1].splitlines()
         if line.strip()
     }
-    assert command_names == {"cleanup", "status", "install", "uninstall"}
+    assert command_names == {"cleanup", "status", "install", "trust", "uninstall"}
     status_help = run(
         python,
         "-I",
@@ -144,3 +144,26 @@ assert assets.TARGETS == json.loads(sys.argv[2])
     )
     assert inspect_result.returncode == 2
     assert "No such command 'inspect'" in inspect_result.stderr
+    trust_help = run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.cli import main; main()",
+        "tunnel",
+        "trust",
+        "--help",
+    )
+    assert "Commands:" in trust_help.stdout
+    reset_help = run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.cli import main; main()",
+        "tunnel",
+        "trust",
+        "reset",
+        "--help",
+    )
+    assert {"--partition", "--account", "--region", "--instance-id"} <= set(
+        reset_help.stdout.split()
+    )
