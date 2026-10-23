@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/stelviodev/traforo/internal/diagnostics"
 	"github.com/stelviodev/traforo/internal/forwarder"
 	"github.com/stelviodev/traforo/internal/helper"
 )
@@ -47,5 +48,6 @@ func executeWithForwarder(args []string, stdout, stderr io.Writer, runForwarder 
 }
 
 func main() {
+	diagnostics.BuildVersion = version
 	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr))
 }
