@@ -51,7 +51,7 @@ api.route("GET", "/", "functions/hello.handler")
 The reason for this is that the CloudFront Router sits just in front of all other components from a visitor's perspective.
 Your API handles all its internal routes by itself, as outlined in the [REST API guide](rest-api.md) and [HTTP API guide](http-api.md).
 
-The CloudFront route (`router.route("/api", api)`) maps every incoming request to the API and strips the `/api` prefix. A request to `/api` therefore reaches the API's `/` route, while `/api/users` reaches `/users`. The same behavior applies to both `RestApi` and `HttpApi` origins.
+The CloudFront route (`router.route("/api", api)`) maps every incoming request to the API and strips the `/api` prefix. A request to `/api` therefore reaches the API's `/` route, while `/api/users` reaches `/users`. The same behavior applies to both `RestApi` and `HttpApi` origins. Each such route takes two of the 75 cache behaviors a CloudFront distribution allows, one for `/api` and one for `/api/*`.
 
 Similarly, the S3 Bucket has its internal structure of objects. Let's say, you have an object called "hello.txt" in your bucket. If you'd expose the bucket to the web as outlined in the [Custom Domains](../../concepts/dns.md), you'd access that file via `https://example.com/hello.txt`. However, that's not what our intention was initially: We want to access that file via `https://example.com/files/hello.txt`. This is what the CloudFront route is for: It takes the incoming request, strips the `files/` part and directs it to the bucket origin.
 
@@ -71,8 +71,10 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
 
 !!! note "Path matching rules"
     - Longer, more specific paths take priority over shorter ones
-    - The root path `/` acts as a catch-all for unmatched requests
+    - The root path `/` acts as a catch-all for unmatched requests. `/*` is the same route, so a Router accepts only one of them
     - If no root path is defined, unmatched requests return a 404 response
+    - A wildcard path like `/files/*` keeps its prefix: `/files/a.txt` reaches the origin as `/files/a.txt`
+    - A Bucket on the root path serves its `index.html` for `/` only. A folder in it (`/docs/`) or a bucket route on another path (`/files/`) returns 403
 
 !!! warning "Routes must be defined before resource creation"
     All routes must be added to the Router before its resources are created. Once the Router's CloudFront distribution and related resources have been provisioned, attempting to add new routes will raise a `RuntimeError`. Define all your routes immediately after creating the Router instance.
@@ -100,6 +102,25 @@ router.route("/api", fn, function_url={"cors": {...}})
 
 Key takeaway: When `auth` is omitted or set to `"default"`, `Router` defaults to `"iam"`.
 
+With `"iam"`, CloudFront signs every request it sends to the function. This changes two things for your clients:
+
+- A `PUT` or `POST` with a body must carry the body's SHA-256 hex digest in an `x-amz-content-sha256` header. Lambda doesn't accept unsigned payloads, so without it the request fails. See [Restrict access to an AWS Lambda function URL origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda.html).
+- Your function never sees the client's `Authorization` header, because CloudFront replaces it with its own signature. Send your own tokens in a different header.
+
+```bash
+BODY='{"key": "value"}'
+curl -X POST https://example.com/api \
+  -H "Content-Type: application/json" \
+  -H "x-amz-content-sha256: $(printf '%s' "$BODY" | shasum -a 256 | cut -d' ' -f1)" \
+  -d "$BODY"
+```
+
+`function_url={"auth": None}` drops the `x-amz-content-sha256` rule, but then anyone can call the Function URL directly, past the Router.
+
+
+#### API and Function routes cache behavior
+
+CloudFront doesn't cache API and Function routes and doesn't compress their responses. It passes every viewer header except `Host`, all cookies and all query strings to the origin. On a Function route with IAM auth, CloudFront replaces `Authorization` with its own signature, as described above.
 
 #### S3 Buckets cache behavior
 

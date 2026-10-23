@@ -55,7 +55,7 @@ _DS_TYPES_REQUIRING_CODE = {DS_TYPE_DYNAMO, DS_TYPE_HTTP, DS_TYPE_RDS, DS_TYPE_O
 
 
 def _build_additional_auth_provider(
-    auth: AuthConfig, *, lambda_authorizer_invoke_arn: Output[str] | None = None
+    auth: AuthConfig, *, lambda_authorizer_arn: Output[str] | None = None
 ) -> dict[str, Any]:
     provider: dict[str, Any] = {"authentication_type": _auth_type_string(auth)}
 
@@ -64,11 +64,9 @@ def _build_additional_auth_provider(
     elif isinstance(auth, OidcAuth):
         provider["openid_connect_config"] = auth.to_provider_config()
     elif isinstance(auth, LambdaAuth):
-        if lambda_authorizer_invoke_arn is None:
-            raise ValueError("Missing lambda authorizer invoke ARN for LambdaAuth provider")
-        provider["lambda_authorizer_config"] = auth.to_authorizer_config(
-            lambda_authorizer_invoke_arn
-        )
+        if lambda_authorizer_arn is None:
+            raise ValueError("Missing lambda authorizer ARN for LambdaAuth provider")
+        provider["lambda_authorizer_config"] = auth.to_authorizer_config(lambda_authorizer_arn)
 
     return provider
 
@@ -494,15 +492,15 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             if auth_function is None:
                 raise RuntimeError("Primary LambdaAuth function was not created")
             api_args["lambda_authorizer_config"] = self._config.auth.to_authorizer_config(
-                auth_function.invoke_arn
+                auth_function.invocation_arn
             )
 
         if self._config.additional_auth:
             api_args["additional_authentication_providers"] = [
                 _build_additional_auth_provider(
                     auth,
-                    lambda_authorizer_invoke_arn=(
-                        additional_auth_functions[index].invoke_arn
+                    lambda_authorizer_arn=(
+                        additional_auth_functions[index].invocation_arn
                         if index in additional_auth_functions
                         else None
                     ),

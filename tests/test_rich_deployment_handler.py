@@ -5224,7 +5224,7 @@ def test_instance_class_capacity_error_keeps_aws_text_and_prints_the_fix():
                 "AWS has no capacity for this instance class "
                 "in your Vpc's availability zones right now."
             ),
-            "Set a different `instance_class` and deploy again, or try later.",
+            "Set a different `instance` and deploy again, or try later.",
             "Docs: https://stelvio.dev/docs/components/aws/document-db/#instance-class-capacity",
         )
     )

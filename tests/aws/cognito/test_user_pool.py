@@ -12,7 +12,9 @@ from stelvio.aws.cognito.user_pool import UserPool
 from ...conftest import TP
 from ...test_utils import assert_config_dict_matches_dataclass
 from ..conftest import assert_hash_truncated
-from ..pulumi_mocks import R, tn
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tn
+
+SES_IDENTITY_ARN = f"arn:aws:ses:{DEFAULT_REGION}:{ACCOUNT_ID}:identity/noreply@example.com"
 
 # =========================================================================
 # Config validation tests (no Pulumi mocks needed)
@@ -83,111 +85,145 @@ def test_user_pool_config_property():
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_basic_user_pool_creation(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        pools = pulumi_mocks.created_user_pools()
-        assert len(pools) == 1
-        assert pools[0].typ == "aws:cognito/userPool:UserPool"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {
+            "usernameAttributes": ["email"],
+            "autoVerifiedAttributes": ["email"],
+            "mfaConfiguration": "OFF",
+            "deletionProtection": "INACTIVE",
+            "userPoolTier": "ESSENTIALS",
+        },
+    )
+    pulumi_mocks.assert_res_counts({R.USER_POOL: 1})
 
 
-@pulumi.runtime.test
 def test_user_pool_with_username_attributes(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["usernameAttributes"] == ["email"]
-        assert mock.inputs.get("aliasAttributes") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {"usernameAttributes": ["email"], "aliasAttributes": None},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_user_pool_with_alias_attributes(pulumi_mocks):
     pool = UserPool("users", aliases=["email", "preferred_username"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["aliasAttributes"] == ["email", "preferred_username"]
-        assert mock.inputs.get("usernameAttributes") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {"aliasAttributes": ["email", "preferred_username"], "usernameAttributes": None},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_user_pool_auto_verified_email(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["autoVerifiedAttributes"] == ["email"]
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users", R.USER_POOL, {"autoVerifiedAttributes": ["email"]}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_user_pool_auto_verified_phone(pulumi_mocks):
     pool = UserPool("users", usernames=["phone"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["autoVerifiedAttributes"] == ["phone_number"]
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users", R.USER_POOL, {"autoVerifiedAttributes": ["phone_number"]}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_user_pool_auto_verified_both(pulumi_mocks):
     pool = UserPool("users", aliases=["email", "phone"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["autoVerifiedAttributes"] == ["email", "phone_number"]
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users", R.USER_POOL, {"autoVerifiedAttributes": ["email", "phone_number"]}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_user_pool_no_auto_verified_when_empty(pulumi_mocks):
     pool = UserPool("users")
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs.get("autoVerifiedAttributes") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"autoVerifiedAttributes": None}, partial=True)
 
 
-@pulumi.runtime.test
 def test_user_pool_alias_phone_auto_verified(pulumi_mocks):
     """Phone in aliases (not just usernames) should be auto-verified."""
     pool = UserPool("users", aliases=["phone"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["autoVerifiedAttributes"] == ["phone_number"]
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users", R.USER_POOL, {"autoVerifiedAttributes": ["phone_number"]}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_user_pool_alias_preferred_username_no_auto_verify(pulumi_mocks):
     """preferred_username in aliases should NOT be auto-verified."""
     pool = UserPool("users", aliases=["preferred_username"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs.get("autoVerifiedAttributes") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"autoVerifiedAttributes": None}, partial=True)
 
 
-@pulumi.runtime.test
 def test_password_policy_args(pulumi_mocks):
     pool = UserPool(
         "users",
@@ -199,118 +235,145 @@ def test_password_policy_args(pulumi_mocks):
         ),
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        pw = mock.inputs["passwordPolicy"]
-        assert pw["minimumLength"] == 12
-        assert pw["requireSymbols"] is False
-        assert pw["requireLowercase"] is True
-        assert pw["requireUppercase"] is True
-        assert pw["requireNumbers"] is True
-        assert pw["temporaryPasswordValidityDays"] == 3
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {
+            "passwordPolicy": {
+                "minimumLength": 12,
+                "requireLowercase": True,
+                "requireUppercase": True,
+                "requireNumbers": True,
+                "requireSymbols": False,
+                "temporaryPasswordValidityDays": 3,
+            }
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_default_password_not_set(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs.get("passwordPolicy") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"passwordPolicy": None}, partial=True)
 
 
-@pulumi.runtime.test
 def test_mfa_off(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["mfaConfiguration"] == "OFF"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"mfaConfiguration": "OFF"}, partial=True)
 
 
-@pulumi.runtime.test
 def test_mfa_optional(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], mfa="optional", software_token=True)
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["mfaConfiguration"] == "OPTIONAL"
-        assert mock.inputs["softwareTokenMfaConfiguration"]["enabled"] is True
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {"mfaConfiguration": "OPTIONAL", "softwareTokenMfaConfiguration": {"enabled": True}},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_mfa_on(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], mfa="on", software_token=True)
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["mfaConfiguration"] == "ON"
-        assert mock.inputs["softwareTokenMfaConfiguration"]["enabled"] is True
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {"mfaConfiguration": "ON", "softwareTokenMfaConfiguration": {"enabled": True}},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_deletion_protection_enabled(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], deletion_protection=True)
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["deletionProtection"] == "ACTIVE"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"deletionProtection": "ACTIVE"}, partial=True)
 
 
-@pulumi.runtime.test
 def test_deletion_protection_disabled_by_default(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["deletionProtection"] == "INACTIVE"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"deletionProtection": "INACTIVE"}, partial=True)
 
 
-@pulumi.runtime.test
 def test_tier_essentials_default(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["userPoolTier"] == "ESSENTIALS"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"userPoolTier": "ESSENTIALS"}, partial=True)
 
 
-@pulumi.runtime.test
 def test_tier_lite(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], tier="lite")
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["userPoolTier"] == "LITE"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"userPoolTier": "LITE"}, partial=True)
 
 
-@pulumi.runtime.test
 def test_tier_plus(pulumi_mocks):
     pool = UserPool("users", usernames=["email"], tier="plus")
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["userPoolTier"] == "PLUS"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"userPoolTier": "PLUS"}, partial=True)
 
 
 @pulumi.runtime.test
@@ -329,7 +392,6 @@ def test_user_pool_properties(pulumi_mocks):
     pulumi.Output.all(pool.id, pool.arn, pool.name_in_aws).apply(check)
 
 
-@pulumi.runtime.test
 def test_customization_overrides(pulumi_mocks):
     pool = UserPool(
         "users",
@@ -337,39 +399,47 @@ def test_customization_overrides(pulumi_mocks):
         customize={"user_pool": {"name": "custom-pool-name"}},
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["name"] == "custom-pool-name"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"name": "custom-pool-name"}, partial=True)
 
 
-@pulumi.runtime.test
 def test_no_triggers_by_default(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
 
-    def check(_):
-        assert pool.resources.trigger_functions == {}
-        assert pool.resources.trigger_permissions == {}
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs.get("lambdaConfig") is None
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    assert pool.resources.trigger_functions == {}
+    assert pool.resources.trigger_permissions == {}
+    pulumi_mocks.assert_res("users", R.USER_POOL, {"lambdaConfig": None}, partial=True)
 
 
-@pulumi.runtime.test
 def test_config_parameter_style(pulumi_mocks):
     pool = UserPool(
         "users",
         config=UserPoolConfig(usernames=["email"], tier="plus"),
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        assert mock.inputs["usernameAttributes"] == ["email"]
-        assert mock.inputs["userPoolTier"] == "PLUS"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {"usernameAttributes": ["email"], "userPoolTier": "PLUS"},
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -418,22 +488,30 @@ def test_invalid_trigger_handler_types_rejected(invalid_handler):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_user_pool_with_ses_email(pulumi_mocks):
     from stelvio.aws.email import Email
 
     email = Email("auth-email", "noreply@example.com", dmarc=None)
     pool = UserPool("users", usernames=["email"], email=email)
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "users")
-        email_config = mock.inputs["emailConfiguration"]
-        assert email_config["emailSendingAccount"] == "DEVELOPER"
-        assert "arn:aws:ses:" in email_config["sourceArn"]
-        assert "noreply@example.com" in email_config["sourceArn"]
-        assert email_config["fromEmailAddress"] == "noreply@example.com"
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "users",
+        R.USER_POOL,
+        {
+            "emailConfiguration": {
+                "emailSendingAccount": "DEVELOPER",
+                "sourceArn": SES_IDENTITY_ARN,
+                "fromEmailAddress": "noreply@example.com",
+            }
+        },
+        partial=True,
+    )
 
 
 # =========================================================================
@@ -441,7 +519,6 @@ def test_user_pool_with_ses_email(pulumi_mocks):
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_fully_loaded_config(pulumi_mocks, project_cwd):
     from stelvio.aws.email import Email
 
@@ -458,19 +535,41 @@ def test_fully_loaded_config(pulumi_mocks, project_cwd):
         triggers={"pre_sign_up": "functions/auth/validate.handler"},
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_user_pool_created(TP + "full")
-        assert mock.inputs["usernameAttributes"] == ["email"]
-        assert mock.inputs["mfaConfiguration"] == "OPTIONAL"
-        assert mock.inputs["softwareTokenMfaConfiguration"]["enabled"] is True
-        assert mock.inputs["passwordPolicy"]["minimumLength"] == 12
-        assert mock.inputs["emailConfiguration"]["emailSendingAccount"] == "DEVELOPER"
-        assert mock.inputs["userPoolTier"] == "PLUS"
-        assert mock.inputs["deletionProtection"] == "ACTIVE"
-        assert mock.inputs["autoVerifiedAttributes"] == ["email"]
-        assert "preSignUp" in mock.inputs["lambdaConfig"]
+    @pulumi.runtime.test
+    def deploy():
+        return pool.resources
 
-    pool.arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "full",
+        R.USER_POOL,
+        {
+            "usernameAttributes": ["email"],
+            "autoVerifiedAttributes": ["email"],
+            "mfaConfiguration": "OPTIONAL",
+            "softwareTokenMfaConfiguration": {"enabled": True},
+            "passwordPolicy": {
+                "minimumLength": 12,
+                "requireLowercase": True,
+                "requireUppercase": True,
+                "requireNumbers": True,
+                "requireSymbols": True,
+                "temporaryPasswordValidityDays": 7,
+            },
+            "emailConfiguration": {
+                "emailSendingAccount": "DEVELOPER",
+                "sourceArn": SES_IDENTITY_ARN,
+                "fromEmailAddress": "noreply@example.com",
+            },
+            "lambdaConfig": {
+                "preSignUp": f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:"
+                f"{tn(TP + 'full-trigger-pre_sign_up')}"
+            },
+            "deletionProtection": "ACTIVE",
+            "userPoolTier": "PLUS",
+        },
+    )
 
 
 def test_user_pool_lets_pulumi_name_it(pulumi_mocks):

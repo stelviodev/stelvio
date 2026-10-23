@@ -18,6 +18,9 @@ from ...conftest import TP
 from ..conftest import assert_hash_truncated
 from ..pulumi_mocks import ACCOUNT_ID, R, tid, tn
 
+AUTH_ROLE_ARN = f"arn:aws:iam::{ACCOUNT_ID}:role/{tn(f'{TP}app-identity-auth-role')}"
+UNAUTH_ROLE_ARN = f"arn:aws:iam::{ACCOUNT_ID}:role/{tn(f'{TP}app-identity-unauth-role')}"
+
 # =========================================================================
 # Config validation tests (no Pulumi mocks needed)
 # =========================================================================
@@ -132,7 +135,6 @@ def test_default_permissions():
 # =========================================================================
 
 
-@pulumi.runtime.test
 def test_basic_identity_pool_creation(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -142,15 +144,38 @@ def test_basic_identity_pool_creation(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        pools = pulumi_mocks.created_identity_pools()
-        assert len(pools) == 1
-        assert pools[0].typ == "aws:cognito/identityPool:IdentityPool"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity",
+        R.IDENTITY_POOL,
+        {
+            "identityPoolName": f"{TP}app-identity",
+            "allowUnauthenticatedIdentities": False,
+            "cognitoIdentityProviders": [
+                {
+                    "providerName": "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id",
+                    "clientId": tid(f"{TP}users-web"),
+                    "serverSideTokenCheck": False,
+                }
+            ],
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.USER_POOL: 1,
+            R.USER_POOL_CLIENT: 1,
+            R.IDENTITY_POOL: 1,
+            R.ROLE: 1,
+            R.IDENTITY_POOL_ROLE_ATTACHMENT: 1,
+        }
+    )
 
 
-@pulumi.runtime.test
 def test_identity_pool_naming(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -160,36 +185,17 @@ def test_identity_pool_naming(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        assert mock.inputs["identityPoolName"] == TP + "app-identity"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.id.apply(check)
+    deploy()
 
-
-@pulumi.runtime.test
-def test_cognito_identity_providers(pulumi_mocks):
-    pool = UserPool("users", usernames=["email"])
-    client = pool.add_client("web")
-
-    identity = IdentityPool(
-        "app-identity",
-        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    pulumi_mocks.assert_res(
+        "app-identity", R.IDENTITY_POOL, {"identityPoolName": TP + "app-identity"}, partial=True
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        providers = mock.inputs["cognitoIdentityProviders"]
-        assert len(providers) == 1
-        provider = providers[0]
-        assert "clientId" in provider
-        assert "providerName" in provider
-        assert provider["serverSideTokenCheck"] is False
 
-    identity.authenticated_role_arn.apply(check)
-
-
-@pulumi.runtime.test
 def test_identity_provider_name_uses_resolved_region(pulumi_mocks, no_region_context):
     """Provider name carries the chain-resolved region when config has none.
 
@@ -207,16 +213,28 @@ def test_identity_provider_name_uses_resolved_region(pulumi_mocks, no_region_con
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_res("app-identity", R.IDENTITY_POOL)
-        provider = mock.inputs["cognitoIdentityProviders"][0]
-        pool_id = tid(TP + "users")
-        assert provider["providerName"] == f"cognito-idp.eu-central-1.amazonaws.com/{pool_id}"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity",
+        R.IDENTITY_POOL,
+        {
+            "cognitoIdentityProviders": [
+                {
+                    "providerName": f"cognito-idp.eu-central-1.amazonaws.com/{tid(f'{TP}users')}",
+                    "clientId": tid(f"{TP}users-web"),
+                    "serverSideTokenCheck": False,
+                }
+            ]
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_allow_unauthenticated_enabled(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -227,14 +245,17 @@ def test_allow_unauthenticated_enabled(pulumi_mocks):
         allow_unauthenticated=True,
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        assert mock.inputs["allowUnauthenticatedIdentities"] is True
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity", R.IDENTITY_POOL, {"allowUnauthenticatedIdentities": True}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_allow_unauthenticated_disabled_by_default(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -244,14 +265,17 @@ def test_allow_unauthenticated_disabled_by_default(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        assert mock.inputs["allowUnauthenticatedIdentities"] is False
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity", R.IDENTITY_POOL, {"allowUnauthenticatedIdentities": False}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_authenticated_role_created(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -261,14 +285,15 @@ def test_authenticated_role_created(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        auth_role = pulumi_mocks.assert_role_created(TP + "app-identity-auth-role")
-        assert auth_role.typ == "aws:iam/role:Role"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("app-identity-auth-role", R.ROLE)
 
 
-@pulumi.runtime.test
 def test_authenticated_role_trust_policy(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -278,28 +303,33 @@ def test_authenticated_role_trust_policy(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        auth_role = pulumi_mocks.assert_role_created(TP + "app-identity-auth-role")
-        trust_policy = auth_role.inputs["assumeRolePolicy"]
-        policy_doc = json.loads(trust_policy)
-        assert policy_doc["Version"] == "2012-10-17"
-        assert len(policy_doc["Statement"]) == 1
-        stmt = policy_doc["Statement"][0]
-        assert stmt["Action"] == "sts:AssumeRoleWithWebIdentity"
-        assert stmt["Principal"] == {"Federated": "cognito-identity.amazonaws.com"}
-        condition = stmt["Condition"]
-        assert "StringEquals" in condition
-        assert "cognito-identity.amazonaws.com:aud" in condition["StringEquals"]
-        assert "ForAnyValue:StringLike" in condition
-        assert (
-            condition["ForAnyValue:StringLike"]["cognito-identity.amazonaws.com:amr"]
-            == "authenticated"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    auth_role = pulumi_mocks.assert_res("app-identity-auth-role", R.ROLE)
+    assert json.loads(auth_role.inputs["assumeRolePolicy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Principal": {"Federated": "cognito-identity.amazonaws.com"},
+                "Condition": {
+                    "StringEquals": {
+                        "cognito-identity.amazonaws.com:aud": tid(f"{TP}app-identity")
+                    },
+                    "ForAnyValue:StringLike": {
+                        "cognito-identity.amazonaws.com:amr": "authenticated"
+                    },
+                },
+            }
+        ],
+    }
 
 
-@pulumi.runtime.test
 def test_authenticated_role_policy_created_with_permissions(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -317,39 +347,20 @@ def test_authenticated_role_policy_created_with_permissions(pulumi_mocks):
         ),
     )
 
-    def check(_):
-        policy = pulumi_mocks.assert_role_policy_created(TP + "app-identity-auth-policy")
-        assert policy.typ == "aws:iam/rolePolicy:RolePolicy"
-        # Role should reference the auth role
-        auth_role_name = TP + "app-identity-auth-role"
-        assert policy.inputs["role"] == tid(auth_role_name)
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    pulumi.Output.all(
-        identity.resources.roles_attachment.identity_pool_id,
-        identity.resources.authenticated_role_policy.name,
-    ).apply(check)
+    deploy()
 
-
-@pulumi.runtime.test
-def test_no_auth_role_policy_when_no_permissions(pulumi_mocks):
-    pool = UserPool("users", usernames=["email"])
-    client = pool.add_client("web")
-
-    identity = IdentityPool(
-        "app-identity",
-        user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
+    pulumi_mocks.assert_res(
+        "app-identity-auth-policy",
+        R.ROLE_POLICY,
+        {"role": tid(f"{TP}app-identity-auth-role")},
+        partial=True,
     )
 
-    def check(_):
-        policies = pulumi_mocks.created_role_policies()
-        # No role policies should be created
-        identity_policies = [p for p in policies if "app-identity" in p.name]
-        assert len(identity_policies) == 0
 
-    identity.authenticated_role_arn.apply(check)
-
-
-@pulumi.runtime.test
 def test_unauthenticated_role_created_when_enabled(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -360,14 +371,15 @@ def test_unauthenticated_role_created_when_enabled(pulumi_mocks):
         allow_unauthenticated=True,
     )
 
-    def check(_):
-        unauth_role = pulumi_mocks.assert_role_created(TP + "app-identity-unauth-role")
-        assert unauth_role.typ == "aws:iam/role:Role"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.unauthenticated_role_arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("app-identity-unauth-role", R.ROLE)
 
 
-@pulumi.runtime.test
 def test_unauthenticated_role_skipped_when_disabled(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -377,15 +389,15 @@ def test_unauthenticated_role_skipped_when_disabled(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        roles = pulumi_mocks.created_roles()
-        unauth_roles = [r for r in roles if "unauth-role" in r.name]
-        assert len(unauth_roles) == 0
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    assert [r.name for r in pulumi_mocks.created(R.ROLE)] == [f"{TP}app-identity-auth-role"]
 
 
-@pulumi.runtime.test
 def test_unauthenticated_role_trust_policy(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -396,20 +408,33 @@ def test_unauthenticated_role_trust_policy(pulumi_mocks):
         allow_unauthenticated=True,
     )
 
-    def check(_):
-        unauth_role = pulumi_mocks.assert_role_created(TP + "app-identity-unauth-role")
-        trust_policy = unauth_role.inputs["assumeRolePolicy"]
-        policy_doc = json.loads(trust_policy)
-        stmt = policy_doc["Statement"][0]
-        assert (
-            stmt["Condition"]["ForAnyValue:StringLike"]["cognito-identity.amazonaws.com:amr"]
-            == "unauthenticated"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.unauthenticated_role_arn.apply(check)
+    deploy()
+
+    unauth_role = pulumi_mocks.assert_res("app-identity-unauth-role", R.ROLE)
+    assert json.loads(unauth_role.inputs["assumeRolePolicy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Principal": {"Federated": "cognito-identity.amazonaws.com"},
+                "Condition": {
+                    "StringEquals": {
+                        "cognito-identity.amazonaws.com:aud": tid(f"{TP}app-identity")
+                    },
+                    "ForAnyValue:StringLike": {
+                        "cognito-identity.amazonaws.com:amr": "unauthenticated"
+                    },
+                },
+            }
+        ],
+    }
 
 
-@pulumi.runtime.test
 def test_unauthenticated_role_policy_created(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -428,19 +453,20 @@ def test_unauthenticated_role_policy_created(pulumi_mocks):
         allow_unauthenticated=True,
     )
 
-    def check(_):
-        policy = pulumi_mocks.assert_role_policy_created(TP + "app-identity-unauth-policy")
-        assert policy.typ == "aws:iam/rolePolicy:RolePolicy"
-        unauth_role_name = TP + "app-identity-unauth-role"
-        assert policy.inputs["role"] == tid(unauth_role_name)
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    pulumi.Output.all(
-        identity.resources.roles_attachment.identity_pool_id,
-        identity.resources.unauthenticated_role_policy.name,
-    ).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity-unauth-policy",
+        R.ROLE_POLICY,
+        {"role": tid(f"{TP}app-identity-unauth-role")},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_roles_attachment_created(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -450,19 +476,20 @@ def test_roles_attachment_created(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        attachment = pulumi_mocks.assert_roles_attachment_created(TP + "app-identity-roles")
-        assert (
-            attachment.typ == "aws:cognito/identityPoolRoleAttachment:IdentityPoolRoleAttachment"
-        )
-        # Should reference the identity pool
-        pool_name = TP + "app-identity"
-        assert attachment.inputs["identityPoolId"] == tid(pool_name)
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.resources.roles_attachment.identity_pool_id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity-roles",
+        R.IDENTITY_POOL_ROLE_ATTACHMENT,
+        {"identityPoolId": tid(f"{TP}app-identity")},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_roles_attachment_contains_authenticated_role(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -472,17 +499,20 @@ def test_roles_attachment_contains_authenticated_role(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        attachment = pulumi_mocks.assert_roles_attachment_created(TP + "app-identity-roles")
-        roles = attachment.inputs["roles"]
-        assert "authenticated" in roles
-        auth_role_name = TP + "app-identity-auth-role"
-        assert roles["authenticated"] == f"arn:aws:iam::{ACCOUNT_ID}:role/{tn(auth_role_name)}"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.resources.roles_attachment.identity_pool_id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity-roles",
+        R.IDENTITY_POOL_ROLE_ATTACHMENT,
+        {"roles": {"authenticated": AUTH_ROLE_ARN}},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_roles_attachment_with_both_roles(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -493,16 +523,20 @@ def test_roles_attachment_with_both_roles(pulumi_mocks):
         allow_unauthenticated=True,
     )
 
-    def check(_):
-        attachment = pulumi_mocks.assert_roles_attachment_created(TP + "app-identity-roles")
-        roles = attachment.inputs["roles"]
-        assert "authenticated" in roles
-        assert "unauthenticated" in roles
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.resources.roles_attachment.identity_pool_id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity-roles",
+        R.IDENTITY_POOL_ROLE_ATTACHMENT,
+        {"roles": {"authenticated": AUTH_ROLE_ARN, "unauthenticated": UNAUTH_ROLE_ARN}},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_string_bindings(pulumi_mocks):
     identity = IdentityPool(
         "app-identity",
@@ -511,19 +545,28 @@ def test_string_bindings(pulumi_mocks):
         ],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        providers = mock.inputs["cognitoIdentityProviders"]
-        assert len(providers) == 1
-        assert providers[0]["clientId"] == "client-id-123"
-        assert providers[0]["providerName"] == (
-            "cognito-idp.us-east-1.amazonaws.com/us-east-1_abc123"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity",
+        R.IDENTITY_POOL,
+        {
+            "cognitoIdentityProviders": [
+                {
+                    "providerName": "cognito-idp.us-east-1.amazonaws.com/us-east-1_abc123",
+                    "clientId": "client-id-123",
+                    "serverSideTokenCheck": False,
+                }
+            ]
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_string_binding_provider_name_uses_pool_id_region(pulumi_mocks):
     """When pool ID is from a different region than the app,
     provider_name uses the pool's region."""
@@ -534,18 +577,28 @@ def test_string_binding_provider_name_uses_pool_id_region(pulumi_mocks):
         ],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        providers = mock.inputs["cognitoIdentityProviders"]
-        assert providers[0]["providerName"] == (
-            "cognito-idp.eu-west-1.amazonaws.com/eu-west-1_abc123"
-        )
-        assert providers[0]["clientId"] == "client-id-123"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity",
+        R.IDENTITY_POOL,
+        {
+            "cognitoIdentityProviders": [
+                {
+                    "providerName": "cognito-idp.eu-west-1.amazonaws.com/eu-west-1_abc123",
+                    "clientId": "client-id-123",
+                    "serverSideTokenCheck": False,
+                }
+            ]
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_component_binding_provider_name_uses_app_region(pulumi_mocks):
     """UserPool component bindings use the app region for provider_name."""
     pool = UserPool("users", usernames=["email"])
@@ -556,18 +609,28 @@ def test_component_binding_provider_name_uses_app_region(pulumi_mocks):
         user_pools=[IdentityPoolBinding(user_pool=pool, client=client)],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        providers = mock.inputs["cognitoIdentityProviders"]
-        assert providers[0]["providerName"] == (
-            "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id"
-        )
-        assert providers[0]["serverSideTokenCheck"] is False
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity",
+        R.IDENTITY_POOL,
+        {
+            "cognitoIdentityProviders": [
+                {
+                    "providerName": "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id",
+                    "clientId": tid(f"{TP}users-web"),
+                    "serverSideTokenCheck": False,
+                }
+            ]
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_mixed_component_and_string_bindings(pulumi_mocks):
     """Mix of UserPool component and string bindings resolves each correctly."""
     pool = UserPool("users", usernames=["email"])
@@ -581,24 +644,37 @@ def test_mixed_component_and_string_bindings(pulumi_mocks):
         ],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        providers = mock.inputs["cognitoIdentityProviders"]
-        assert len(providers) == 2
-        # Component binding uses app region
-        assert providers[0]["providerName"] == (
-            "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id"
-        )
-        # String binding uses parsed region from pool ID
-        assert providers[1]["providerName"] == (
-            "cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_ext456"
-        )
-        assert providers[1]["clientId"] == "ext-client"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.authenticated_role_arn.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity",
+        R.IDENTITY_POOL,
+        {
+            "cognitoIdentityProviders": [
+                # Component binding uses app region
+                {
+                    "providerName": "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id",
+                    "clientId": tid(f"{TP}users-web"),
+                    "serverSideTokenCheck": False,
+                },
+                # String binding uses parsed region from pool ID
+                {
+                    "providerName": (
+                        "cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_ext456"
+                    ),
+                    "clientId": "ext-client",
+                    "serverSideTokenCheck": False,
+                },
+            ]
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_identity_pool_customization(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -609,14 +685,17 @@ def test_identity_pool_customization(pulumi_mocks):
         customize={"identity_pool": {"developer_provider_name": "my-app"}},
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        assert mock.inputs["developerProviderName"] == "my-app"
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity", R.IDENTITY_POOL, {"developerProviderName": "my-app"}, partial=True
+    )
 
 
-@pulumi.runtime.test
 def test_multiple_bindings(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     web_client = pool.add_client("web")
@@ -630,15 +709,33 @@ def test_multiple_bindings(pulumi_mocks):
         ],
     )
 
-    def check(_):
-        mock = pulumi_mocks.assert_identity_pool_created(TP + "app-identity")
-        providers = mock.inputs["cognitoIdentityProviders"]
-        assert len(providers) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    identity.id.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "app-identity",
+        R.IDENTITY_POOL,
+        {
+            "cognitoIdentityProviders": [
+                {
+                    "providerName": "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id",
+                    "clientId": tid(f"{TP}users-web"),
+                    "serverSideTokenCheck": False,
+                },
+                {
+                    "providerName": "cognito-idp.us-east-1.amazonaws.com/test-test-users-test-id",
+                    "clientId": tid(f"{TP}users-api"),
+                    "serverSideTokenCheck": False,
+                },
+            ]
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_auth_role_policy_contains_correct_actions(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -656,20 +753,23 @@ def test_auth_role_policy_contains_correct_actions(pulumi_mocks):
         ),
     )
 
-    def check(_):
-        policy = pulumi_mocks.assert_role_policy_created(TP + "app-identity-auth-policy")
-        policy_doc = json.loads(policy.inputs["policy"])
-        assert policy_doc["Version"] == "2012-10-17"
-        assert len(policy_doc["Statement"]) == 1
-        stmt = policy_doc["Statement"][0]
-        assert "s3:GetObject" in stmt["Action"]
-        assert "s3:PutObject" in stmt["Action"]
-        assert "arn:aws:s3:::my-bucket/*" in stmt["Resource"]
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    pulumi.Output.all(
-        identity.resources.roles_attachment.identity_pool_id,
-        identity.resources.authenticated_role_policy.name,
-    ).apply(check)
+    deploy()
+
+    policy = pulumi_mocks.assert_res("app-identity-auth-policy", R.ROLE_POLICY)
+    assert json.loads(policy.inputs["policy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject"],
+                "Resource": ["arn:aws:s3:::my-bucket/*"],
+            }
+        ],
+    }
 
 
 @pulumi.runtime.test
@@ -739,7 +839,6 @@ def test_unauthenticated_role_arn_property_none_when_disabled(pulumi_mocks):
     assert identity.unauthenticated_role_arn is None
 
 
-@pulumi.runtime.test
 def test_config_from_opts(pulumi_mocks):
     pool = UserPool("users", usernames=["email"])
     client = pool.add_client("web")
@@ -750,18 +849,24 @@ def test_config_from_opts(pulumi_mocks):
         allow_unauthenticated=True,
     )
 
-    def check(_):
-        pools = pulumi_mocks.created_identity_pools()
-        assert len(pools) == 1
-        # Verify both auth and unauth roles exist
-        roles = pulumi_mocks.created_roles()
-        identity_roles = [r for r in roles if "app-identity" in r.name]
-        assert len(identity_roles) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return identity.resources
 
-    pulumi.Output.all(
-        identity.authenticated_role_arn,
-        identity.unauthenticated_role_arn,
-    ).apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res("app-identity", R.IDENTITY_POOL)
+    pulumi_mocks.assert_res("app-identity-auth-role", R.ROLE)
+    pulumi_mocks.assert_res("app-identity-unauth-role", R.ROLE)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.USER_POOL: 1,
+            R.USER_POOL_CLIENT: 1,
+            R.IDENTITY_POOL: 1,
+            R.ROLE: 2,
+            R.IDENTITY_POOL_ROLE_ATTACHMENT: 1,
+        }
+    )
 
 
 # =========================================================================

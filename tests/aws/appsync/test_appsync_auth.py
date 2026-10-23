@@ -23,34 +23,42 @@ from stelvio.aws.appsync.constants import (
 from stelvio.aws.cognito.user_pool import UserPool
 from stelvio.aws.function import Function, FunctionConfig
 
-from ..pulumi_mocks import R
+from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 from .conftest import (
+    API_ID,
     COGNITO_USER_POOL_ID,
     INLINE_SCHEMA,
     TP,
-    assert_graphql_api_inputs,
+    deploy_all,
     make_api,
-    when_appsync_ready,
 )
 
 
-@pulumi.runtime.test
+def authorizer_uri(function: str) -> str:
+    return f"arn:aws:lambda:{DEFAULT_REGION}:{ACCOUNT_ID}:function:{tn(TP + function)}"
+
+
 def test_api_key_auth(pulumi_mocks, project_cwd):
-    api = make_api(auth=ApiKeyAuth(expires=30))
+    make_api(auth=ApiKeyAuth(expires=30))
 
-    def check_resources(_):
-        assert_graphql_api_inputs(pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_API_KEY)
+    deploy_all()
 
-        api_keys = pulumi_mocks.created_appsync_api_keys()
-        assert len(api_keys) == 1
-        assert api_keys[0].typ == "aws:appsync/apiKey:ApiKey"
-        expires_str = api_keys[0].inputs["expires"]
-        expires_dt = datetime.strptime(expires_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-        now = datetime.now(tz=UTC)
-        assert expires_dt > now + timedelta(days=29)
-        assert expires_dt < now + timedelta(days=31)
-
-    when_appsync_ready(api, check_resources)
+    pulumi_mocks.assert_res(
+        "myapi", R.GRAPHQL_API, {"authenticationType": AUTH_TYPE_API_KEY}, partial=True
+    )
+    api_key = pulumi_mocks.assert_res("myapi-api-key", R.APPSYNC_API_KEY)
+    assert {k: v for k, v in api_key.inputs.items() if k != "expires"} == {
+        "apiId": API_ID,
+        "description": "Managed by Pulumi",  # pulumi_aws default, not a Stelvio input
+    }
+    pulumi_mocks.assert_res_counts(
+        {R.GRAPHQL_API: 1, R.APPSYNC_DATA_SOURCE: 1, R.APPSYNC_API_KEY: 1}
+    )
+    expires_str = api_key.inputs["expires"]
+    expires_dt = datetime.strptime(expires_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    now = datetime.now(tz=UTC)
+    assert expires_dt > now + timedelta(days=29)
+    assert expires_dt < now + timedelta(days=31)
 
 
 @pytest.mark.parametrize(
@@ -87,7 +95,7 @@ def test_api_key_property(
             CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
             AUTH_TYPE_COGNITO,
             "userPoolConfig",
-            {"userPoolId": COGNITO_USER_POOL_ID},
+            {"defaultAction": "ALLOW", "userPoolId": COGNITO_USER_POOL_ID},
         ),
         (
             CognitoAuth(
@@ -98,6 +106,7 @@ def test_api_key_property(
             AUTH_TYPE_COGNITO,
             "userPoolConfig",
             {
+                "defaultAction": "ALLOW",
                 "userPoolId": COGNITO_USER_POOL_ID,
                 "awsRegion": "eu-west-1",
                 "appIdClientRegex": "^my-app.*",
@@ -128,72 +137,57 @@ def test_api_key_property(
     ],
     ids=["iam", "cognito", "cognito-opts", "oidc", "oidc-opts"],
 )
-@pulumi.runtime.test
 def test_auth_mode_creates_correct_api(  # noqa: PLR0913
     auth_config, expected_auth_type, config_key, expected_config, pulumi_mocks, project_cwd
 ):
-    api = make_api(auth=auth_config)
+    make_api(auth=auth_config)
 
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(
-            pulumi_mocks, f"{TP}myapi", authenticationType=expected_auth_type
-        )
-        if config_key:
-            config = inputs[config_key]
-            for key, value in expected_config.items():
-                assert config[key] == value
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    expected = {"authenticationType": expected_auth_type}
+    if config_key:
+        expected[config_key] = expected_config
+    pulumi_mocks.assert_res("myapi", R.GRAPHQL_API, expected, partial=True)
 
 
-@pulumi.runtime.test
 def test_cognito_auth_accepts_user_pool_component(pulumi_mocks, project_cwd):
     pool = UserPool("auth-pool", usernames=["email"])
-    api = make_api(auth=CognitoAuth(user_pool_id=pool))
+    make_api(auth=CognitoAuth(user_pool_id=pool))
 
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(
-            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
-        )
-        config = inputs["userPoolConfig"]
-        assert config["userPoolId"] == "test-test-auth-pool-test-id"
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    pulumi_mocks.assert_res(
+        "myapi",
+        R.GRAPHQL_API,
+        {
+            "authenticationType": AUTH_TYPE_COGNITO,
+            "userPoolConfig": {"defaultAction": "ALLOW", "userPoolId": tid(f"{TP}auth-pool")},
+        },
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_cognito_auth_user_pool_component_with_options(pulumi_mocks, project_cwd):
     """UserPool component works alongside region and app_id_client_regex options."""
     pool = UserPool("auth-pool", usernames=["email"])
-    api = make_api(
-        auth=CognitoAuth(user_pool_id=pool, region="eu-west-1", app_id_client_regex="^web.*")
+    make_api(auth=CognitoAuth(user_pool_id=pool, region="eu-west-1", app_id_client_regex="^web.*"))
+
+    deploy_all()
+
+    pulumi_mocks.assert_res(
+        "myapi",
+        R.GRAPHQL_API,
+        {
+            "authenticationType": AUTH_TYPE_COGNITO,
+            "userPoolConfig": {
+                "defaultAction": "ALLOW",
+                "userPoolId": tid(f"{TP}auth-pool"),
+                "awsRegion": "eu-west-1",
+                "appIdClientRegex": "^web.*",
+            },
+        },
+        partial=True,
     )
-
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(
-            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
-        )
-        config = inputs["userPoolConfig"]
-        assert config["userPoolId"] == "test-test-auth-pool-test-id"
-        assert config["awsRegion"] == "eu-west-1"
-        assert config["appIdClientRegex"] == "^web.*"
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
-def test_cognito_auth_string_pool_id_still_works(pulumi_mocks, project_cwd):
-    """Existing string pool ID usage continues to work after the UserPool change."""
-    api = make_api(auth=CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID))
-
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(
-            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_COGNITO
-        )
-        config = inputs["userPoolConfig"]
-        assert config["userPoolId"] == COGNITO_USER_POOL_ID
-
-    when_appsync_ready(api, check_resources)
 
 
 def test_cognito_auth_empty_string_still_rejected():
@@ -214,16 +208,16 @@ def test_cognito_auth_invalid_type_rejected():
 @pytest.mark.parametrize(
     ("auth_config", "expected_fn_inputs", "expected_auth_config"),
     [
-        (LambdaAuth(handler="functions/simple.handler"), {}, None),
+        (LambdaAuth(handler="functions/simple.handler"), {}, {}),
         (
             LambdaAuth(handler="functions/simple.handler", memory=256, timeout=10),
             {"memorySize": 256, "timeout": 10},
-            None,
+            {},
         ),
         (
             LambdaAuth(handler=FunctionConfig(handler="functions/simple.handler", memory=512)),
             {"memorySize": 512},
-            None,
+            {},
         ),
         (
             LambdaAuth(handler="functions/simple.handler", result_ttl=300),
@@ -241,52 +235,100 @@ def test_cognito_auth_invalid_type_rejected():
     ],
     ids=["basic", "fn-opts", "function-config", "result-ttl", "identity-validation"],
 )
-@pulumi.runtime.test
 def test_lambda_auth_creates_function(
     auth_config, expected_auth_config, expected_fn_inputs, pulumi_mocks, project_cwd
 ):
-    api = make_api(auth=auth_config)
+    make_api(auth=auth_config)
 
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(
-            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_LAMBDA
-        )
-        assert "lambdaAuthorizerConfig" in inputs
+    deploy_all()
 
-        if expected_auth_config:
-            for key, value in expected_auth_config.items():
-                assert inputs["lambdaAuthorizerConfig"][key] == value
+    pulumi_mocks.assert_res(
+        "myapi",
+        R.GRAPHQL_API,
+        {
+            "authenticationType": AUTH_TYPE_LAMBDA,
+            "lambdaAuthorizerConfig": {
+                "authorizerUri": authorizer_uri("myapi-authorizer"),
+                **expected_auth_config,
+            },
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res("myapi-authorizer", R.FUNCTION, expected_fn_inputs, partial=True)
+    pulumi_mocks.assert_res(
+        "myapi-auth-perm",
+        R.LAMBDA_PERMISSION,
+        {
+            "action": "lambda:InvokeFunction",
+            "function": tn(f"{TP}myapi-authorizer"),
+            "principal": "appsync.amazonaws.com",
+            "sourceArn": f"arn:aws:appsync:{DEFAULT_REGION}:{ACCOUNT_ID}:apis/appsync-{API_ID}",
+        },
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.GRAPHQL_API: 1,
+            R.APPSYNC_DATA_SOURCE: 1,
+            R.FUNCTION: 1,
+            R.ROLE: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.LAMBDA_PERMISSION: 1,
+        }
+    )
 
-        fns = pulumi_mocks.created_functions(f"{TP}myapi-authorizer")
-        assert len(fns) == 1
-        assert fns[0].typ == "aws:lambda/function:Function"
-        for key, value in expected_fn_inputs.items():
-            assert fns[0].inputs[key] == value
 
-        perms = [p for p in pulumi_mocks.created_permissions() if "auth-perm" in p.name]
-        assert len(perms) == 1
-        assert perms[0].inputs["action"] == "lambda:InvokeFunction"
-        assert perms[0].inputs["principal"] == "appsync.amazonaws.com"
-
-    when_appsync_ready(api, check_resources)
-
-
-@pulumi.runtime.test
 def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
     auth_fn = Function("existing-auth-fn", handler="functions/simple.handler")
-    api = make_api(auth=LambdaAuth(handler=auth_fn))
+    make_api(auth=LambdaAuth(handler=auth_fn))
 
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(
-            pulumi_mocks, f"{TP}myapi", authenticationType=AUTH_TYPE_LAMBDA
-        )
-        assert "lambdaAuthorizerConfig" in inputs
+    deploy_all()
 
-        existing_fn = pulumi_mocks.assert_function_created(f"{TP}existing-auth-fn")
-        assert existing_fn.typ == "aws:lambda/function:Function"
-        assert len(pulumi_mocks.created_functions(f"{TP}myapi-authorizer")) == 0
+    pulumi_mocks.assert_res(
+        "myapi",
+        R.GRAPHQL_API,
+        {
+            "authenticationType": AUTH_TYPE_LAMBDA,
+            "lambdaAuthorizerConfig": {"authorizerUri": authorizer_uri("existing-auth-fn")},
+        },
+        partial=True,
+    )
+    pulumi_mocks.assert_res("existing-auth-fn", R.FUNCTION)
+    assert len(pulumi_mocks.created(R.FUNCTION)) == 1
 
-    when_appsync_ready(api, check_resources)
+
+@pytest.mark.parametrize("additional", [False, True], ids=["primary", "additional"])
+def test_durable_lambda_authorizer_uses_alias_arn(pulumi_mocks, project_cwd, additional):
+    auth_fn = Function(
+        "durable-auth-fn",
+        handler="functions/simple.handler",
+        runtime="python3.14",
+        durable={"execution_timeout": 300},
+    )
+    auth = LambdaAuth(handler=auth_fn)
+    make_api(additional_auth=[auth]) if additional else make_api(auth=auth)
+
+    deploy_all()
+
+    authorizer = {"authorizerUri": authorizer_uri("durable-auth-fn") + ":live"}
+    expected = (
+        {
+            "additionalAuthenticationProviders": [
+                {
+                    "authenticationType": AUTH_TYPE_LAMBDA,
+                    "lambdaAuthorizerConfig": authorizer,
+                }
+            ]
+        }
+        if additional
+        else {"lambdaAuthorizerConfig": authorizer}
+    )
+    pulumi_mocks.assert_res("myapi", R.GRAPHQL_API, expected, partial=True)
+    pulumi_mocks.assert_res(
+        "myapi-auth-0-perm" if additional else "myapi-auth-perm",
+        R.LAMBDA_PERMISSION,
+        {"function": tn(TP + "durable-auth-fn") + ":live"},
+        partial=True,
+    )
 
 
 @pytest.mark.parametrize(
@@ -300,18 +342,14 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
     ],
     ids=["auth", "additional-auth"],
 )
-@pulumi.runtime.test
 def test_auth_functions_customize_reaches_built_authorizer(
     auth_kwargs, fn_name, pulumi_mocks, project_cwd
 ):
-    api = make_api(
-        **auth_kwargs, customize={"auth_functions": {"function": {"memory_size": 1024}}}
-    )
+    make_api(**auth_kwargs, customize={"auth_functions": {"function": {"memory_size": 1024}}})
 
-    def check_resources(_):
-        pulumi_mocks.assert_res(fn_name, R.FUNCTION, {"memorySize": 1024}, partial=True)
+    deploy_all()
 
-    when_appsync_ready(api, check_resources)
+    pulumi_mocks.assert_res(fn_name, R.FUNCTION, {"memorySize": 1024}, partial=True)
 
 
 @pytest.mark.parametrize(
@@ -321,7 +359,7 @@ def test_auth_functions_customize_reaches_built_authorizer(
             CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID),
             ["iam", ApiKeyAuth()],
             AUTH_TYPE_COGNITO,
-            [(AUTH_TYPE_IAM, None, None), (AUTH_TYPE_API_KEY, None, None)],
+            [{"authenticationType": AUTH_TYPE_IAM}, {"authenticationType": AUTH_TYPE_API_KEY}],
             1,
             0,
         ),
@@ -329,7 +367,14 @@ def test_auth_functions_customize_reaches_built_authorizer(
             "iam",
             [LambdaAuth(handler="functions/simple.handler")],
             AUTH_TYPE_IAM,
-            [(AUTH_TYPE_LAMBDA, "lambdaAuthorizerConfig", None)],
+            [
+                {
+                    "authenticationType": AUTH_TYPE_LAMBDA,
+                    "lambdaAuthorizerConfig": {
+                        "authorizerUri": authorizer_uri("myapi-authorizer-additional-0")
+                    },
+                }
+            ],
             0,
             1,
         ),
@@ -337,7 +382,12 @@ def test_auth_functions_customize_reaches_built_authorizer(
             "iam",
             [CognitoAuth(user_pool_id=COGNITO_USER_POOL_ID)],
             AUTH_TYPE_IAM,
-            [(AUTH_TYPE_COGNITO, "userPoolConfig", {"userPoolId": COGNITO_USER_POOL_ID})],
+            [
+                {
+                    "authenticationType": AUTH_TYPE_COGNITO,
+                    "userPoolConfig": {"userPoolId": COGNITO_USER_POOL_ID},
+                }
+            ],
             0,
             0,
         ),
@@ -346,11 +396,13 @@ def test_auth_functions_customize_reaches_built_authorizer(
             [OidcAuth(issuer="https://auth.example.com", client_id="my-app")],
             AUTH_TYPE_IAM,
             [
-                (
-                    AUTH_TYPE_OIDC,
-                    "openidConnectConfig",
-                    {"issuer": "https://auth.example.com", "clientId": "my-app"},
-                )
+                {
+                    "authenticationType": AUTH_TYPE_OIDC,
+                    "openidConnectConfig": {
+                        "issuer": "https://auth.example.com",
+                        "clientId": "my-app",
+                    },
+                }
             ],
             0,
             0,
@@ -358,7 +410,6 @@ def test_auth_functions_customize_reaches_built_authorizer(
     ],
     ids=["iam+apikey", "iam+lambda", "iam+cognito", "iam+oidc"],
 )
-@pulumi.runtime.test
 def test_additional_auth_configuration(  # noqa: PLR0913
     auth,
     extra,
@@ -369,33 +420,18 @@ def test_additional_auth_configuration(  # noqa: PLR0913
     pulumi_mocks,
     project_cwd,
 ):
-    api = make_api(auth=auth, additional_auth=extra)
+    make_api(auth=auth, additional_auth=extra)
 
-    def check_resources(_):
-        inputs = assert_graphql_api_inputs(
-            pulumi_mocks,
-            f"{TP}myapi",
-            authenticationType=expected_type,
-        )
-        actual_providers = inputs["additionalAuthenticationProviders"]
-        assert len(actual_providers) == len(providers)
+    deploy_all()
 
-        for provider, (exp_type, config_key, exp_config) in zip(
-            actual_providers, providers, strict=False
-        ):
-            assert provider["authenticationType"] == exp_type
-            if config_key is None:
-                continue
-            assert config_key in provider
-            if exp_config is not None:
-                for key, value in exp_config.items():
-                    assert provider[config_key][key] == value
-
-        assert len(pulumi_mocks.created_appsync_api_keys()) == api_keys
-        actual_auth_fns = [f for f in pulumi_mocks.created_functions() if "authorizer" in f.name]
-        assert len(actual_auth_fns) == auth_fns
-
-    when_appsync_ready(api, check_resources)
+    pulumi_mocks.assert_res(
+        "myapi",
+        R.GRAPHQL_API,
+        {"authenticationType": expected_type, "additionalAuthenticationProviders": providers},
+        partial=True,
+    )
+    assert len(pulumi_mocks.created(R.APPSYNC_API_KEY)) == api_keys
+    assert len(pulumi_mocks.created(R.FUNCTION)) == auth_fns
 
 
 # --- Auth config validation ---

@@ -10,6 +10,7 @@ from stelvio.config import AwsConfig
 from stelvio.context import AppContext, _ContextStore
 from stelvio.exceptions import StelvioValidationError
 from stelvio.provider import ProviderStore
+from tests.aws.pulumi_mocks import R, provider_urn
 
 # --- Region resolution ---
 
@@ -69,17 +70,18 @@ def test_default_region_with_unknown_profile_raises_friendly_error(no_region_con
     )
 
 
-@pulumi.runtime.test
 def test_aws_provider_created_with_resolved_region(pulumi_mocks, no_region_context):
     """The provider gets the chain-resolved region explicitly — never an unset region."""
-    provider = ProviderStore.aws()
 
-    def check(_):
-        pulumi_mocks.assert_res(
-            "stelvio-aws", inputs={"region": "eu-central-1"}, partial=True, prefixed=False
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return ProviderStore.aws()
 
-    provider.region.apply(check)
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "stelvio-aws", inputs={"region": "eu-central-1"}, partial=True, prefixed=False
+    )
 
 
 @pulumi.runtime.test
@@ -120,50 +122,28 @@ def test_region_of_foreign_provider_raises(pulumi_mocks):
 # --- Provider creation and configuration ---
 
 
-@pulumi.runtime.test
 def test_aws_creates_provider(pulumi_mocks):
-    """ProviderStore.aws() creates exactly one AWS provider."""
-    provider = ProviderStore.aws()
+    """ProviderStore.aws() creates exactly one AWS provider, with region, profile and
+    auto-tags from AppContext."""
 
-    def check(_):
-        providers = pulumi_mocks.created_providers()
-        assert len(providers) == 1
-        assert providers[0].typ == "pulumi:providers:aws"
-        assert providers[0].name == "stelvio-aws"
+    @pulumi.runtime.test
+    def deploy():
+        return ProviderStore.aws()
 
-    provider.region.apply(check)
+    deploy()
 
-
-@pulumi.runtime.test
-def test_aws_provider_region_and_profile(pulumi_mocks):
-    """Provider uses region and profile from AppContext."""
-    provider = ProviderStore.aws()
-
-    def check(_):
-        p = pulumi_mocks.created_providers()[0]
-        assert p.typ == "pulumi:providers:aws"
-        assert p.inputs["region"] == "us-east-1"
-        assert p.inputs["profile"] == "default"
-
-    provider.region.apply(check)
+    assert len(pulumi_mocks.created(R.AWS_PROVIDER)) == 1
+    p = pulumi_mocks.assert_res("stelvio-aws", R.AWS_PROVIDER, prefixed=False)
+    # defaultTags is recorded as a JSON string
+    assert {**p.inputs, "defaultTags": json.loads(p.inputs["defaultTags"])} == {
+        "region": "us-east-1",
+        "profile": "default",
+        "skipCredentialsValidation": "false",
+        "skipRegionValidation": "true",
+        "defaultTags": {"tags": {"stelvio:app": "test", "stelvio:env": "test"}},
+    }
 
 
-@pulumi.runtime.test
-def test_aws_provider_auto_tags(pulumi_mocks):
-    """Provider has stelvio:app and stelvio:env auto-tags."""
-    provider = ProviderStore.aws()
-
-    def check(_):
-        p = pulumi_mocks.created_providers()[0]
-        assert p.typ == "pulumi:providers:aws"
-        tags = json.loads(p.inputs["defaultTags"])["tags"]
-        assert tags["stelvio:app"] == "test"
-        assert tags["stelvio:env"] == "test"
-
-    provider.region.apply(check)
-
-
-@pulumi.runtime.test
 def test_aws_provider_merges_global_tags_with_auto_tags(pulumi_mocks):
     """Provider default tags include app-level tags plus auto-tags."""
     _ContextStore.clear()
@@ -178,20 +158,23 @@ def test_aws_provider_merges_global_tags_with_auto_tags(pulumi_mocks):
         )
     )
 
-    provider = ProviderStore.aws()
+    @pulumi.runtime.test
+    def deploy():
+        return ProviderStore.aws()
 
-    def check(_):
-        p = pulumi_mocks.created_providers()[0]
-        tags = json.loads(p.inputs["defaultTags"])["tags"]
-        assert tags["stelvio:app"] == "test"
-        assert tags["stelvio:env"] == "test"
-        assert tags["Team"] == "platform"
-        assert tags["CostCenter"] == "ops"
+    deploy()
 
-    provider.region.apply(check)
+    p = pulumi_mocks.assert_res("stelvio-aws", R.AWS_PROVIDER, prefixed=False)
+    assert json.loads(p.inputs["defaultTags"]) == {
+        "tags": {
+            "stelvio:app": "test",
+            "stelvio:env": "test",
+            "Team": "platform",
+            "CostCenter": "ops",
+        }
+    }
 
 
-@pulumi.runtime.test
 def test_aws_provider_global_tags_override_auto_tags(pulumi_mocks):
     """Global tags override auto-tags on key conflicts."""
     _ContextStore.clear()
@@ -206,15 +189,16 @@ def test_aws_provider_global_tags_override_auto_tags(pulumi_mocks):
         )
     )
 
-    provider = ProviderStore.aws()
+    @pulumi.runtime.test
+    def deploy():
+        return ProviderStore.aws()
 
-    def check(_):
-        p = pulumi_mocks.created_providers()[0]
-        tags = json.loads(p.inputs["defaultTags"])["tags"]
-        assert tags["stelvio:app"] == "custom-app"
-        assert tags["stelvio:env"] == "custom-env"
+    deploy()
 
-    provider.region.apply(check)
+    p = pulumi_mocks.assert_res("stelvio-aws", R.AWS_PROVIDER, prefixed=False)
+    assert json.loads(p.inputs["defaultTags"]) == {
+        "tags": {"stelvio:app": "custom-app", "stelvio:env": "custom-env"}
+    }
 
 
 # --- Caching ---
@@ -240,35 +224,26 @@ def test_reset_clears_providers(pulumi_mocks):
 # --- Cross-region providers ---
 
 
-@pulumi.runtime.test
 def test_aws_for_region_creates_provider(pulumi_mocks):
-    """aws_for_region() creates a provider with the specified region."""
-    provider = ProviderStore.aws_for_region("eu-west-1")
+    """aws_for_region() creates a provider with the specified region and the same
+    profile and auto-tags."""
 
-    def check(_):
-        providers = pulumi_mocks.created_providers("stelvio-aws-eu-west-1")
-        assert len(providers) == 1
-        p = providers[0]
-        assert p.typ == "pulumi:providers:aws"
-        assert p.inputs["region"] == "eu-west-1"
-        assert p.inputs["profile"] == "default"
+    @pulumi.runtime.test
+    def deploy():
+        return ProviderStore.aws_for_region("eu-west-1")
 
-    provider.region.apply(check)
+    deploy()
 
-
-@pulumi.runtime.test
-def test_aws_for_region_auto_tags(pulumi_mocks):
-    """Cross-region provider has the same auto-tags."""
-    provider = ProviderStore.aws_for_region("eu-west-1")
-
-    def check(_):
-        p = pulumi_mocks.created_providers("stelvio-aws-eu-west-1")[0]
-        assert p.typ == "pulumi:providers:aws"
-        tags = json.loads(p.inputs["defaultTags"])["tags"]
-        assert tags["stelvio:app"] == "test"
-        assert tags["stelvio:env"] == "test"
-
-    provider.region.apply(check)
+    assert len(pulumi_mocks.created(R.AWS_PROVIDER)) == 1
+    p = pulumi_mocks.assert_res("stelvio-aws-eu-west-1", R.AWS_PROVIDER, prefixed=False)
+    # defaultTags is recorded as a JSON string
+    assert {**p.inputs, "defaultTags": json.loads(p.inputs["defaultTags"])} == {
+        "region": "eu-west-1",
+        "profile": "default",
+        "skipCredentialsValidation": "false",
+        "skipRegionValidation": "true",
+        "defaultTags": {"tags": {"stelvio:app": "test", "stelvio:env": "test"}},
+    }
 
 
 @pulumi.runtime.test
@@ -368,20 +343,14 @@ def test_context_change_recreates_regional_provider(pulumi_mocks):
 # --- Provider propagation ---
 
 
-@pulumi.runtime.test
 def test_provider_propagates_to_child_resources(pulumi_mocks):
     """Child resources created by a Component receive the ProviderStore provider."""
-    topic = Topic("my-topic")
-    resources = topic.resources
 
-    def check(_):
-        sns_topics = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sns/topic:Topic"]
-        assert len(sns_topics) == 1
-        assert sns_topics[0].provider is not None
-        provider_name = sns_topics[0].provider.rsplit("::", 1)[-1]
-        normalized_provider_name = provider_name.removesuffix("-test-id")
-        assert normalized_provider_name == "stelvio-aws", (
-            f"Expected default provider 'stelvio-aws', got '{provider_name}'"
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return Topic("my-topic").resources
 
-    resources.topic.arn.apply(check)
+    deploy()
+
+    [sns_topic] = pulumi_mocks.created(R.TOPIC)
+    assert sns_topic.provider == provider_urn("stelvio-aws")

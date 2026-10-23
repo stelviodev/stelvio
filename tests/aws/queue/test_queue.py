@@ -39,16 +39,15 @@ def basic_queue():
 
 
 def assert_mapping_config(pulumi_mocks, batch_size=10, enabled=True):
-    mapping = pulumi_mocks.created_event_source_mappings()[0]
+    [mapping] = pulumi_mocks.created(R.EVENT_SOURCE_MAPPING)
     assert mapping.inputs["batchSize"] == batch_size
     assert mapping.inputs["enabled"] == enabled
 
 
 def get_single_event_source_mapping(pulumi_mocks):
     """Get the single EventSourceMapping from mocks, asserting exactly one exists."""
-    mappings = pulumi_mocks.created_event_source_mappings()
-    assert len(mappings) == 1
-    return mappings[0]
+    [mapping] = pulumi_mocks.created(R.EVENT_SOURCE_MAPPING)
+    return mapping
 
 
 @dataclass
@@ -80,53 +79,26 @@ def verify_subscription_resources(
             assert name in subscription_names
 
     # Check Pulumi mock resources
-    functions = [
-        r for r in pulumi_mocks.created_resources if r.typ == "aws:lambda/function:Function"
-    ]
-    mappings = pulumi_mocks.created_event_source_mappings()
+    assert len(pulumi_mocks.created(R.FUNCTION)) == expected_count
+    assert len(pulumi_mocks.created(R.EVENT_SOURCE_MAPPING)) == expected_count
 
-    assert len(functions) == expected_count
-    assert len(mappings) == expected_count
-
-    # Verify each subscription has proper mapping and function with correct relationships
-    queue_mock = next(r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue")
-    expected_queue_name = tn(queue_mock.name)
-    expected_queue_arn = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{expected_queue_name}"
+    [queue_mock] = pulumi_mocks.created(R.QUEUE)
+    expected_queue_arn = QUEUE_ARN_TEMPLATE.format(name=tn(queue_mock.name))
 
     for subscription in queue._subscriptions:
-        # Extract subscription name from function_name
         subscription_name = subscription._function_name.split(f"{queue.name}-", 1)[1]
-
-        # Find corresponding function and mapping in mocks by exact name match
-        expected_function_name = subscription._function_name
-        expected_mapping_name = f"{subscription.name}-mapping"
-
-        function_mock = next((f for f in functions if f.name == TP + expected_function_name), None)
-        mapping_mock = next((m for m in mappings if m.name == TP + expected_mapping_name), None)
-
-        assert function_mock is not None, (
-            f"Function not found for subscription '{subscription_name}'"
-        )
-        assert mapping_mock is not None, (
-            f"EventSourceMapping not found for subscription '{subscription_name}'"
-        )
-
-        # Verify EventSourceMapping configuration
-        esm_inputs = mapping_mock.inputs
-        assert esm_inputs["batchSize"] == 10
-        assert esm_inputs["enabled"] is True
-
-        # Verify the mapping connects THIS specific function to the queue
-        expected_function_name_in_mapping = tn(function_mock.name)
-        assert esm_inputs["eventSourceArn"] == expected_queue_arn
-        assert esm_inputs["functionName"] == expected_function_name_in_mapping
-
-        # Critical: Verify that the mapping actually references the function we found
-        # This ensures the mapping-function pairing is correct
-        assert esm_inputs["functionName"] == tn(TP + expected_function_name), (
-            f"Mapping for subscription '{subscription_name}' should reference function "
-            f"'{TP + expected_function_name}' "
-            f"but references '{esm_inputs['functionName']}'"
+        function_mock = pulumi_mocks.assert_res(subscription._function_name, R.FUNCTION)
+        # The mapping connects THIS subscription's function to the queue
+        pulumi_mocks.assert_res(
+            f"{subscription.name}-mapping",
+            R.EVENT_SOURCE_MAPPING,
+            {
+                "batchSize": 10,
+                "enabled": True,
+                "eventSourceArn": expected_queue_arn,
+                "functionName": tn(function_mock.name),
+            },
+            partial=True,
         )
 
         # Verify Lambda function has the correct SQS permissions
@@ -146,19 +118,9 @@ def verify_subscription_resources(
 
 
 def verify_function_sqs_permissions(pulumi_mocks, function_mock, expected_queue_arn):
-    # Find the IAM policy for this function
-    policies = [r for r in pulumi_mocks.created_resources if r.typ == "aws:iam/policy:Policy"]
-
-    # Function policy name uses resource_name with "-p" suffix
-    expected_policy_name = function_mock.name + "-p"
-    function_policy = next((p for p in policies if p.name == expected_policy_name), None)
-
-    assert function_policy is not None, f"IAM policy not found for function {function_mock.name}"
-
-    # Parse the policy document and verify it contains the expected SQS permissions
+    function_policy = pulumi_mocks.assert_res(function_mock.name + "-p", R.POLICY, prefixed=False)
     actual_statements = json.loads(function_policy.inputs["policy"])
 
-    # Expected policy should contain SQS permissions
     expected_sqs_statement = {
         "actions": [
             "sqs:ReceiveMessage",
@@ -168,30 +130,23 @@ def verify_function_sqs_permissions(pulumi_mocks, function_mock, expected_queue_
         "resources": [expected_queue_arn],
     }
 
-    # Find the SQS statement in actual policy
-    sqs_statements = [
-        stmt for stmt in actual_statements if "sqs:ReceiveMessage" in stmt.get("actions", [])
-    ]
-    sqs_statement = sqs_statements[0] if sqs_statements else None
-
-    assert sqs_statement is not None, "SQS permissions not found in function policy"
-    assert sqs_statement == expected_sqs_statement, (
-        f"SQS permissions mismatch.\nExpected: {expected_sqs_statement}\nGot: {sqs_statement}"
-    )
+    [statement] = [s for s in actual_statements if "sqs:ReceiveMessage" in s["actions"]]
+    assert statement == expected_sqs_statement
 
 
 def verify_queue_resources(pulumi_mocks, test_case: QueueTestCase):
-    queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-    assert len(queues) == 1
-    queue_args = queues[0]
-
-    assert queue_args.name == TP + test_case.name
-    assert queue_args.inputs.get("delaySeconds") == test_case.expected_delay
-    actual_visibility = queue_args.inputs.get("visibilityTimeoutSeconds")
-    assert actual_visibility == test_case.expected_visibility_timeout
-    actual_retention = queue_args.inputs.get("messageRetentionSeconds")
-    assert actual_retention == test_case.expected_retention
-    assert queue_args.inputs.get("fifoQueue") == test_case.expected_fifo
+    assert len(pulumi_mocks.created(R.QUEUE)) == 1
+    pulumi_mocks.assert_res(
+        test_case.name,
+        R.QUEUE,
+        {
+            "delaySeconds": test_case.expected_delay,
+            "visibilityTimeoutSeconds": test_case.expected_visibility_timeout,
+            "messageRetentionSeconds": test_case.expected_retention,
+            "fifoQueue": test_case.expected_fifo,
+        },
+        partial=True,
+    )
 
 
 # Test case definitions
@@ -277,7 +232,6 @@ def test_dlq_config_dict_matches_dataclass():
     ],
     ids=lambda tc: tc.test_id,
 )
-@pulumi.runtime.test
 def test_queue_creation(pulumi_mocks, test_case):
     if test_case.config_input is None:
         queue = Queue(test_case.name)
@@ -286,10 +240,13 @@ def test_queue_creation(pulumi_mocks, test_case):
     else:
         queue = Queue(test_case.name, config=test_case.config_input)
 
-    def check_resources(_):
-        verify_queue_resources(pulumi_mocks, test_case)
+    @pulumi.runtime.test
+    def deploy():
+        return queue.resources
 
-    queue.arn.apply(check_resources)
+    deploy()
+
+    verify_queue_resources(pulumi_mocks, test_case)
 
 
 @pulumi.runtime.test
@@ -399,93 +356,66 @@ def test_dlq_config_from_queue_component():
     assert queue._config.dlq.retry == 5
 
 
-@pulumi.runtime.test
 def test_dlq_with_queue_reference(pulumi_mocks):
     """Test that DLQ is properly configured when referencing Queue component."""
-    dlq = Queue("orders-dlq")
-    main_queue = Queue("orders", dlq=DlqConfig(queue=dlq, retry=5))
 
-    def check_dlq_config(args):
-        _main_arn, dlq_arn = args
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 2
+    @pulumi.runtime.test
+    def deploy():
+        dlq = Queue("orders-dlq")
+        return Queue("orders", dlq=DlqConfig(queue=dlq, retry=5)).resources
 
-        # Find the main queue (not the DLQ)
-        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
-        assert main_queue_resource is not None
+    deploy()
 
-        # Verify redrive policy has correct values
-        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
-        assert redrive_policy is not None
-
-        # Parse and verify the redrive policy content
-        policy = json.loads(redrive_policy)
-        assert policy["deadLetterTargetArn"] == dlq_arn
-        assert policy["maxReceiveCount"] == 5
-
-    pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
+    assert len(pulumi_mocks.created(R.QUEUE)) == 2
+    main_queue = pulumi_mocks.assert_res("orders", R.QUEUE)
+    assert json.loads(main_queue.inputs["redrivePolicy"]) == {
+        "deadLetterTargetArn": QUEUE_ARN_TEMPLATE.format(name=tn(TP + "orders-dlq")),
+        "maxReceiveCount": 5,
+    }
 
 
-@pulumi.runtime.test
 def test_dlq_with_dict_reference(pulumi_mocks):
     """Test that DLQ is properly configured when using dict syntax."""
-    dlq = Queue("orders-dlq")
-    main_queue = Queue("orders", dlq={"queue": dlq})  # Uses default retry=3
 
-    def check_dlq_config(args):
-        _main_arn, dlq_arn = args
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 2
+    @pulumi.runtime.test
+    def deploy():
+        dlq = Queue("orders-dlq")
+        return Queue("orders", dlq={"queue": dlq}).resources  # Uses default retry=3
 
-        # Find the main queue (not the DLQ)
-        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
-        assert main_queue_resource is not None
+    deploy()
 
-        # Verify redrive policy has correct values with default retry=3
-        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
-        assert redrive_policy is not None
-
-        # Parse and verify the redrive policy content
-        policy = json.loads(redrive_policy)
-        assert policy["deadLetterTargetArn"] == dlq_arn
-        assert policy["maxReceiveCount"] == 3  # default retry value
-
-    pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
+    assert len(pulumi_mocks.created(R.QUEUE)) == 2
+    main_queue = pulumi_mocks.assert_res("orders", R.QUEUE)
+    assert json.loads(main_queue.inputs["redrivePolicy"]) == {
+        "deadLetterTargetArn": QUEUE_ARN_TEMPLATE.format(name=tn(TP + "orders-dlq")),
+        "maxReceiveCount": 3,
+    }
 
 
-@pulumi.runtime.test
 def test_dlq_with_queue_directly(pulumi_mocks):
     """Test that DLQ is properly configured when passing Queue component directly."""
     dlq = Queue("orders-dlq")
     main_queue = Queue("orders", dlq=dlq)  # Pass Queue directly, uses default retry=3
 
-    def check_dlq_config(args):
-        _main_arn, dlq_arn = args
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return main_queue.resources
 
-        # Find the main queue (not the DLQ)
-        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
-        assert main_queue_resource is not None
+    deploy()
 
-        # Verify redrive policy has correct values with default retry=3
-        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
-        assert redrive_policy is not None
+    assert len(pulumi_mocks.created(R.QUEUE)) == 2
+    main_queue_resource = pulumi_mocks.assert_res("orders", R.QUEUE)
+    assert json.loads(main_queue_resource.inputs["redrivePolicy"]) == {
+        "deadLetterTargetArn": QUEUE_ARN_TEMPLATE.format(name=tn(TP + "orders-dlq")),
+        "maxReceiveCount": 3,
+    }
 
-        # Parse and verify the redrive policy content
-        policy = json.loads(redrive_policy)
-        assert policy["deadLetterTargetArn"] == dlq_arn
-        assert policy["maxReceiveCount"] == 3  # default retry value
-
-        # Verify the internal config was normalized to DlqConfig
-        assert isinstance(main_queue._config.dlq, DlqConfig)
-        assert main_queue._config.dlq.queue is dlq
-        assert main_queue._config.dlq.retry == 3
-
-    pulumi.Output.all(main_queue.arn, dlq.arn).apply(check_dlq_config)
+    # Verify the internal config was normalized to DlqConfig
+    assert isinstance(main_queue._config.dlq, DlqConfig)
+    assert main_queue._config.dlq.queue is dlq
+    assert main_queue._config.dlq.retry == 3
 
 
-@pulumi.runtime.test
 def test_dlq_with_string_arn(pulumi_mocks):
     """Test that DLQ is properly configured when passing ARN as string.
 
@@ -496,30 +426,24 @@ def test_dlq_with_string_arn(pulumi_mocks):
     external_dlq_arn = "arn:aws:sqs:us-east-1:123456789012:external-dlq"
     main_queue = Queue("orders", dlq=external_dlq_arn)  # Pass ARN string, uses default retry=3
 
-    def check_dlq_config(main_arn):
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        # Only main queue should be created (DLQ is external)
-        assert len(queues) == 1
+    @pulumi.runtime.test
+    def deploy():
+        return main_queue.resources
 
-        # Find the main queue
-        main_queue_resource = next((q for q in queues if q.name == TP + "orders"), None)
-        assert main_queue_resource is not None
+    deploy()
 
-        # Verify redrive policy has correct values with default retry=3
-        redrive_policy = main_queue_resource.inputs.get("redrivePolicy")
-        assert redrive_policy is not None
+    # Only main queue should be created (DLQ is external)
+    assert len(pulumi_mocks.created(R.QUEUE)) == 1
+    main_queue_resource = pulumi_mocks.assert_res("orders", R.QUEUE)
+    assert json.loads(main_queue_resource.inputs["redrivePolicy"]) == {
+        "deadLetterTargetArn": external_dlq_arn,
+        "maxReceiveCount": 3,
+    }
 
-        # Parse and verify the redrive policy content
-        policy = json.loads(redrive_policy)
-        assert policy["deadLetterTargetArn"] == external_dlq_arn
-        assert policy["maxReceiveCount"] == 3  # default retry value
-
-        # Verify the internal config was normalized to DlqConfig
-        assert isinstance(main_queue._config.dlq, DlqConfig)
-        assert main_queue._config.dlq.queue == external_dlq_arn
-        assert main_queue._config.dlq.retry == 3
-
-    main_queue.arn.apply(check_dlq_config)
+    # Verify the internal config was normalized to DlqConfig
+    assert isinstance(main_queue._config.dlq, DlqConfig)
+    assert main_queue._config.dlq.queue == external_dlq_arn
+    assert main_queue._config.dlq.retry == 3
 
 
 @pulumi.runtime.test
@@ -532,20 +456,19 @@ def test_duplicate_subscription_names(pulumi_mocks):
         queue.subscribe("processor", USERS_HANDLER)
 
 
-@pulumi.runtime.test
 def test_subscription_basic(pulumi_mocks):
     """Basic subscription functionality test."""
     queue = Queue("basic-sub")
 
     subscription = queue.subscribe("test", SIMPLE_HANDLER)
 
-    def check_subscription(_):
-        verify_subscription_resources(pulumi_mocks, queue, 1, ["test"])
+    @pulumi.runtime.test
+    def deploy():
+        return [queue.resources, subscription.resources]
 
-    # Trigger resource creation and then verify
-    pulumi.Output.all(queue.arn, subscription.resources.event_source_mapping.arn).apply(
-        check_subscription
-    )
+    deploy()
+
+    verify_subscription_resources(pulumi_mocks, queue, 1, ["test"])
 
 
 @pytest.mark.parametrize(
@@ -556,46 +479,47 @@ def test_subscription_basic(pulumi_mocks):
         (FunctionConfig(handler=ORDERS_HANDLER, timeout=120), "config"),
     ],
 )
-@pulumi.runtime.test
 def test_subscription_handler_types(pulumi_mocks, handler_input, test_name):
     """Test all supported handler input types."""
     queue = Queue(f"sub-{test_name}")
 
     subscription = queue.subscribe("test", handler_input)
 
-    def check_handler_type(_):
-        verify_subscription_resources(
-            pulumi_mocks,
-            queue,
-            expected_count=1,
-            expected_names=["test"],
-            expected_configs={"test": handler_input},
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return [queue.resources, subscription.resources]
 
-    esm = subscription.resources.event_source_mapping
-    pulumi.Output.all([queue.arn, esm.arn]).apply(check_handler_type)
+    deploy()
+
+    verify_subscription_resources(
+        pulumi_mocks,
+        queue,
+        expected_count=1,
+        expected_names=["test"],
+        expected_configs={"test": handler_input},
+    )
 
 
-@pulumi.runtime.test
 def test_subscription_function_config_opts(pulumi_mocks):
     queue = Queue("dict-unpacked")
 
     subscription = queue.subscribe("test", handler=USERS_HANDLER, memory=512, timeout=60)
 
-    def check_dict_unpacked(_):
-        verify_subscription_resources(
-            pulumi_mocks,
-            queue,
-            expected_count=1,
-            expected_names=["test"],
-            expected_configs={"test": {"handler": USERS_HANDLER, "memory": 512, "timeout": 60}},
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return [queue.resources, subscription.resources]
 
-    esm = subscription.resources.event_source_mapping
-    pulumi.Output.all([queue.arn, esm.arn]).apply(check_dict_unpacked)
+    deploy()
+
+    verify_subscription_resources(
+        pulumi_mocks,
+        queue,
+        expected_count=1,
+        expected_names=["test"],
+        expected_configs={"test": {"handler": USERS_HANDLER, "memory": 512, "timeout": 60}},
+    )
 
 
-@pulumi.runtime.test
 def test_subscription_link_merging(pulumi_mocks):
     """Test that user-provided links are properly merged with mandatory SQS permissions."""
     queue = Queue("link-merge-test")
@@ -616,53 +540,54 @@ def test_subscription_link_merging(pulumi_mocks):
     # Subscribe with custom function config
     subscription = queue.subscribe("processor", function_config)
 
-    def check_link_merging(_):
-        # Verify subscription created correctly
-        verify_subscription_resources(
-            pulumi_mocks,
-            queue,
-            expected_count=1,
-            expected_names=["processor"],
-            expected_configs={"processor": function_config},
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return [queue.resources, subscription.resources]
 
-        # Additional verification: check that the created Function has both links
-        functions = ComponentRegistry._instances.get(Function, [])
-        function_map = {f.name: f for f in functions}
+    deploy()
 
-        created_function = function_map[f"{queue.name}-processor"]
+    verify_subscription_resources(
+        pulumi_mocks,
+        queue,
+        expected_count=1,
+        expected_names=["processor"],
+        expected_configs={"processor": function_config},
+    )
 
-        # Should have 2 links: sqs link + user's custom link
-        assert len(created_function.config.links) == 2, (
-            f"Expected 2 links (sqs + custom), got {len(created_function.config.links)}"
-        )
+    # Additional verification: check that the created Function has both links
+    functions = ComponentRegistry._instances.get(Function, [])
+    function_map = {f.name: f for f in functions}
 
-        # Verify SQS link is present
-        sqs_links = [
-            link
-            for link in created_function.config.links
-            if hasattr(link, "name") and link.name == f"{queue.name}-sqs"
-        ]
-        assert len(sqs_links) == 1, "SQS link not found in merged links"
+    created_function = function_map[f"{queue.name}-processor"]
 
-        # Verify custom link is present with correct permissions
-        custom_links = [
-            link
-            for link in created_function.config.links
-            if hasattr(link, "name") and link.name == "s3-access"
-        ]
-        assert len(custom_links) == 1, "Custom link not found in merged links"
+    # Should have 2 links: sqs link + user's custom link
+    assert len(created_function.config.links) == 2, (
+        f"Expected 2 links (sqs + custom), got {len(created_function.config.links)}"
+    )
 
-        # Verify the custom link has the exact same permission as originally created
-        expected_permission = AwsPermission(
-            actions=["s3:GetObject", "s3:PutObject"], resources=["arn:aws:s3:::my-bucket/*"]
-        )
-        assert custom_links[0].permissions == [expected_permission], (
-            "Custom link permissions not preserved correctly"
-        )
+    # Verify SQS link is present
+    sqs_links = [
+        link
+        for link in created_function.config.links
+        if hasattr(link, "name") and link.name == f"{queue.name}-sqs"
+    ]
+    assert len(sqs_links) == 1, "SQS link not found in merged links"
 
-    esm = subscription.resources.event_source_mapping
-    pulumi.Output.all([queue.arn, esm.arn]).apply(check_link_merging)
+    # Verify custom link is present with correct permissions
+    custom_links = [
+        link
+        for link in created_function.config.links
+        if hasattr(link, "name") and link.name == "s3-access"
+    ]
+    assert len(custom_links) == 1, "Custom link not found in merged links"
+
+    # Verify the custom link has the exact same permission as originally created
+    expected_permission = AwsPermission(
+        actions=["s3:GetObject", "s3:PutObject"], resources=["arn:aws:s3:::my-bucket/*"]
+    )
+    assert custom_links[0].permissions == [expected_permission], (
+        "Custom link permissions not preserved correctly"
+    )
 
 
 @pytest.mark.parametrize("other_name", ["orders-sqs", "orders_sqs"])
@@ -681,7 +606,6 @@ def test_subscription_links_a_queue_named_like_its_own_sqs_link(pulumi_mocks, ot
     assert "STLV_ORDERS_SQS_QUEUE_URL" in fn.inputs["environment"]["variables"]
 
 
-@pulumi.runtime.test
 def test_subscription_with_multiple_handlers(pulumi_mocks):
     queue = Queue("multi-subscription")
 
@@ -689,25 +613,25 @@ def test_subscription_with_multiple_handlers(pulumi_mocks):
     sub2 = queue.subscribe("audit", {"handler": USERS_HANDLER, "memory": 256})
     sub3 = queue.subscribe("config", FunctionConfig(handler=ORDERS_HANDLER, timeout=60))
 
-    def check_subscription_resources(_):
-        verify_subscription_resources(
-            pulumi_mocks,
-            queue,
-            expected_count=3,
-            expected_names=["processor", "audit", "config"],
-            expected_configs={
-                "processor": SIMPLE_HANDLER,
-                "audit": {"handler": USERS_HANDLER, "memory": 256},
-                "config": FunctionConfig(handler=ORDERS_HANDLER, timeout=60),
-            },
-        )
+    @pulumi.runtime.test
+    def deploy():
+        return [queue.resources, sub1.resources, sub2.resources, sub3.resources]
 
-    # Wait for both queue AND all EventSourceMappings to be created
-    all_mapping_arns = [sub.resources.event_source_mapping.arn for sub in [sub1, sub2, sub3]]
-    pulumi.Output.all([queue.arn, *all_mapping_arns]).apply(check_subscription_resources)
+    deploy()
+
+    verify_subscription_resources(
+        pulumi_mocks,
+        queue,
+        expected_count=3,
+        expected_names=["processor", "audit", "config"],
+        expected_configs={
+            "processor": SIMPLE_HANDLER,
+            "audit": {"handler": USERS_HANDLER, "memory": 256},
+            "config": FunctionConfig(handler=ORDERS_HANDLER, timeout=60),
+        },
+    )
 
 
-@pulumi.runtime.test
 def test_subscription_batch_size(pulumi_mocks, basic_queue):
     subscription = basic_queue.subscribe(
         "batch-test",
@@ -715,11 +639,13 @@ def test_subscription_batch_size(pulumi_mocks, basic_queue):
         batch_size=5,
     )
 
-    def check_config(_):
-        assert_mapping_config(pulumi_mocks, batch_size=5)
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
 
-    esm = subscription.resources.event_source_mapping
-    pulumi.Output.all([basic_queue.arn, esm.arn]).apply(check_config)
+    deploy()
+
+    assert_mapping_config(pulumi_mocks, batch_size=5)
 
 
 def test_subscription_customize_reaches_mapping_and_function(pulumi_mocks):
@@ -921,7 +847,6 @@ def test_subscription_batch_size_validation_fifo_queue_invalid():
 
 
 # Filter validation tests
-@pulumi.runtime.test
 def test_subscription_with_single_filter(pulumi_mocks, basic_queue):
     """Test subscription with a single message filter."""
     subscription = basic_queue.subscribe(
@@ -930,18 +855,18 @@ def test_subscription_with_single_filter(pulumi_mocks, basic_queue):
         filters=[{"body": {"orderType": ["refund"]}}],
     )
 
-    def check_filter(_):
-        mapping = get_single_event_source_mapping(pulumi_mocks)
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
 
-        expected_filter_criteria = {
-            "filters": [{"pattern": '{"body": {"orderType": ["refund"]}}'}]
-        }
-        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+    deploy()
 
-    subscription.resources.event_source_mapping.arn.apply(check_filter)
+    mapping = get_single_event_source_mapping(pulumi_mocks)
+
+    expected_filter_criteria = {"filters": [{"pattern": '{"body": {"orderType": ["refund"]}}'}]}
+    assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
 
-@pulumi.runtime.test
 def test_subscription_filters_and_batch_size(pulumi_mocks, basic_queue):
     """Test subscription with both filters and custom batch size."""
     subscription = basic_queue.subscribe(
@@ -951,17 +876,19 @@ def test_subscription_filters_and_batch_size(pulumi_mocks, basic_queue):
         batch_size=5,
     )
 
-    def check_config(_):
-        mapping = get_single_event_source_mapping(pulumi_mocks)
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
 
-        assert mapping.inputs["batchSize"] == 5
-        expected_filter_criteria = {"filters": [{"pattern": '{"body": {"priority": ["high"]}}'}]}
-        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+    deploy()
 
-    subscription.resources.event_source_mapping.arn.apply(check_config)
+    mapping = get_single_event_source_mapping(pulumi_mocks)
+
+    assert mapping.inputs["batchSize"] == 5
+    expected_filter_criteria = {"filters": [{"pattern": '{"body": {"priority": ["high"]}}'}]}
+    assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
 
-@pulumi.runtime.test
 def test_subscription_multiple_filters(pulumi_mocks, basic_queue):
     """Test subscription with multiple filters (OR logic)."""
     filters = [
@@ -975,16 +902,18 @@ def test_subscription_multiple_filters(pulumi_mocks, basic_queue):
         filters=filters,
     )
 
-    def check_filters(_):
-        mapping = get_single_event_source_mapping(pulumi_mocks)
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
 
-        expected_filter_criteria = {"filters": [{"pattern": json.dumps(f)} for f in filters]}
-        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+    deploy()
 
-    subscription.resources.event_source_mapping.arn.apply(check_filters)
+    mapping = get_single_event_source_mapping(pulumi_mocks)
+
+    expected_filter_criteria = {"filters": [{"pattern": json.dumps(f)} for f in filters]}
+    assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
 
-@pulumi.runtime.test
 def test_subscription_empty_filters(pulumi_mocks, basic_queue):
     """Test that empty filter list results in no filter_criteria."""
     subscription = basic_queue.subscribe(
@@ -993,13 +922,16 @@ def test_subscription_empty_filters(pulumi_mocks, basic_queue):
         filters=[],
     )
 
-    def check_no_filters(_):
-        mapping = get_single_event_source_mapping(pulumi_mocks)
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
 
-        # Empty filters should result in None (no filtering)
-        assert mapping.inputs.get("filterCriteria") is None
+    deploy()
 
-    subscription.resources.event_source_mapping.arn.apply(check_no_filters)
+    mapping = get_single_event_source_mapping(pulumi_mocks)
+
+    # Empty filters should result in None (no filtering)
+    assert mapping.inputs.get("filterCriteria") is None
 
 
 def test_subscription_too_many_filters():
@@ -1053,7 +985,6 @@ def test_subscription_filters_not_list():
         )
 
 
-@pulumi.runtime.test
 def test_subscription_complex_filter(pulumi_mocks, basic_queue):
     """Test subscription with complex filter using multiple fields (AND logic)."""
     subscription = basic_queue.subscribe(
@@ -1072,22 +1003,25 @@ def test_subscription_complex_filter(pulumi_mocks, basic_queue):
         ],
     )
 
-    def check_complex_filter(_):
-        mapping = get_single_event_source_mapping(pulumi_mocks)
+    @pulumi.runtime.test
+    def deploy():
+        return subscription.resources
 
-        complex_filter = {
-            "body": {
-                "customerTier": ["gold", "platinum"],
-                "priority": ["high"],
-            },
-            "messageAttributes": {
-                "region": ["us-west-2"],
-            },
-        }
-        expected_filter_criteria = {"filters": [{"pattern": json.dumps(complex_filter)}]}
-        assert mapping.inputs["filterCriteria"] == expected_filter_criteria
+    deploy()
 
-    subscription.resources.event_source_mapping.arn.apply(check_complex_filter)
+    mapping = get_single_event_source_mapping(pulumi_mocks)
+
+    complex_filter = {
+        "body": {
+            "customerTier": ["gold", "platinum"],
+            "priority": ["high"],
+        },
+        "messageAttributes": {
+            "region": ["us-west-2"],
+        },
+    }
+    expected_filter_criteria = {"filters": [{"pattern": json.dumps(complex_filter)}]}
+    assert mapping.inputs["filterCriteria"] == expected_filter_criteria
 
 
 # Retention configuration tests
@@ -1097,17 +1031,18 @@ def test_queue_default_retention():
     assert queue._config.retention is None
 
 
-@pulumi.runtime.test
 def test_queue_default_retention_after_customize(pulumi_mocks):
     """Test that default retention is applied to the SQS resource by the customizer."""
     queue = Queue("default-retention")
 
-    def check_retention(_):
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 1
-        assert queues[0].inputs.get("messageRetentionSeconds") == 345600
+    @pulumi.runtime.test
+    def deploy():
+        return queue.resources
 
-    queue.arn.apply(check_retention)
+    deploy()
+
+    [queue_resource] = pulumi_mocks.created(R.QUEUE)
+    assert queue_resource.inputs["messageRetentionSeconds"] == 345600
 
 
 def test_queue_custom_retention():
@@ -1117,20 +1052,20 @@ def test_queue_custom_retention():
     assert queue._config.retention == 604800
 
 
-@pulumi.runtime.test
 def test_queue_retention_in_resources(pulumi_mocks):
     """Test that retention is properly passed to SQS resource."""
     queue = Queue("retention-test", retention=86400)  # 1 day
 
-    def check_retention(_):
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 1
-        assert queues[0].inputs.get("messageRetentionSeconds") == 86400
+    @pulumi.runtime.test
+    def deploy():
+        return queue.resources
 
-    queue.arn.apply(check_retention)
+    deploy()
+
+    [queue_resource] = pulumi_mocks.created(R.QUEUE)
+    assert queue_resource.inputs["messageRetentionSeconds"] == 86400
 
 
-@pulumi.runtime.test
 def test_multiple_subscriptions_same_handler_different_batch_sizes(pulumi_mocks):
     """Test creating multiple subscriptions with same handler but different batch sizes.
 
@@ -1143,74 +1078,51 @@ def test_multiple_subscriptions_same_handler_different_batch_sizes(pulumi_mocks)
     sub1 = queue.subscribe("fast-processor", SIMPLE_HANDLER, batch_size=1)
     sub2 = queue.subscribe("batch-processor", SIMPLE_HANDLER, batch_size=100)
 
-    def check_subscriptions(_):
-        # Verify both subscriptions exist
-        assert len(queue._subscriptions) == 2
+    @pulumi.runtime.test
+    def deploy():
+        return [queue.resources, sub1.resources, sub2.resources]
 
-        # Verify each subscription has correct batch size
-        mappings = pulumi_mocks.created_event_source_mappings()
-        assert len(mappings) == 2
+    deploy()
 
-        # Find mappings by their names and verify batch sizes
-        fast_mapping = next(
-            (
-                m
-                for m in mappings
-                if m.name == TP + "multi-batch-queue-fast-processor-subscription-mapping"
-            ),
-            None,
-        )
-        batch_mapping = next(
-            (
-                m
-                for m in mappings
-                if m.name == TP + "multi-batch-queue-batch-processor-subscription-mapping"
-            ),
-            None,
-        )
+    assert len(queue._subscriptions) == 2
 
-        assert fast_mapping is not None, "Fast processor mapping not found"
-        assert batch_mapping is not None, "Batch processor mapping not found"
-
-        assert fast_mapping.inputs["batchSize"] == 1
-        assert batch_mapping.inputs["batchSize"] == 100
-
-    pulumi.Output.all(
-        queue.arn,
-        sub1.resources.event_source_mapping.arn,
-        sub2.resources.event_source_mapping.arn,
-    ).apply(check_subscriptions)
+    assert len(pulumi_mocks.created(R.EVENT_SOURCE_MAPPING)) == 2
+    pulumi_mocks.assert_res(
+        "multi-batch-queue-fast-processor-subscription-mapping",
+        R.EVENT_SOURCE_MAPPING,
+        {"batchSize": 1},
+        partial=True,
+    )
+    pulumi_mocks.assert_res(
+        "multi-batch-queue-batch-processor-subscription-mapping",
+        R.EVENT_SOURCE_MAPPING,
+        {"batchSize": 100},
+        partial=True,
+    )
 
 
-@pulumi.runtime.test
 def test_fifo_queue_with_subscription(pulumi_mocks):
     """Test that FIFO queue subscription creates EventSourceMapping with correct FIFO queue ARN."""
     queue = Queue("fifo-sub-test", fifo=True)
 
     subscription = queue.subscribe("processor", SIMPLE_HANDLER, batch_size=5)
 
-    def check_fifo_subscription(_):
-        # Verify queue is FIFO
-        queues = [r for r in pulumi_mocks.created_resources if r.typ == "aws:sqs/queue:Queue"]
-        assert len(queues) == 1
-        queue_resource = queues[0]
-        assert queue_resource.inputs.get("fifoQueue") is True
+    @pulumi.runtime.test
+    def deploy():
+        return [queue.resources, subscription.resources]
 
-        # Get the FIFO queue ARN
-        expected_queue_name = tn(queue_resource.name)
-        expected_queue_arn = f"arn:aws:sqs:{DEFAULT_REGION}:{ACCOUNT_ID}:{expected_queue_name}"
+    deploy()
 
-        # Verify EventSourceMapping references the FIFO queue
-        mapping = get_single_event_source_mapping(pulumi_mocks)
+    assert len(pulumi_mocks.created(R.QUEUE)) == 1
+    pulumi_mocks.assert_res("fifo-sub-test", R.QUEUE, {"fifoQueue": True}, partial=True)
 
-        assert mapping.inputs["eventSourceArn"] == expected_queue_arn
-        assert mapping.inputs["batchSize"] == 5  # FIFO max is 10, we set 5
-        assert mapping.inputs["enabled"] is True
+    # Verify EventSourceMapping references the FIFO queue
+    mapping = get_single_event_source_mapping(pulumi_mocks)
 
-    pulumi.Output.all(
-        queue.arn,
-        subscription.resources.event_source_mapping.arn,
-    ).apply(check_fifo_subscription)
+    expected_queue_arn = QUEUE_ARN_TEMPLATE.format(name=tn(TP + "fifo-sub-test"))
+    assert mapping.inputs["eventSourceArn"] == expected_queue_arn
+    assert mapping.inputs["batchSize"] == 5  # FIFO max is 10, we set 5
+    assert mapping.inputs["enabled"] is True
 
 
 @pulumi.runtime.test
