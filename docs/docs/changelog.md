@@ -15,6 +15,12 @@
 - **Router routes work on `/`, on `/api` without a slash, and for HttpApi.** On `/` an API took only GET and lost its query string, `/api` went to the root route, and HttpApi routes got 403. A Bucket on `/` now serves `index.html` and is cached for a day like other bucket routes: [invalidate](components/aws/cloudfront-router.md#s3-buckets-cache-behavior) after an upload.
 - **Router API and Function routes get the client's headers and cookies.** Every request lost `Accept`, `Referer` and cookies, and a GET lost `Authorization`. Function routes with IAM auth still see CloudFront's signature there. CloudFront no longer compresses their responses, and a `distribution` customize that adds `forwarded_values` to them now fails.
 
+## 0.10.2b8 (2026-10-23)
+
+### Security fixes
+
+- Upgrade pip, uv, and certifi across Stelvio, templates, and CI following the eMudhra certificate compromise ([CVE-2026-111943](https://nvd.nist.gov/vuln/detail/cve-2026-111943)); CI now uses final Python 3.15.1.
+
 ## 0.10.1b7 (2026-10-09)
 
 ### Lambda Functions in VPC
