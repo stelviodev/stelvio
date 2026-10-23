@@ -22,22 +22,23 @@ from stelvio.tunnel.diagnostics import protocol, report, runtime
 
 
 @pytest.fixture
-def endpoint(tmp_path, monkeypatch):
-    temporary = tempfile.TemporaryDirectory(prefix="sd-", dir="/private/tmp")
-    path = Path(temporary.name) / "d"
-    monkeypatch.setattr(runtime, "directory", lambda: path)
-    events = runtime.Events()
-    session_id = str(uuid4())
-    service = runtime.RuntimeDiagnostics(
-        session_id,
-        lambda: {"session_id": session_id, "vpcs": []},
-        {"helper": lambda: {"counter": 0}},
-        events,
-    )
-    service.start()
-    yield service, events
-    service.close()
-    temporary.cleanup()
+def endpoint(monkeypatch):
+    with tempfile.TemporaryDirectory(prefix="sd-", dir="/tmp") as temporary:
+        path = Path(temporary) / "d"
+        monkeypatch.setattr(runtime, "directory", lambda: path)
+        events = runtime.Events()
+        session_id = str(uuid4())
+        service = runtime.RuntimeDiagnostics(
+            session_id,
+            lambda: {"session_id": session_id, "vpcs": []},
+            {"helper": lambda: {"counter": 0}},
+            events,
+        )
+        try:
+            service.start()
+            yield service, events
+        finally:
+            service.close()
 
 
 def test_runtime_socket_snapshot_discovery_and_event_gap(endpoint):
