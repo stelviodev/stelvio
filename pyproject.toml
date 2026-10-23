@@ -5,8 +5,8 @@ description = "Ship Python to AWS in minutes, not days"
 license = { text = "Apache-2.0" }
 readme = "README.md"
 requires-python = ">=3.12"
-authors = [{ name = "Michal Martinka", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
-maintainers = [{ name = "Michal", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
+authors = [{ name = "Stelvio Team", email = "team@stelvio.dev" }, { name = "Michal Martinka", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
+maintainers = [{ name = "Stelvio Team", email = "team@stelvio.dev" }, { name = "Michal Martinka", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
 keywords = ["aws", "cloudflare", "infrastructure"]
 
 classifiers = [
