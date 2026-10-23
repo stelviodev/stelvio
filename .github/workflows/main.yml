@@ -12,11 +12,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "0.12.5"
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install the project
-        run: uv sync --dev
+        run: uv sync --locked --dev
       - name: Run ruff format
         run: uv run ruff format --check
       - name: Run ruff check
@@ -45,12 +45,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "0.12.5"
+          version: "0.13.5"
           python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install the project
-        run: uv sync --dev
+        run: uv sync --locked --dev
       - name: Run pytest
         run: uv run pytest tests
 
