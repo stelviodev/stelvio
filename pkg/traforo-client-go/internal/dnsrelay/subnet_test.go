@@ -8,7 +8,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/miekg/dns"
+	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnsutil"
 	"github.com/stelviodev/traforo/internal/protocol"
 )
 
@@ -43,10 +44,10 @@ func TestSubnetResourceProbeAuthorization(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/direct=%t", address, direct), func(t *testing.T) {
 				p := proxyAt(t, "10.254.0.2", func(q *dns.Msg) *dns.Msg {
 					a := new(dns.Msg)
-					a.SetReply(q)
+					dnsutil.SetReply(a, q)
 					// A mixture of valid and invalid answers must fail before connecting.
 					for _, ip := range []string{"10.254.16.3", address} {
-						a.Answer = append(a.Answer, &dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: 1}, A: net.ParseIP(ip).To4()})
+						a.Answer = append(a.Answer, mustA(t, questionName(q), 0, netip.MustParseAddr(ip)))
 					}
 					return a
 				})
@@ -87,8 +88,8 @@ func TestResourceProbeAcrossMaximumSubnetSet(t *testing.T) {
 				address := fmt.Sprintf("10.254.%d.3", index+1)
 				p := proxyAt(t, "10.254.0.2", func(q *dns.Msg) *dns.Msg {
 					a := new(dns.Msg)
-					a.SetReply(q)
-					a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: 1, Ttl: 17}, A: net.ParseIP(address).To4()}}
+					dnsutil.SetReply(a, q)
+					a.Answer = []dns.RR{mustA(t, questionName(q), 17, netip.MustParseAddr(address))}
 					return a
 				})
 				c := config(p, 1)
@@ -101,7 +102,7 @@ func TestResourceProbeAcrossMaximumSubnetSet(t *testing.T) {
 					t.Fatalf("selected range %d/%d: %v", index, count, err)
 				}
 				a := query(t, r, "db.private.test", false)
-				if a.Rcode != dns.RcodeSuccess || len(a.Answer) != 1 || a.Answer[0].Header().Ttl != 17 {
+				if a.Rcode != dns.RcodeSuccess || len(a.Answer) != 1 || a.Answer[0].Header().TTL != 17 {
 					t.Fatal("relay altered the DNS answer")
 				}
 			}
