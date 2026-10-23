@@ -6,4 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "stelvio",
+    "uv>=0.13.5",
+    "certifi>=2026.10.19",
 ]
+
+[tool.uv]
+required-version = ">=0.13.5"

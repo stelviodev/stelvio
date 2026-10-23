@@ -1,12 +1,12 @@
 [project]
 name = "stelvio"
-version = "0.10.1b7"
+version = "0.10.2b8"
 description = "Ship Python to AWS in minutes, not days"
 license = { text = "Apache-2.0" }
 readme = "README.md"
 requires-python = ">=3.12"
-authors = [{ name = "Michal Martinka", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
-maintainers = [{ name = "Michal", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
+authors = [{ name = "Stelvio Team", email = "team@stelvio.dev" }, { name = "Michal Martinka", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
+maintainers = [{ name = "Stelvio Team", email = "team@stelvio.dev" }, { name = "Michal Martinka", email = "michal@stelvio.dev" }, { name = "Bas Steins", email = "bas@stelvio.dev" }]
 keywords = ["aws", "cloudflare", "infrastructure"]
 
 classifiers = [
@@ -23,6 +23,8 @@ classifiers = [
 ]
 
 dependencies = [
+    "uv>=0.13.5",
+    "certifi>=2026.10.19",
     "pulumi==3.263.0",
     "pulumi-aws==7.47.0",
     "pulumi-cloudflare==6.21.0",
@@ -82,6 +84,9 @@ empty_parameter_set_mark = "fail_at_collect"
 
 [tool.coverage.report]
 omit = ["*/tests/*"]
+
+[tool.uv]
+required-version = ">=0.13.5"
 
 [tool.ruff]
 line-length = 99
