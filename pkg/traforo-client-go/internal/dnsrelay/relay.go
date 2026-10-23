@@ -121,6 +121,8 @@ type observation struct {
 }
 
 type Relay struct {
+	metricsOnce  sync.Once
+	metrics      *Metrics
 	mu           sync.Mutex
 	current      *view
 	closed       bool
@@ -135,6 +137,14 @@ type Relay struct {
 }
 
 func New(c Config) (*Relay, error) {
+	return NewWithMetrics(c, nil)
+}
+
+// NewWithMetrics retains a logical unit counter identity across listeners.
+func NewWithMetrics(c Config, metrics *Metrics) (*Relay, error) {
+	if metrics == nil {
+		metrics = &Metrics{}
+	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -145,7 +155,7 @@ func New(c Config) (*Relay, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Relay{udp: udp, tcp: tcp, closeDone: make(chan struct{}), observations: make(map[string]observation), connections: make(map[net.Conn]struct{}), slots: make(chan struct{}, MaxRequests), tcpSlots: make(chan struct{}, MaxRequests)}
+	r := &Relay{metrics: metrics, udp: udp, tcp: tcp, closeDone: make(chan struct{}), observations: make(map[string]observation), connections: make(map[net.Conn]struct{}), slots: make(chan struct{}, MaxRequests), tcpSlots: make(chan struct{}, MaxRequests)}
 	if err = r.Activate(c); err != nil {
 		_ = udp.Close()
 		_ = tcp.Close()
@@ -320,6 +330,21 @@ func (r *Relay) Answer(wire []byte, udp bool) ([]byte, error) {
 }
 
 func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
+	r.metricsOnce.Do(func() {
+		if r.metrics == nil {
+			r.metrics = &Metrics{}
+		}
+	})
+	if udp {
+		r.metrics.UDP.Add(1)
+	} else {
+		r.metrics.TCP.Add(1)
+	}
+	r.metrics.Active.Add(1)
+	defer r.metrics.Active.Add(^uint64(0))
+	if !upstream {
+		r.metrics.Overload.Add(1)
+	}
 	q := &dns.Msg{Data: wire}
 	if len(wire) > 65535 || udp && len(wire) > MaxUDP || q.Unpack() != nil || q.Response {
 		return nil, errors.New("malformed DNS request")
@@ -357,16 +382,31 @@ func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
 		} else if available && upstream {
 			select {
 			case r.slots <- struct{}{}:
+				started := time.Now()
 				upstream, e := exchange(v, q)
+				r.metrics.duration(uint64(time.Since(started)))
+				if e != nil {
+					r.metrics.Failures.Add(1)
+					var timeout net.Error
+					if errors.As(e, &timeout) && timeout.Timeout() {
+						r.metrics.Timeouts.Add(1)
+					}
+				}
 				<-r.slots
 				r.mu.Lock()
 				if e == nil && r.current == v && !r.closed && v.ctx.Err() == nil {
 					a = upstream
+				} else if e == nil {
+					r.metrics.Stale.Add(1)
 				}
 				r.mu.Unlock()
 			default:
+				r.metrics.Overload.Add(1)
 			}
 		}
+	}
+	if int(a.Rcode) < len(r.metrics.Responses) {
+		r.metrics.Responses[a.Rcode].Add(1)
 	}
 	if err := packWithinLimit(a, limit); err != nil {
 		return nil, err
