@@ -551,3 +551,50 @@ until more output arrives; command exit and timeout still fail the check.
 `tests/integration/test_tunnel_audit.py` covers unwrapped and wrapped records,
 partial output, neighboring VPCs, invalid fields, bounds, and command exit. The
 privileged AWS host-key scenario verifies the full rejection and restart path.
+
+
+## Shared diagnostics and local reports
+
+`stlv tunnel diagnose` and `stlv tunnel diagnose --json` use the same versioned
+report. The command runs outside a project and never starts networking, installs
+artifacts, requests elevation, calls AWS, or changes routes or DNS. Uploads and
+the monitor UI are not included.
+
+The runtime publishes a same-UID snapshot endpoint under
+`/private/tmp/stlv-diag-<uid>/`. Its four diagnostic clients share one on-demand
+sample per source per second. The helper has a new read-only operation; the
+forwarder uses an inherited socket separate from mutation control. The runtime
+records up to 256 transition events. Client failure does not own the tunnel lease.
+
+Run Python diagnostics, control compatibility, and protocol tests with:
+
+```bash
+uv run pytest tests/tunnel/test_diagnostics.py tests/tunnel/test_forwarding.py \
+  tests/tunnel/test_helper_client.py tests/tunnel/test_helper_protocol.py \
+  tests/tunnel/test_protocol_vectors.py tests/tunnel/test_supervisor.py -q
+```
+
+Run the Go module's `make test race vet lint` checks. The diagnostics parser also
+has `FuzzDecode`; run it with a bounded fuzz duration. Python tests do not compile
+Go. Build matching developer images with the existing `scripts/build.py
+--build-only` workflow before interoperability or native tests.
+
+The explicit serial native test installs the selected image and restores the
+original helper and independently checked host baseline. It uses two local SOCKS
+fixtures and needs no AWS credentials or deployment:
+
+```bash
+STLV_TRAFORO_DEV_BINARY=/absolute/path/to/validated/traforo-darwin-arm64 \
+uv run pytest tests/integration/test_tunnel_diagnostics.py \
+  --integration-macos-privileged -n 0 -q
+```
+
+It checks live packet/TCP counters, DNS and resolver observations, repeated
+snapshots, a separate CLI reader, partial forwarder-source failure, unchanged
+ownership, and continued forwarding after diagnostics fails. Record the candidate
+commit, platform, artifact digest, commands, skips, and restoration evidence.
+
+The pinned v0.0.7 image does not support statistics. A compatible image reports its
+capability in the existing ready handshake. Old images continue forwarding; the
+report marks missing diagnostics unavailable and uses legacy helper status where
+possible. Publishing and pinning a new release is a separate step.
