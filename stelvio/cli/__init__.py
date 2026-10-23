@@ -32,6 +32,7 @@ from stelvio.cli.commands import (
     run_state_repair,
     run_unlock,
 )
+from stelvio.cli.completion import install_completion
 from stelvio.cli.init_command import (
     create_default_gitignore,
     create_stlv_app_file,
@@ -544,6 +545,7 @@ cli.add_command(unlock)
 cli.add_command(outputs)
 cli.add_command(state)
 cli.add_command(system)
+cli.add_command(install_completion)
 
 
 def determine_env(

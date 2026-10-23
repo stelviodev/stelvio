@@ -15,6 +15,43 @@ stlv -v deploy staging
 stlv -vv diff
 ```
 
+## Shell Completion
+
+Install Click's native completions for both `stlv` and `stelvio` with:
+
+```bash
+stlv install-completion
+```
+
+Stelvio detects Bash, Zsh, Fish, or PowerShell from the current shell when possible. Pass
+`--shell` if detection is unclear or you are installing completions for another shell:
+
+```bash
+stlv install-completion --shell zsh
+```
+
+The command writes completion files under your home directory and asks whether to update
+your shell profile; the default answer is no. Bash, Zsh, and PowerShell can use profile
+configuration to load their files, while Fish loads its files automatically. Use
+`--edit-profile` to request profile setup without a prompt, or `--no-edit-profile` to skip
+it. In non-interactive use, choose one of those flags explicitly.
+
+| Shell | Completion files | Profile |
+| --- | --- | --- |
+| Bash | `~/.local/share/bash-completion/completions/` | `~/.bashrc` |
+| Zsh | `~/.zsh/completions/` | `~/.zshrc` |
+| Fish | `~/.config/fish/completions/` | Loaded automatically |
+| PowerShell | `~/.config/powershell/completions/` | Current-user profile for the active host |
+
+To install the files without changing your profile, run `stlv install-completion
+--no-edit-profile` and add the following to the relevant startup file:
+
+- Bash: source `stlv` and `stelvio` from `~/.local/share/bash-completion/completions/`.
+- Zsh: add `fpath=( "$HOME/.zsh/completions" $fpath )` before `compinit` in `~/.zshrc`.
+- PowerShell: dot-source the `*.ps1` files in `~/.config/powershell/completions/` from
+  your current-user profile. The profile path can vary by PowerShell host.
+- Fish loads completion files from `~/.config/fish/completions/` automatically.
+
 ## Commands
 
 ### init
