@@ -19,8 +19,9 @@ def _label(name: str) -> str:
 
 
 def _scalar(value: object) -> bool:
-    return not isinstance(value, (dict, list)) or (
-        isinstance(value, list) and all(not isinstance(item, (dict, list)) for item in value)
+    return not isinstance(value, (dict, list, tuple)) or (
+        isinstance(value, (list, tuple))
+        and all(not isinstance(item, (dict, list, tuple)) for item in value)
     )
 
 
@@ -29,7 +30,7 @@ def _text(value: object) -> Text:
         return Text("Unavailable")
     if isinstance(value, bool):
         return Text("Yes" if value else "No")
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return Text(", ".join(_text(item).plain for item in value) if value else "None")
     return Text(str(value))
 
@@ -62,7 +63,7 @@ def _render_mapping(value: dict, console: Console, title: str) -> None:
             _render_value(item, console, _child_title(title, key))
 
 
-def _render_records(value: list[dict], console: Console, title: str) -> None:
+def _render_records(value: list[dict] | tuple[dict, ...], console: Console, title: str) -> None:
     nested = {key for row in value for key, item in row.items() if not _scalar(item)}
     columns = list(dict.fromkeys(key for row in value for key in row if key not in nested))
     if columns:
@@ -115,9 +116,13 @@ def _render_records(value: list[dict], console: Console, title: str) -> None:
 def _render_value(value: object, console: Console, title: str) -> None:
     if isinstance(value, dict):
         _render_mapping(value, console, title)
-    elif isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+    elif (
+        isinstance(value, (list, tuple))
+        and value
+        and all(isinstance(item, dict) for item in value)
+    ):
         _render_records(value, console, title)
-    elif isinstance(value, list) and not _scalar(value):
+    elif isinstance(value, (list, tuple)) and not _scalar(value):
         for index, item in enumerate(value, 1):
             _render_value(item, console, f"{title} · {index}")
     else:
