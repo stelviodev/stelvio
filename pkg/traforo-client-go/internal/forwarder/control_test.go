@@ -15,7 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
+	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnsutil"
 	"github.com/stelviodev/traforo/internal/protocol"
 )
 
@@ -278,7 +279,7 @@ func TestDNSProbeDoesNotBlockCarrierDispatch(t *testing.T) {
 		if _, serverErr = c.Write([]byte{5, 0, 0, 1, 127, 0, 0, 1, 0, 0}); serverErr != nil {
 			return
 		}
-		dc := &dns.Conn{Conn: c}
+		dc := &dnsTestConn{Conn: c}
 		query, err := dc.ReadMsg()
 		if err != nil {
 			serverErr = err
@@ -287,7 +288,7 @@ func TestDNSProbeDoesNotBlockCarrierDispatch(t *testing.T) {
 		close(ready)
 		<-release
 		answer := new(dns.Msg)
-		answer.SetReply(query)
+		dnsutil.SetReply(answer, query)
 		serverErr = dc.WriteMsg(answer)
 	}()
 
@@ -368,4 +369,31 @@ func TestDNSProbeDoesNotBlockCarrierDispatch(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("SOCKS fixture did not finish")
 	}
+}
+
+// dnsTestConn frames the v2 DNS messages exchanged by the SOCKS test server.
+type dnsTestConn struct{ net.Conn }
+
+func (c *dnsTestConn) ReadMsg() (*dns.Msg, error) {
+	m := new(dns.Msg)
+	if _, err := m.ReadFrom(c.Conn); err != nil {
+		return nil, err
+	}
+	if err := m.Unpack(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *dnsTestConn) WriteMsg(m *dns.Msg) error {
+	if err := m.Pack(); err != nil {
+		return err
+	}
+	var prefix [2]byte
+	binary.BigEndian.PutUint16(prefix[:], uint16(len(m.Data)))
+	if _, err := c.Write(prefix[:]); err != nil {
+		return err
+	}
+	_, err := c.Write(m.Data)
+	return err
 }
