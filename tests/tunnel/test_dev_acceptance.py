@@ -14,8 +14,8 @@ from tests.integration import cli_session
 @pytest.mark.parametrize(
     ("method", "arguments"),
     [
-        ("start_dev", ["dev", "tunnel-proof", "--yes"]),
-        ("start", ["tunnel", "start", "tunnel-proof"]),
+        ("start_dev", ["dev", "proof", "--yes"]),
+        ("start", ["tunnel", "start", "proof"]),
     ],
 )
 def test_acceptance_subprocess_uses_captured_environment_and_closed_stdin(
@@ -25,7 +25,7 @@ def test_acceptance_subprocess_uses_captured_environment_and_closed_stdin(
     session.process = None
     session.cli = Path("/test/stlv")
     session.project = tmp_path
-    session.environment_name = "tunnel-proof"
+    session.environment_name = "proof"
     session.log_path = tmp_path / "session.log"
     session.environment = {
         "AWS_PROFILE": "captured-profile",
@@ -56,19 +56,19 @@ def test_acceptance_subprocess_uses_captured_environment_and_closed_stdin(
 @pytest.mark.parametrize(
     "scenario",
     [
-        (["tunnel-proof", "--yes"], "n\n", True, False),
-        (["tunnel-proof"], "y\n", True, True),
-        (["tunnel-proof"], "n\n", False, True),
+        (["proof", "--yes"], "n\n", True, False),
+        (["proof"], "y\n", True, True),
+        (["proof"], "n\n", False, True),
     ],
 )
 def test_real_dev_cli_preserves_shared_environment_confirmation(cli, monkeypatch, scenario):
     arguments, answer, runs, prompt = scenario
-    monkeypatch.setattr(cli, "determine_env", lambda *_args, **_kwargs: "tunnel-proof")
+    monkeypatch.setattr(cli, "determine_env", lambda *_args, **_kwargs: "proof")
     cli.get_environment_confirmation_info.return_value = ("proof-app", True)
     result = CliRunner().invoke(cli.dev, arguments, input=answer)
     assert result.exit_code == 0, result.output
-    assert ("Deploy to tunnel-proof?" in result.output) is prompt
+    assert ("Deploy to proof?" in result.output) is prompt
     if runs:
-        cli.run_dev.assert_called_once_with("tunnel-proof", show_unchanged=False)
+        cli.run_dev.assert_called_once_with("proof", show_unchanged=False)
     else:
         cli.run_dev.assert_not_called()
