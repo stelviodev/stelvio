@@ -190,7 +190,9 @@ def run():
     export_output('function4_url', plain_function.url)
     export_output('function4_name', plain_function.resources.function.name)
 """
-        source = source.replace("APP_NAME", repr(self.app)).replace("ENVIRONMENT_NAME", repr(self.environment_name))
+        source = source.replace("APP_NAME", repr(self.app)).replace(
+            "ENVIRONMENT_NAME", repr(self.environment_name)
+        )
         (self.project / "stlv_app.py").write_text(source)
         (self.project / ".stelvio").mkdir()
         (self.project / ".stelvio" / "userenv").write_text(self.environment_name)

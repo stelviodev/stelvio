@@ -18,7 +18,7 @@ def _write_cli_session_project(tmp_path, *, no_vpc: bool = False) -> str:
     session.app = "proof-app"
     session.profile = "proof-profile"
     session.region = "us-east-1"
-    session.environment_name = "tunnel-proof"
+    session.environment_name = "proof"
     session.invocation_path = tmp_path / "imports.jsonl"
     session._write_project()
     source = (tmp_path / "stlv_app.py").read_text()
@@ -1576,7 +1576,7 @@ def worker_status_session(command_session, monkeypatch):
     return session
 
 
-_WORKER_ID = "urn:pulumi:tunnel-proof::stlv-tunnel-04a1caa5::stelvio:aws:Vpc::net1"
+_WORKER_ID = "urn:pulumi:proof::stlv-t-04a1caa5::stelvio:aws:Vpc::net1"
 
 
 @pytest.mark.parametrize(
