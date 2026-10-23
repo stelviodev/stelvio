@@ -14,7 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
+	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnsutil"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
@@ -129,14 +130,19 @@ func subnetProbeProxy(t *testing.T, address string) (string, <-chan string) {
 				if target != "10.254.0.2:53" {
 					return
 				}
-				dc := &dns.Conn{Conn: c}
+				dc := &dnsTestConn{Conn: c}
 				q, err := dc.ReadMsg()
 				if err != nil {
 					return
 				}
 				a := new(dns.Msg)
-				a.SetReply(q)
-				a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: 1, Ttl: 17}, A: net.ParseIP(address).To4()}}
+				dnsutil.SetReply(a, q)
+				rr, err := dns.New(fmt.Sprintf("%s 17 IN A %s", q.Question[0].Header().Name, address))
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				a.Answer = []dns.RR{rr}
 				_ = dc.WriteMsg(a)
 			}()
 		}
