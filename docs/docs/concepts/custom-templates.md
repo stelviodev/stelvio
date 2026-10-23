@@ -16,6 +16,11 @@ uvx --from stelvio stlv init --template gh:YOUR_ORG/app-templates@v1.0.0/http-se
 If the CLI is already installed, use `stlv init --template` with the same selector.
 Replace the organization, repository, tag, and subdirectory with your template's values.
 
+The `base` template does not include a dependency lockfile. After initialization, run
+`uv sync` in the new application directory. This command selects compatible dependency
+versions and creates `uv.lock`. Commit this file with your application to keep the same
+dependency versions for later installations.
+
 ### Template selectors
 
 | Selector | Source |

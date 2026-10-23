@@ -19,6 +19,14 @@
 - **Router routes work on `/`, on `/api` without a slash, and for HttpApi.** On `/` an API took only GET and lost its query string, `/api` went to the root route, and HttpApi routes got 403. A Bucket on `/` now serves `index.html` and is cached for a day like other bucket routes: [invalidate](components/aws/cloudfront-router.md#s3-buckets-cache-behavior) after an upload.
 - **Router API and Function routes get the client's headers and cookies.** Every request lost `Accept`, `Referer` and cookies, and a GET lost `Authorization`. Function routes with IAM auth still see CloudFront's signature there. CloudFront no longer compresses their responses, and a `distribution` customize that adds `forwarded_values` to them now fails.
 
+## 0.10.2b8 (2026-10-23)
+
+### Security fixes
+
+- **Update your tools following the eMudhra/emSign certificate compromise.** Upgrade your own uv to **0.13.5 or later** and pip to **26.2.2 or later**, following the [Python advisory's upgrade instructions](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576). Stelvio requires `certifi>=2026.10.19` and `uv>=0.13.5`; upgrade pip separately.
+- **Update deployed Lambda dependencies.** Bump certifi to **2026.10.19 or later** in your Lambda requirements, rebuild affected packages or layers, and redeploy.
+- **New `stlv init` projects require uv 0.13.5 or later.** The base template enforces this minimum with `tool.uv.required-version`.
+
 ## 0.10.1b7 (2026-10-09)
 
 ### Lambda Functions in VPC
