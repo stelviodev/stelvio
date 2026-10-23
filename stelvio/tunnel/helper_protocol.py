@@ -34,6 +34,7 @@ class HelperOperation(IntEnum):
     REMOVE = 4
     RELEASE = 5
     RECONCILE = 6
+    DIAGNOSTICS = 7
 
 
 @dataclass(frozen=True)
@@ -100,7 +101,11 @@ class HelperRequest:
         )
 
     def _identity(self) -> tuple[bytes, bytes]:
-        anonymous = self.operation in {HelperOperation.STATUS, HelperOperation.RECONCILE}
+        anonymous = self.operation in {
+            HelperOperation.STATUS,
+            HelperOperation.RECONCILE,
+            HelperOperation.DIAGNOSTICS,
+        }
         acquiring = self.operation == HelperOperation.ACQUIRE
         if anonymous:
             if self.session is not None or self.capability is not None:
