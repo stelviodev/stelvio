@@ -142,7 +142,7 @@ def test_two_unit_diagnostics_are_read_only_and_survive_failed_readers(macos_hos
             timeout=20,
             check=True,
         )
-        assert json.loads(result.stdout)["schema_version"] == 1
+        assert json.loads(result.stdout)["schema_version"] == 2
         assert helper.status() == before
         # Lose the statistics connection. The mutation channel and data plane continue.
         forwarding._diagnostics.close()
