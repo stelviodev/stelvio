@@ -345,7 +345,8 @@ def test_tables_render_every_row_and_nested_data_without_python_representations(
             ),
             "nested": protocol.observation(
                 {
-                    "units": [{"unit": "unit-one", "dns": {"nameservers": ["192.0.2.53"]}}],
+                    # Legacy helper dataclasses retain tuples after asdict().
+                    "units": ({"unit": "unit-one", "dns": {"nameservers": ("192.0.2.53",)}},),
                     "literal": "[bold]literal[/bold]",
                 }
             ),
