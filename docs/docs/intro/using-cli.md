@@ -278,6 +278,27 @@ stlv version
 stlv --version
 ```
 
+### Managed networking downloads
+
+When a Stelvio networking operation requests its executables, Stelvio uses the
+checksum-pinned Traforo `v0.0.7` release and AWS Session Manager plugin `1.2.835.0`.
+The releases support macOS `arm64` and `x86_64`. Stelvio checks each artifact's
+checksum, executable architecture, file permissions, and version before use.
+Cache directories and developer images must also pass ownership and ACL checks.
+Read-only grants and deny entries are allowed, including macOS files that have
+both extended attributes and ACLs. Write grants are rejected. Do not change host
+ACLs to bypass a validation failure.
+
+If the Traforo release is private, set `GITHUB_TOKEN` in the environment with read
+access to the release repository. Public release downloads do not need a token.
+Stelvio reads the token from the environment and does not send it to a redirected
+asset host. Do not put the token in a URL or commit it to project files.
+
+For local Traforo development, set `STLV_TRAFORO_DEV_BINARY` to an absolute path to
+the executable. Stelvio accepts the pinned release version or its matching
+development snapshot version. An unsafe or incompatible override fails; Stelvio
+does not fall back to the release or change its pinned cache.
+
 ### exit codes
 
 Stelvio currently uses these stable exit codes for automation:
