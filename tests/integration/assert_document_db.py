@@ -36,13 +36,10 @@ def assert_document_db_cluster(  # noqa: C901, PLR0913
     deletion_protection: bool | None = None,
     backup_retention_period: int | None = None,
     identifier_prefix: str | None = None,
-    serverless_scaling: dict[str, float] | None = None,
 ) -> dict:
     """Assert a DocumentDB cluster's core properties. Returns the cluster description."""
     client = _boto3_session().client("docdb")
     cluster = client.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
-    if serverless_scaling is not None:
-        assert cluster["ServerlessV2ScalingConfiguration"] == serverless_scaling
     if port is not None:
         assert cluster["Port"] == port
     if storage_encrypted is not None:

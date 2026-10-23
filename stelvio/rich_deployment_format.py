@@ -153,7 +153,7 @@ def format_child_resource_line(
 _INSTANCE_CLASS_CAPACITY_PHRASE = "create at least one new subnet"
 _INSTANCE_CLASS_CAPACITY_HINT = (
     "AWS has no capacity for this instance class in your Vpc's availability zones right now.",
-    "Set a different `instance` and deploy again, or try later.",
+    "Set a different `instance_class` and deploy again, or try later.",
     "Docs: https://stelvio.dev/docs/components/aws/document-db/#instance-class-capacity",
 )
 

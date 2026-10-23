@@ -124,7 +124,7 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
         outputs["document_db_todos_cluster_id"],
         instance_count=1,
         publicly_accessible=False,
-        instance_class="db.serverless",
+        instance_class="db.t3.medium",
         engine_version="8.0.0",
         tags=expected_tags,
         identifier_prefix=f"stlv-{stelvio_env.run_id}-test-todos-",
@@ -208,21 +208,22 @@ def test_document_db_default_and_rotation(stelvio_env):  # noqa: PLR0915
 
 def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR0915
     engine = "5.0"
-    instance = "t3.medium"
+    instance_class = None
 
     def infra():
         vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))
-        opts = {"instance": instance}
+        opts = {} if instance_class is None else {"instance_class": instance_class}
         db = DocumentDb(
             "todos",
             vpc=vpc,
-            replicas=1,
+            instances=2,
             engine=engine,
             customize={
                 "cluster": {
                     "apply_immediately": True,
                     "allow_major_version_upgrade": True,
                 },
+                "instance": {"apply_immediately": True},
             },
             **opts,
         )
@@ -308,7 +309,7 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
         ) == {"document": {"_id": "before-upgrade", "value": 42}}
 
         # Resize in a separate update: the engine change must not race the resize.
-        instance = "r6g.large"
+        instance_class = "r6g.large"
         resized = stelvio_env.deploy(infra)
         assert resized["document_db_todos_cluster_id"] == cluster_id
         assert_document_db_cluster(cluster_id, engine_version="5.0.0")
@@ -360,74 +361,3 @@ def test_document_db_link_and_upgrade(stelvio_env, project_dir):  # noqa: PLR091
     finally:
         # AWS keeps its pre-upgrade snapshot even after the test stack is destroyed.
         delete_document_db_upgrade_snapshots(cluster_id)
-
-
-def test_document_db_provisioned_serverless_round_trip(stelvio_env, project_dir):
-    instance = "t3.medium"
-
-    def infra():
-        vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))
-        db = DocumentDb(
-            "todos",
-            vpc=vpc,
-            instance=instance,
-            **({"min_capacity": 1, "max_capacity": 8} if instance is None else {}),
-        )
-        fn = Function(
-            "client",
-            handler="handlers/docdb_client::main.main",
-            vpc=vpc,
-            links=[db],
-            requirements=["pymongo"],
-        )
-        export_document_db(db)
-        export_function(fn)
-
-    original = stelvio_env.deploy(infra)
-    cluster_id = original["document_db_todos_cluster_id"]
-    cluster = assert_document_db_cluster(cluster_id, engine_version="8.0.0")
-    assert "ServerlessV2ScalingConfiguration" not in cluster
-    instance_ids = assert_document_db_instances(
-        cluster_id, instance_count=1, instance_class="db.t3.medium", engine_version="8.0.0"
-    )
-    document = {"_id": "before-serverless", "value": 42}
-    assert invoke_lambda(original["function_client_arn"]) == {
-        "username": "stelvio",
-        "mongo_ok": True,
-    }
-    assert invoke_lambda(
-        original["function_client_arn"], {"operation": "write", "document": document}
-    ) == {"document": document}
-    documents = [document]
-
-    for step, instance in enumerate((None, "t3.medium")):
-        updated = stelvio_env.deploy(infra)
-        for field in ("cluster_id", "cluster_arn", "endpoint", "reader_endpoint"):
-            key = f"document_db_todos_{field}"
-            assert updated[key] == original[key]
-        # The old range remains on the cluster after switching back to provisioned.
-        assert_document_db_cluster(
-            cluster_id, serverless_scaling={"MinCapacity": 1, "MaxCapacity": 8}
-        )
-        assert (
-            assert_document_db_instances(
-                cluster_id,
-                instance_count=1,
-                instance_class="db.serverless" if instance is None else "db.t3.medium",
-                engine_version="8.0.0",
-            )
-            == instance_ids
-        )
-        function_arn = updated["function_client_arn"]
-        for preserved in documents:
-            assert invoke_lambda(function_arn, {"operation": "read", "id": preserved["_id"]}) == {
-                "document": preserved
-            }
-        document = {"_id": f"after-switch-{step}", "value": step}
-        assert invoke_lambda(function_arn, {"operation": "write", "document": document}) == {
-            "document": document
-        }
-        assert invoke_lambda(function_arn, {"operation": "read", "id": document["_id"]}) == {
-            "document": document
-        }
-        documents.append(document)
