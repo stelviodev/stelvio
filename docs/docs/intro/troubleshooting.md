@@ -129,6 +129,14 @@ You have three options:
 
 ### Native VPC helper issues
 
+Use `stlv tunnel diagnose` to inspect local state in tables, or
+`stlv tunnel diagnose --json` to get the same parsed data in JSON report schema
+version 2. Interfaces, routes, DNS, proxy settings, and service state are records,
+not command-output strings. All collected rows appear in the human report.
+An unavailable source or parse warning does not discard healthy sections.
+An `incomplete` result can contain valid records but is not a complete view of
+that source. The report does not include raw text when parsing fails.
+
 The `stlv tunnel` administration commands run on macOS. `install` requires macOS
 15 or later and asks for administrator authorization. Run Stelvio as your normal
 user; only the helper runs with elevated privileges.

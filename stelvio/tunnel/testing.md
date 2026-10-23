@@ -560,6 +560,14 @@ report. The command runs outside a project and never starts networking, installs
 artifacts, requests elevation, calls AWS, or changes routes or DNS. Uploads and
 the monitor UI are not included.
 
+Report schema 2 parses macOS observations before JSON or table rendering. Pure
+parser fixtures cover interface aliases, IPv6 scope, point-to-point peers, bridge
+members, variable route columns, scoped DNS, disabled services, empty DNS settings,
+proxy privacy, launchd nesting, and denied packet-filter access. Tests retain valid
+records after malformed or truncated input, check nested lookups for raw-output
+leaks, and render more than 50 records on narrow and wide terminals without row
+limits or Python dictionary representations. IPC versions remain unchanged.
+
 The runtime publishes a same-UID snapshot endpoint under
 `/private/tmp/stlv-diag-<uid>/`. Its four diagnostic clients share one on-demand
 sample per source per second. The helper has a new read-only operation; the
@@ -569,7 +577,8 @@ records up to 256 transition events. Client failure does not own the tunnel leas
 Run Python diagnostics, control compatibility, and protocol tests with:
 
 ```bash
-uv run pytest tests/tunnel/test_diagnostics.py tests/tunnel/test_forwarding.py \
+uv run pytest tests/tunnel/test_diagnostics.py tests/tunnel/test_diagnostics_parsers.py \
+  tests/tunnel/test_forwarding.py \
   tests/tunnel/test_helper_client.py tests/tunnel/test_helper_protocol.py \
   tests/tunnel/test_protocol_vectors.py tests/tunnel/test_supervisor.py -q
 ```

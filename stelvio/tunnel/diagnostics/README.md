@@ -59,11 +59,52 @@ change does not implement rates, chart history, or a monitor command.
 
 ## Reports and privacy
 
-Report schema version 1 has generation time, duration, section observations,
+Report schema version 2 has generation time, duration, section observations,
 findings, and truncation. A 15-second collection deadline, two-second subprocess
 deadlines, 128 KiB subprocess output limits, and an 8 MiB report limit bound work.
 An unavailable source does not invalidate the report or change its successful
 exit status. JSON stdout contains exactly one document.
+
+System command text is internal to collection. Parsers project it into typed
+records before either report format sees it. No section or nested observation
+contains an `output` field or a raw-text fallback. This replaces the version 1
+command payloads; runtime and Go snapshot protocol versions remain 1.
+
+| Section | Data fields |
+| --- | --- |
+| `interfaces` | `interfaces`: name, flags/value, MTU, options/value, link address, media, status, addresses, bridge members/configuration, optional ND6 options/value |
+| `routes` | `routes`: family, native destination, canonical network, gateway, flag characters, interface, expiry seconds/marker |
+| `default_route` | Destination, mask, gateway, interface, named flags, numeric metrics, route target |
+| `selected_routes` | Session/VPC/range records with the same parsed route lookup observation |
+| `resolvers` | `resolvers`: query scope, number, domain/search domains, nameservers, interface/index, options, flags, reachability, timeout, order, optional port |
+| `network_services` | `services`: name and enabled state |
+| `network_service_dns` | Service records with nameservers and an explicit configured state in nested DNS observations |
+| `proxies` | Allowlisted typed `settings` and PAC configured state/scheme |
+| `macos_build` | Product name/version and build version |
+| `firewall` | Enabled state and numeric state |
+| `packet_filter` | Enabled state, running seconds, named numeric statistics and optional rates |
+| `helper_service` | Top-level launchd state, PID, runs, exit code, type, and program |
+| `resolver_files` | Public receipt file metadata and typed nameserver/port/domain/search-order/timeout configuration |
+
+Interface address records preserve the address family, prefix length, IPv6 zone
+and scope ID, point-to-point peer, broadcast address, and address flags. Repeated
+addresses and resolver numbers in different query scopes remain separate records.
+Route findings consume these parsed records rather than interpreting command text
+again. Network-service DNS collection uses the parsed enabled service list.
+
+Command observations retain `exit_code` and `truncated` in `data`, plus
+`parse_warnings` (code and 1-based line number) and `incomplete`. Complete records
+survive malformed neighbours; the source remains collected with a `partial-parse`
+error and `incomplete: true`. Wholly unrecognised successful output is failed with
+`parse-unrecognized`. Failed commands keep their original error and exit status.
+An incomplete final line of truncated command output is discarded before parsing.
+Warnings never include source text. Missing values are null, not guessed defaults.
+
+Human output uses the same parsed data in labelled tables, including helper and
+runtime records and nested observations. All collected rows are displayed. Wide
+records use multiple tables with a repeated row identity; narrow terminals wrap
+values rather than omitting them. Empty, failed, stale, and incomplete observations
+remain visible. Both formats retain the same collection and report size limits.
 
 Local reports include network addresses and deployment identities. Explicit data
 projections omit credentials, capabilities, private keys, tokens, process
