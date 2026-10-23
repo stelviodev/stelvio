@@ -258,7 +258,12 @@ so standalone and dev commands can both expose the observation without wrapping.
 Tunnel startup has a 900-second limit. Destruction has a separate 3,600-second
 limit because DocumentDB deletion and Lambda VPC interface cleanup can outlast
 startup. A separate, bounded AWS absence audit runs after destruction, including
-when the command fails. Reaching the destroy deadline is a test failure.
+when the command fails. Dev acceptance captures its proof Lambda log groups
+before destruction, removes only those names after AWS confirms the Functions are
+gone, and verifies that the full proof app/environment prefix is absent. A group
+that appears after capture fails the audit and is not added to the deletion set.
+The runner needs logs:DescribeLogGroups and logs:DeleteLogGroup permissions for
+these proof-owned groups. Reaching the destroy deadline is a test failure.
 
 Each CLI command saves `stdout.log`, `stderr.log`, and `command.json` under a
 private `cli-<command>-*` directory in the proof project. Timeout records include

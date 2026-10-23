@@ -433,6 +433,15 @@ ARNs; missing ARNs or failed AWS requests fail the audit rather than certifying
 cleanup. Both ownership tags must match before an otherwise unrelated name is
 reported as belonging to the proof application.
 
+Dev acceptance captures exact Lambda log groups for its random proof app before
+destroy. It removes those groups only after AWS confirms the proof Functions are
+gone, then checks the proof app/environment prefix until all groups are absent.
+A pre-existing group under a newly selected proof name stops setup before deploy.
+The AWS test identity needs logs:DescribeLogGroups and logs:DeleteLogGroup. Cleanup
+deletes only names captured before destroy, after Functions are absent. The audit
+reports any group that remains or appears later; it never adds that group to the
+deletion set.
+
 These checks do not certify a live acceptance run.
 
 
