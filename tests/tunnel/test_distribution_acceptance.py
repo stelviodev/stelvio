@@ -122,7 +122,15 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         for line in help_result.stdout.split("Commands:\n", 1)[-1].splitlines()
         if line.strip()
     }
-    assert command_names == {"cleanup", "status", "install", "start", "trust", "uninstall"}
+    assert command_names == {
+        "cleanup",
+        "status",
+        "install",
+        "start",
+        "trust",
+        "uninstall",
+        "diagnose",
+    }
     status_help = run(
         python,
         "-I",
@@ -177,3 +185,26 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         "--help",
     )
     assert "start [OPTIONS] [ENV]" in start_help.stdout
+
+    diagnostic_result = run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.cli import main; main()",
+        "tunnel",
+        "diagnose",
+        "--json",
+    )
+    diagnostic_report = json.loads(diagnostic_result.stdout)
+    assert diagnostic_report["schema_version"] == 1
+    assert {"versions", "artifacts", "helper", "sessions"} <= set(diagnostic_report["sections"])
+    run(
+        python,
+        "-I",
+        "-c",
+        "from pathlib import Path; "
+        "from stelvio.tunnel.diagnostics import protocol, runtime, report; "
+        "from stelvio.pulumi import get_stelvio_config_dir; "
+        "assert Path(runtime.__file__).with_name('README.md').is_file(); "
+        "assert not (get_stelvio_config_dir() / 'bin').exists()",
+    )

@@ -27,9 +27,10 @@ def endpoint(tmp_path, monkeypatch):
     path = Path(temporary.name) / "d"
     monkeypatch.setattr(runtime, "directory", lambda: path)
     events = runtime.Events()
+    session_id = str(uuid4())
     service = runtime.RuntimeDiagnostics(
-        str(uuid4()),
-        lambda: {"session_id": "session", "vpcs": []},
+        session_id,
+        lambda: {"session_id": session_id, "vpcs": []},
         {"helper": lambda: {"counter": 0}},
         events,
     )
@@ -257,3 +258,13 @@ def test_report_reuses_fresh_matching_runtime_helper_sample(monkeypatch):
     source["data"]["session_id"] = "another-owner"
     monkeypatch.setattr(report, "helper", lambda: protocol.observation(status="unavailable"))
     assert report._helper_observation(sections, time.monotonic() + 2)["status"] == "unavailable"
+
+
+def test_invalid_runtime_snapshot_stays_a_partial_source(endpoint):
+    service, _ = endpoint
+    service.state = lambda: {"session_id": str(uuid4()), "vpcs": []}
+    with pytest.raises(ValueError, match="identity"):
+        runtime.snapshot(service.path)
+    value = report.sessions()
+    assert value["data"]["sessions"] == []
+    assert value["data"]["endpoint_errors"][0]["code"] == "ValueError"
