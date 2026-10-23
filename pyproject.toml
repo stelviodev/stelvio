@@ -23,7 +23,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "pip>=26.2.2",
     "uv>=0.13.5",
     "certifi>=2026.10.19",
     "pulumi==3.263.0",

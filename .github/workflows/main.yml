@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14", "3.15.1"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
         runs-on: ["ubuntu-latest", "ubuntu-22.04-arm"]
         experimental: [false]
         timeout-minutes: [10]
@@ -51,9 +51,6 @@ jobs:
           cache-dependency-glob: "uv.lock"
       - name: Install the project
         run: uv sync --locked --dev
-      - name: Verify Python 3.15 is a final release
-        if: matrix.python-version == '3.15.1'
-        run: uv run --locked python -c "import sys; assert sys.version_info.releaselevel == 'final', sys.version"
       - name: Run pytest
         run: uv run pytest tests
 

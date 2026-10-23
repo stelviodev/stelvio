@@ -19,7 +19,9 @@
 
 ### Security fixes
 
-- Upgrade pip, uv, and certifi across Stelvio, templates, and CI following the eMudhra certificate compromise ([CVE-2026-111943](https://nvd.nist.gov/vuln/detail/cve-2026-111943)); CI now uses final Python 3.15.1.
+- **Update your tools following the eMudhra/emSign certificate compromise.** Upgrade your own uv to **0.13.4 or later** and pip to **26.2.2 or later**, following the [Python advisory's upgrade instructions](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576). Stelvio requires `certifi>=2026.10.19` and `uv>=0.13.5`; upgrade pip separately.
+- **Update deployed Lambda dependencies.** Bump certifi to **2026.10.19 or later** in your Lambda requirements, rebuild affected packages or layers, and redeploy.
+- **New `stlv init` projects require uv 0.13.5 or later.** The base template enforces this minimum with `tool.uv.required-version`.
 
 ## 0.10.1b7 (2026-10-09)
 
