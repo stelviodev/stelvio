@@ -447,6 +447,9 @@ def main(event, context):
             statuses[arn] = status
         next_result = await function.handle_bridge_event(envelope(function, BASE_ARN + "/next/id"))
         assert next_result.durable_status == "SUCCEEDED"
+        from stelvio.bridge.local.durable import _cleanup_snapshots
+
+        _cleanup_snapshots(next_result.durable_cleanup, threading.Event())
         assert manifests[0].exists() is retained
 
     return check()
@@ -525,3 +528,175 @@ def test_worker_reports_missing_local_sdk(monkeypatch, tmp_path):
         "Install it in the Python environment running stlv dev and declare it "
         "in the function's requirements."
     )
+
+
+@pulumi.runtime.test
+def test_replay_preserves_changed_removed_and_absent_variables(project_cwd, durable_backend):
+    source = HANDLER.replace(
+        '"linked": Resources.settings.value',
+        '"changed": os.getenv("CHANGED"), "removed": os.getenv("REMOVED"), '
+        '"added": os.getenv("ADDED", "absent")',
+    )
+    function = make_function(project_cwd, source=source)
+    function.config.environment.update(CHANGED="original", REMOVED="original")
+    operations, _, _, _ = durable_backend
+    arn = BASE_ARN + "/environment/id"
+
+    async def check():
+        assert (
+            await function.handle_bridge_event(envelope(function, arn))
+        ).durable_status == "PENDING"
+        function.config.environment.update(CHANGED="edited", ADDED="new")
+        del function.config.environment["REMOVED"]
+        for operation in operations[arn].values():
+            if operation["Type"] == "WAIT":
+                operation["Status"] = "SUCCEEDED"
+        result = await function.handle_bridge_event(
+            envelope(function, arn, operations=list(operations[arn].values()))
+        )
+        value = json.loads(result.success_result["Result"])
+        assert (value["changed"], value["removed"], value["added"]) == (
+            "original",
+            "original",
+            "absent",
+        )
+        new_arn = BASE_ARN + "/environment-new/id"
+        await function.handle_bridge_event(envelope(function, new_arn))
+        for operation in operations[new_arn].values():
+            if operation["Type"] == "WAIT":
+                operation["Status"] = "SUCCEEDED"
+        result = await function.handle_bridge_event(
+            envelope(function, new_arn, operations=list(operations[new_arn].values()))
+        )
+        value = json.loads(result.success_result["Result"])
+        assert (value["changed"], value["removed"], value["added"]) == ("edited", None, "new")
+
+    return check()
+
+
+def test_cleanup_isolated_coalesced_and_stopped(monkeypatch, tmp_path):
+    from stelvio.bridge.local import durable
+    from stelvio.bridge.local.dtos import DurableCleanupRequest
+
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def scan(request, stop):
+        calls.append(request)
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(durable, "_cleanup_snapshots", scan)
+
+    async def check():
+        manager = durable.DurableCleanupManager()
+        request = DurableCleanupRequest(tmp_path, None, "us-east-1", BASE_ARN)
+        try:
+            manager.submit(request)
+            while not entered.is_set():
+                await asyncio.sleep(0.001)
+            for _ in range(32):
+                manager.submit(request)
+            assert len(manager._pending) == 1
+            assert (
+                await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(None, lambda: "ordinary"), 1
+                )
+                == "ordinary"
+            )
+            closing = asyncio.create_task(manager.close())
+            await asyncio.sleep(0)
+            release.set()
+            await closing
+            assert calls == [request]
+        finally:
+            release.set()
+            await manager.close()
+
+    asyncio.run(check())
+
+
+def test_cleanup_filters_region_and_continues_after_errors(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from stelvio.bridge.local.dtos import DurableCleanupRequest
+    from stelvio.bridge.local.durable import _cleanup_snapshots
+
+    arns = {
+        "current": BASE_ARN + "/current/id",
+        "done": BASE_ARN + "/done/id",
+        "running": BASE_ARN + "/running/id",
+        "denied": BASE_ARN + "/denied/id",
+        "other": BASE_ARN.replace("us-east-1", "eu-west-1") + "/other/id",
+    }
+    for name, arn in arns.items():
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "manifest.json").write_text(json.dumps({"execution_arn": arn}))
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / "manifest.json").write_text("invalid")
+    client = Mock()
+
+    def status(*, DurableExecutionArn):  # noqa: N803
+        if DurableExecutionArn == arns["denied"]:
+            raise PermissionError
+        return {"Status": "SUCCEEDED" if DurableExecutionArn == arns["done"] else "RUNNING"}
+
+    client.get_durable_execution.side_effect = status
+    session = Mock()
+    session.return_value.client.return_value = client
+    monkeypatch.setattr("stelvio.bridge.local.durable.boto3.Session", session)
+    _cleanup_snapshots(
+        DurableCleanupRequest(tmp_path, "selected", "us-east-1", arns["current"]),
+        threading.Event(),
+    )
+    session.assert_called_once_with(profile_name="selected", region_name="us-east-1")
+    assert not (tmp_path / "done").exists()
+    assert all(
+        (tmp_path / name).exists() for name in ("current", "running", "denied", "other", "bad")
+    )
+    assert client.get_durable_execution.call_count == 3
+    client.close.assert_called_once()
+
+
+def test_listener_publishes_before_cleanup(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from stelvio.bridge.local import listener
+    from stelvio.bridge.local.dtos import BridgeInvocationResult, DurableCleanupRequest
+
+    request = DurableCleanupRequest(tmp_path, None, "us-east-1", BASE_ARN)
+    result = BridgeInvocationResult(
+        {"Status": "SUCCEEDED"},
+        None,
+        BASE_ARN,
+        "DURABLE",
+        0,
+        -1,
+        durable_cleanup=request,
+    )
+    handler = SimpleNamespace(
+        _dev_endpoint_id="worker", handle_bridge_event=AsyncMock(return_value=result)
+    )
+    manager = Mock()
+
+    async def publish(*args):
+        manager.submit.assert_not_called()
+
+    monkeypatch.setattr(listener.WebsocketHandlers, "all", lambda: [handler])
+    monkeypatch.setattr(listener, "publish", publish)
+    monkeypatch.setattr(listener, "log_invocation", lambda result: None)
+    asyncio.run(
+        listener._handle_data_message(
+            {"event": json.dumps({"endpointId": "worker"})},
+            None,
+            "key",
+            "app",
+            "dev",
+            cleanup=manager,
+        )
+    )
+    manager.submit.assert_called_once_with(request)

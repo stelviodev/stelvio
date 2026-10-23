@@ -20,6 +20,7 @@ from stelvio.bridge._chunking import (
     split_message,
 )
 from stelvio.bridge.local.dtos import BridgeInvocationResult
+from stelvio.bridge.local.durable import DurableCleanupManager
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.remote.infrastructure import AppSyncResource, discover_or_create_appsync
 
@@ -196,6 +197,7 @@ async def _handle_data_message(  # noqa: PLR0913
     *,
     ordinary_lock: asyncio.Lock | None = None,
     process_environment: dict[str, str] | None = None,
+    cleanup: DurableCleanupManager | None = None,
 ) -> None:
     event_data = json.loads(data["event"])
 
@@ -221,6 +223,8 @@ async def _handle_data_message(  # noqa: PLR0913
             result = await handler.handle_bridge_event(data)
         if result:
             await publish(result, ws, api_key, data, app_name, env)
+            if cleanup is not None and result.durable_cleanup is not None:
+                cleanup.submit(result.durable_cleanup)
             log_invocation(result)
 
 
@@ -243,17 +247,22 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
 
     ordinary_lock = asyncio.Lock()
     process_environment = os.environ.copy()
-    async with asyncio.TaskGroup() as invocations:
-        await _listen(
-            ws,
-            config,
-            app_name,
-            env,
-            console=console,
-            ordinary_lock=ordinary_lock,
-            invocations=invocations,
-            process_environment=process_environment,
-        )
+    cleanup = DurableCleanupManager()
+    try:
+        async with asyncio.TaskGroup() as invocations:
+            await _listen(
+                ws,
+                config,
+                app_name,
+                env,
+                console=console,
+                ordinary_lock=ordinary_lock,
+                invocations=invocations,
+                process_environment=process_environment,
+                cleanup=cleanup,
+            )
+    finally:
+        await cleanup.close()
 
 
 async def _listen(  # noqa: PLR0913
@@ -266,6 +275,7 @@ async def _listen(  # noqa: PLR0913
     ordinary_lock: asyncio.Lock,
     invocations: asyncio.TaskGroup,
     process_environment: dict[str, str],
+    cleanup: DurableCleanupManager,
 ) -> None:
     async for message in ws:
         data = json.loads(message)
@@ -306,6 +316,7 @@ async def _listen(  # noqa: PLR0913
                         env,
                         ordinary_lock=ordinary_lock,
                         process_environment=process_environment,
+                        cleanup=cleanup,
                     )
                 )
             case _:

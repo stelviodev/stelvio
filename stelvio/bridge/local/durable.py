@@ -10,16 +10,16 @@ import shutil
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING, Any
 
 import boto3
 from botocore.config import Config
 
-from stelvio.aws.function.packaging import _folder_assets, _link_file_sources
-from stelvio.aws.function.resources_codegen import create_stlv_resource_file_content
-from stelvio.bridge.local.dtos import BridgeInvocationResult
+from stelvio.bridge.local.dtos import BridgeInvocationResult, DurableCleanupRequest
 from stelvio.project import get_dot_stelvio_dir, get_project_root
 
 if TYPE_CHECKING:
@@ -75,6 +75,14 @@ def _populate_snapshot(
     environment: dict[str, str],
     execution_arn: str,
 ) -> dict[str, Any]:
+    from stelvio.aws.function.packaging import (  # noqa: PLC0415
+        _folder_assets,
+        _link_file_sources,
+    )
+    from stelvio.aws.function.resources_codegen import (  # noqa: PLC0415
+        create_stlv_resource_file_content,
+    )
+
     package = temporary / "package"
     package.mkdir()
     config = function.config
@@ -137,29 +145,67 @@ def _populate_snapshot(
     }
 
 
-def _cleanup_snapshots(root: Path, environment: dict[str, str], current_arn: str) -> None:
-    """Only AWS terminal status permits removal; missing permission retains the snapshot."""
-    manifests = list(root.glob("*/manifest.json"))
-    if not manifests:
-        return
-    session = boto3.Session(
-        profile_name=environment.get("AWS_PROFILE"), region_name=environment.get("AWS_REGION")
-    )
+class DurableCleanupManager:
+    """One background scan at a time, independent of invocation executor capacity."""
+
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="durable-cleanup")
+        self._stop = Event()
+        self._pending: dict[tuple[Path, str | None, str], DurableCleanupRequest] = {}
+        self._task: asyncio.Task | None = None
+
+    def submit(self, request: DurableCleanupRequest) -> None:
+        if self._stop.is_set():
+            return
+        self._pending[request.root, request.profile, request.region] = request
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._drain())
+
+    async def _drain(self) -> None:
+        while self._pending and not self._stop.is_set():
+            key = next(iter(self._pending))
+            request = self._pending.pop(key)
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    self._executor, _cleanup_snapshots, request, self._stop
+                )
+            except Exception:
+                logger.debug("Durable snapshot cleanup deferred", exc_info=True)
+
+    async def close(self) -> None:
+        self._stop.set()
+        self._pending.clear()
+        try:
+            if self._task is not None:
+                await asyncio.shield(self._task)
+        finally:
+            self._executor.shutdown(wait=True, cancel_futures=True)
+
+
+def _cleanup_snapshots(request: DurableCleanupRequest, stop: Event) -> None:
+    """Only AWS terminal status permits removal; errors retain the snapshot."""
+    session = boto3.Session(profile_name=request.profile, region_name=request.region)
     client = session.client(
         "lambda", config=Config(connect_timeout=1, read_timeout=1, retries={"max_attempts": 0})
     )
-    for path in manifests:
-        manifest = json.loads(path.read_text())
-        arn = manifest["execution_arn"]
-        if arn == current_arn:
-            continue
-        try:
-            response = client.get_durable_execution(DurableExecutionArn=arn)
-        except Exception:  # Cleanup must never break a pending execution.
-            logger.debug("Unable to confirm durable execution status for cleanup", exc_info=True)
-            continue
-        if response.get("Status") in _TERMINAL_STATUSES:
-            shutil.rmtree(path.parent)
+    try:
+        for path in request.root.glob("*/manifest.json"):
+            if stop.is_set():
+                break
+            try:
+                manifest = json.loads(path.read_text())
+                arn = manifest["execution_arn"]
+                if arn == request.execution_arn or arn.split(":")[3] != request.region:
+                    continue
+                if stop.is_set():
+                    break
+                response = client.get_durable_execution(DurableExecutionArn=arn)
+                if response.get("Status") in _TERMINAL_STATUSES:
+                    shutil.rmtree(path.parent)
+            except Exception:
+                logger.debug("Unable to clean durable snapshot", exc_info=True)
+    finally:
+        client.close()
 
 
 async def _run_worker(
@@ -234,6 +280,7 @@ async def handle_durable_invocation(function: Function, data: dict) -> BridgeInv
     execution_arn = event.get("DurableExecutionArn", "unknown")
     result = None
     error = None
+    cleanup = None
     process_environment = dict(data.get("_local_environment", os.environ))
     try:
         _validate_invocation(event, execution_arn)
@@ -241,18 +288,17 @@ async def handle_durable_invocation(function: Function, data: dict) -> BridgeInv
         # Packaging/link helpers construct Pulumi objects and require the event-loop thread.
         snapshot = _snapshot(function, event, environment)
         manifest = json.loads((snapshot / "manifest.json").read_text())
-        result = await _run_worker(
-            function, snapshot, manifest, {**process_environment, **environment}, message
+        worker_environment = {
+            **process_environment,
+            **{key: value for key, value in environment.items() if key.startswith("AWS_")},
+        }
+        result = await _run_worker(function, snapshot, manifest, worker_environment, message)
+        cleanup = DurableCleanupRequest(
+            root=snapshot.parent,
+            profile=environment.get("AWS_PROFILE"),
+            region=environment["AWS_REGION"],
+            execution_arn=execution_arn,
         )
-        # The current envelope has not reached AWS yet, so only collect other confirmed
-        # terminal executions. The current snapshot is checked on a later invocation.
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(_cleanup_snapshots, snapshot.parent, environment, execution_arn),
-                timeout=1,
-            )
-        except Exception:
-            logger.debug("Durable snapshot cleanup deferred", exc_info=True)
     except (Exception, SystemExit) as exc:
         error = exc
     return BridgeInvocationResult(
@@ -263,6 +309,7 @@ async def handle_durable_invocation(function: Function, data: dict) -> BridgeInv
         process_time_local=(time.perf_counter() - started) * 1000,
         status_code=-1,
         handler_name=function.config.handler,
+        durable_cleanup=cleanup,
         durable_execution_arn=execution_arn,
         durable_status=result.get("Status") if result is not None else None,
     )

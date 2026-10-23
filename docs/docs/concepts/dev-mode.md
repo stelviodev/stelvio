@@ -69,8 +69,9 @@ shared with your project and are not copied into the snapshot.
 
 Snapshots persist under `.stelvio/durable-dev`. Keep this directory when restarting the
 dev server. If a replay's snapshot is missing, Stelvio reports an invocation error instead
-of running current code. A later invocation can collect finished snapshots after AWS
-confirms terminal status; cleanup additionally needs `lambda:GetDurableExecution`.
+of running current code. After a response is published, one background worker can collect
+finished snapshots after AWS confirms terminal status. Cleanup does not delay invocation
+responses. Cleanup additionally needs `lambda:GetDurableExecution`.
 Without that permission, snapshots are retained.
 
 Stopping the server leaves durable executions in AWS. Invocations that cannot reach the
