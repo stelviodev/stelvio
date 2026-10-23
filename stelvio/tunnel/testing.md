@@ -87,9 +87,35 @@ lock remains the same inode across administration, and treats transaction files 
 unknown matching artifacts as a preflight or recovery failure.
 
 The distinct-candidate upgrade case needs a verified candidate supplied through
-`STLV_TRAFORO_DEV_BINARY`; Step 9 supplies the local builder. Cross-venv acceptance
-needs a wheel at `STLV_TEST_STELVIO_WHEEL`. Record either check as pending when its
-artifact is not available.
+`STLV_TRAFORO_DEV_BINARY`. Build and validate a local candidate without installation
+or release publication:
+
+```bash
+make -C pkg/traforo-client-go build
+```
+
+The builder checks both release architectures, writes provenance, and prints the
+host image path for explicit selection. The default builder command installs that
+image through the existing authorized transaction. Do not use it in a build-only
+lane.
+
+Distribution acceptance uses prebuilt archive paths. Build them outside pytest:
+
+```bash
+DIST_DIR="$(mktemp -d)"
+uv build --out-dir "$DIST_DIR"
+STLV_TEST_STELVIO_WHEEL="$(find "$DIST_DIR" -name '*.whl' -print -quit)" \
+STLV_TEST_STELVIO_SDIST="$(find "$DIST_DIR" -name '*.tar.gz' -print -quit)" \
+  uv run pytest tests/tunnel/test_distribution_acceptance.py -q
+```
+
+The suite checks archive contents and installs the wheel into a clean virtual
+environment outside the checkout. It verifies the installed CLI command set,
+checks `tunnel status --help`, and rejects the unsupported `tunnel inspect`
+command. These CLI checks do not contact the helper or AWS. Pytest does not build
+Go or Python artifacts.
+Distinct-candidate upgrade acceptance remains pending until its candidate and the
+required native authorization are available.
 
 ## Native fixture subnet selection
 
