@@ -158,9 +158,9 @@ def _message(valid_control: bool, flags: int, descriptors: list[int], data: byte
         raise HelperError("The helper closed an incomplete reply")
 
 
-def _header(packet: bytes | bytearray) -> tuple[HelperStatus, int]:
+def _header(packet: bytes | bytearray, limit: int = MAX_REPLY) -> tuple[HelperStatus, int]:
     magic, status, reserved, size = _REPLY.unpack(packet)
-    if magic != b"STLVREP1" or reserved or size > MAX_REPLY:
+    if magic != b"STLVREP1" or reserved or size > limit:
         raise HelperError("The helper returned an incompatible reply")
     try:
         return HelperStatus(status), size
@@ -234,7 +234,7 @@ def _success(response: HelperStatus, payload: bytes = b"") -> None:
 
 
 def _receive(
-    connection: socket.socket, *, deadline: float | None = None
+    connection: socket.socket, limit: int = MAX_REPLY, *, deadline: float | None = None
 ) -> tuple[bytes, list[int]]:
     packet = bytearray()
     descriptors: list[int] = []
@@ -251,7 +251,7 @@ def _receive(
             _message(_controls(controls, descriptors), flags, descriptors, data)
             packet.extend(data)
             if len(packet) == _REPLY.size:
-                response, size = _header(packet)
+                response, size = _header(packet, limit)
                 target += size
         _success(response, bytes(packet[_REPLY.size :]))
         return bytes(packet[_REPLY.size :]), descriptors
@@ -314,6 +314,23 @@ class NativeHelper:
             if send_error is not None:
                 raise HelperError("Native helper request delivery is uncertain") from send_error
             return payload
+
+    def diagnostics(self) -> dict:
+        from stelvio.tunnel.diagnostics.protocol import (  # noqa: PLC0415
+            SOURCE_LIMIT,
+            decode,
+            validate_snapshot,
+        )
+
+        with self.connect() as connection:
+            connection.sendall(HelperRequest(HelperOperation.DIAGNOSTICS).encode())
+            payload, descriptors = _receive(
+                connection, SOURCE_LIMIT, deadline=monotonic() + self.timeout
+            )
+            if descriptors:
+                _close_descriptors(descriptors)
+                raise HelperError("Diagnostics must not return descriptors")
+            return validate_snapshot(decode(payload))
 
     def status(self) -> HelperOwnershipState:
         payload = self.request(HelperRequest(HelperOperation.STATUS))

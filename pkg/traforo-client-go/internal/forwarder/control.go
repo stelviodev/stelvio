@@ -32,14 +32,16 @@ type command struct {
 	Direct     bool     `json:"direct,omitempty"`
 }
 type reply struct {
-	Version  int    `json:"version"`
-	ID       uint64 `json:"id"`
-	Status   string `json:"status"`
-	Code     string `json:"code,omitempty"`
-	Port     uint16 `json:"port,omitempty"`
-	Observed bool   `json:"observed"`
+	Diagnostics int    `json:"diagnostics,omitempty"`
+	Version     int    `json:"version"`
+	ID          uint64 `json:"id"`
+	Status      string `json:"status"`
+	Code        string `json:"code,omitempty"`
+	Port        uint16 `json:"port,omitempty"`
+	Observed    bool   `json:"observed"`
 }
 type dnsUnit struct {
+	metrics                       *dnsrelay.Metrics
 	generation, attempt, revision uint64
 	relay                         *dnsrelay.Relay
 	claims                        []string
@@ -163,12 +165,15 @@ func (m *manager) control(c command) reply {
 				break
 			}
 			var relay *dnsrelay.Relay
-			relay, err = dnsrelay.New(config)
+			if d == nil {
+				d = &dnsUnit{generation: c.Generation}
+			}
+			if d.metrics == nil {
+				d.metrics = &dnsrelay.Metrics{}
+			}
+			relay, err = dnsrelay.NewWithMetrics(config, d.metrics)
 			if err == nil {
-				if d == nil {
-					d = &dnsUnit{generation: c.Generation}
-					m.dns[c.Unit] = d
-				}
+				m.dns[c.Unit] = d
 				d.relay = relay
 			}
 		} else {
@@ -238,7 +243,7 @@ func (m *manager) closeDNS() {
 
 func (m *manager) serveControl(input io.Reader, output io.Writer) error {
 	encoder := json.NewEncoder(output)
-	if err := encoder.Encode(reply{Version: 2, Status: "ready"}); err != nil {
+	if err := encoder.Encode(reply{Version: 2, Status: "ready", Diagnostics: m.diagnosticsVersion()}); err != nil {
 		return err
 	}
 	scanner := bufio.NewScanner(input)
@@ -250,6 +255,7 @@ func (m *manager) serveControl(input io.Reader, output io.Writer) error {
 		if err == nil && c.ID > lastID {
 			lastID = c.ID
 			r = m.control(c)
+			m.refreshDiagnostics()
 		}
 		if err = encoder.Encode(r); err != nil {
 			return err
