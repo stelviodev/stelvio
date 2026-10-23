@@ -3,6 +3,7 @@ package dnsrelay
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/miekg/dns"
+	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnsutil"
 	"github.com/stelviodev/traforo/internal/protocol"
 	"github.com/xjasonlyu/tun2socks/v2/transport/socks5"
 )
@@ -297,20 +299,16 @@ func exchange(v *view, q *dns.Msg) (*dns.Msg, error) {
 		return nil, err
 	}
 	defer func() { _ = c.Close() }()
-	dc := &dns.Conn{Conn: c}
-	if err = dc.WriteMsg(q); err != nil {
-		return nil, err
-	}
-	a, err := dc.ReadMsg()
+	a, _, err := dns.NewClient().ExchangeWithConn(v.ctx, q, c)
 	if err != nil {
 		return nil, err
 	}
-	if !a.Response || a.Id != q.Id || a.Opcode != q.Opcode || len(a.Question) != len(q.Question) || a.Truncated {
+	if !a.Response || a.ID != q.ID || a.Opcode != q.Opcode || len(a.Question) != len(q.Question) || a.Truncated {
 		return nil, ErrUnavailable
 	}
 	for i, x := range q.Question {
 		y := a.Question[i]
-		if !strings.EqualFold(x.Name, y.Name) || x.Qtype != y.Qtype || x.Qclass != y.Qclass {
+		if !strings.EqualFold(x.Header().Name, y.Header().Name) || dns.RRToType(x) != dns.RRToType(y) || x.Header().Class != y.Header().Class {
 			return nil, ErrUnavailable
 		}
 	}
@@ -322,17 +320,18 @@ func (r *Relay) Answer(wire []byte, udp bool) ([]byte, error) {
 }
 
 func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
-	q := new(dns.Msg)
-	if len(wire) > 65535 || udp && len(wire) > MaxUDP || q.Unpack(wire) != nil || q.Response {
+	q := &dns.Msg{Data: wire}
+	if len(wire) > 65535 || udp && len(wire) > MaxUDP || q.Unpack() != nil || q.Response {
 		return nil, errors.New("malformed DNS request")
 	}
 	a := new(dns.Msg)
-	a.SetRcode(q, dns.RcodeServerFailure)
+	dnsutil.SetReply(a, q)
+	a.Rcode = dns.RcodeServerFailure
 	limit := 65535
 	if udp {
 		limit = 512
-		if e := q.IsEdns0(); e != nil {
-			limit = int(e.UDPSize())
+		if q.UDPSize > 0 {
+			limit = int(q.UDPSize)
 			if limit < 512 {
 				limit = 512
 			}
@@ -342,9 +341,9 @@ func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
 		}
 	}
 	if q.Opcode != dns.OpcodeQuery || len(q.Question) != 1 {
-		a.SetRcode(q, dns.RcodeRefused)
+		a.Rcode = dns.RcodeRefused
 	} else {
-		name, err := canonicalQueryName(q.Question[0].Name)
+		name, err := canonicalQueryName(q.Question[0].Header().Name)
 		r.mu.Lock()
 		v := r.current
 		if o, ok := r.observations[name]; ok && v != nil && o.revision == v.config.Revision {
@@ -354,7 +353,7 @@ func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
 		available := !r.closed && v != nil && v.ctx.Err() == nil
 		r.mu.Unlock()
 		if err != nil || v == nil || !v.config.owns(name) {
-			a.SetRcode(q, dns.RcodeRefused)
+			a.Rcode = dns.RcodeRefused
 		} else if available && upstream {
 			select {
 			case r.slots <- struct{}{}:
@@ -369,9 +368,65 @@ func (r *Relay) answer(wire []byte, udp, upstream bool) ([]byte, error) {
 			}
 		}
 	}
-	a.Compress = true
-	a.Truncate(limit)
-	return a.Pack()
+	if err := packWithinLimit(a, limit); err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), a.Data...), nil
+}
+
+// packWithinLimit preserves the longest response prefix that fits, removing
+// additional, authority, and answer records from the tail when truncation is
+// required. V2 stores packed bytes in Msg.Data and exposes coarse truncation via
+// dnsutil.Truncate, so the relay trims from the tail to retain partial answers.
+func packWithinLimit(m *dns.Msg, limit int) error {
+	if err := m.Pack(); err != nil {
+		return err
+	}
+	if len(m.Data) <= limit {
+		return nil
+	}
+	m.Truncated = true
+	for _, section := range []*[]dns.RR{&m.Extra, &m.Ns, &m.Answer, &m.Pseudo} {
+		for len(*section) > 0 {
+			*section = (*section)[:len(*section)-1]
+			if err := m.Pack(); err != nil {
+				return err
+			}
+			if len(m.Data) <= limit {
+				return nil
+			}
+		}
+	}
+	// A Security bit or UDPSize can synthesize an OPT record after the pseudo
+	// section is empty. The question fits within the protocol minimum of 512 B.
+	m.UDPSize, m.Security = 0, false
+	return m.Pack()
+}
+
+func readTCPMessage(r io.Reader) (*dns.Msg, error) {
+	m := new(dns.Msg)
+	if _, err := m.ReadFrom(r); err != nil {
+		return nil, err
+	}
+	if err := m.Unpack(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func writeTCPMessage(w io.Writer, m *dns.Msg) error {
+	if len(m.Data) == 0 {
+		if err := m.Pack(); err != nil {
+			return err
+		}
+	}
+	var prefix [2]byte
+	binary.BigEndian.PutUint16(prefix[:], uint16(len(m.Data)))
+	if _, err := w.Write(prefix[:]); err != nil {
+		return err
+	}
+	_, err := w.Write(m.Data)
+	return err
 }
 
 // Probe resolves through SOCKS and validates every resource A record against CIDRs.
@@ -384,13 +439,13 @@ func (r *Relay) Probe(revision uint64, hostname string, port uint16, direct bool
 	}
 	q := new(dns.Msg)
 	if hostname == "" {
-		q.SetQuestion(".", dns.TypeSOA)
+		dnsutil.SetQuestion(q, ".", dns.TypeSOA)
 	} else {
 		n, err := protocol.Domain(hostname)
 		if err != nil || n != hostname || !v.config.owns(n) || port == 0 {
 			return ErrAuthorization
 		}
-		q.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
+		dnsutil.SetQuestion(q, dnsutil.Fqdn(hostname), dns.TypeA)
 	}
 	a, err := exchange(v, q)
 	if err != nil {
@@ -406,8 +461,8 @@ func (r *Relay) Probe(revision uint64, hostname string, port uint16, direct bool
 		addresses := []netip.Addr{}
 		for _, rr := range a.Answer {
 			if record, ok := rr.(*dns.A); ok {
-				ip, ok := netip.AddrFromSlice(record.A)
-				if !ok || !v.config.ownsAddress(ip.Unmap()) {
+				ip := record.Addr
+				if !ip.IsValid() || !v.config.ownsAddress(ip.Unmap()) {
 					return ErrAuthorization
 				}
 				addresses = append(addresses, ip.Unmap())
@@ -489,27 +544,22 @@ func (r *Relay) serveTCP() {
 		go func() {
 			defer r.workers.Done()
 			defer func() { <-r.tcpSlots; _ = c.Close(); r.mu.Lock(); delete(r.connections, c); r.mu.Unlock() }()
-			dc := &dns.Conn{Conn: c}
 			for i := 0; i < 8; i++ {
 				_ = c.SetDeadline(time.Now().Add(Timeout))
-				q, err := dc.ReadMsg()
+				q, err := readTCPMessage(c)
 				if err != nil {
 					return
 				}
-				wire, err := q.Pack()
+				answer, err := r.Answer(q.Data, false)
 				if err != nil {
 					return
 				}
-				answer, err := r.Answer(wire, false)
-				if err != nil {
-					return
-				}
-				a := new(dns.Msg)
-				if a.Unpack(answer) != nil {
+				a := &dns.Msg{Data: answer}
+				if a.Unpack() != nil {
 					return
 				}
 				_ = c.SetDeadline(time.Now().Add(Timeout))
-				if dc.WriteMsg(a) != nil {
+				if writeTCPMessage(c, a) != nil {
 					return
 				}
 			}
@@ -522,25 +572,20 @@ func (r *Relay) serveTCP() {
 func (r *Relay) answerTCPOverload(c net.Conn) {
 	defer func() { _ = c.Close() }()
 	_ = c.SetDeadline(time.Now().Add(Timeout))
-	dc := &dns.Conn{Conn: c}
-	q, err := dc.ReadMsg()
+	q, err := readTCPMessage(c)
 	if err != nil {
 		return
 	}
-	wire, err := q.Pack()
+	answer, err := r.answer(q.Data, false, false)
 	if err != nil {
 		return
 	}
-	answer, err := r.answer(wire, false, false)
-	if err != nil {
-		return
-	}
-	a := new(dns.Msg)
-	if err = a.Unpack(answer); err != nil {
+	a := &dns.Msg{Data: answer}
+	if err = a.Unpack(); err != nil {
 		return
 	}
 	_ = c.SetDeadline(time.Now().Add(Timeout))
-	_ = dc.WriteMsg(a)
+	_ = writeTCPMessage(c, a)
 }
 
 func (r *Relay) Close() {
