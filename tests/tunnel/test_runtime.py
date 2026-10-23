@@ -233,6 +233,8 @@ credentials.boto3.Session=factory
 class Helper:
     def __init__(self,**kwargs): pass
     def status(self): return SimpleNamespace(owned=False,uncertain=False,units=())
+    def diagnostics(self):
+        return {"version":1,"epoch":"fixture-helper","sample_monotonic_ns":1,"units":[]}
     def acquire(self,session):
         carrier,peer=socket.socketpair(socket.AF_UNIX,socket.SOCK_DGRAM)
         lease=SimpleNamespace(carrier=carrier,connection=peer,closed=False)
@@ -246,6 +248,9 @@ class Worker:
         self.status=VpcStatus(network.identity,"ready",1)
         self.transport=SimpleNamespace(stop_local=lambda:None)
     def start(self): pass
+    def diagnostics(self):
+        from dataclasses import asdict
+        return asdict(self.status)
     def close(self):
         marker=os.environ.get("STLV_TEST_WORKER_CLOSE_MARKER")
         if marker:
@@ -363,6 +368,12 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
                 "detail": None,
             }
         ]
+        from stelvio.tunnel.diagnostics.runtime import directory, snapshot
+
+        diagnostics = snapshot(directory() / f"{description.session_id}.sock")
+        assert diagnostics["session"]["vpcs"][0]["state"] == "ready"
+        assert diagnostics["sources"]["forwarder"]["data"]["version"] == 1
+        assert "HANDLER_KEY" not in json.dumps(diagnostics)
         if owner_death:
             # Closing the parent's owner lease simulates abrupt owner loss while
             # leaving the control socket open. The orphan watchdog must wake the

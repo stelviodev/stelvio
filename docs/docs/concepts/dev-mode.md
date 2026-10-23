@@ -226,3 +226,31 @@ Dev mode supports the same payload limits as [AWS Lambda](https://docs.aws.amazo
 
 - **6 MB** for request and response (synchronous invocations)
 - **1 MB** for asynchronous invocations
+
+
+### Diagnose local tunnel problems
+
+Run these commands from any directory, as your ordinary user:
+
+```bash
+stlv tunnel diagnose
+stlv tunnel diagnose --json > tunnel-report.json
+```
+
+Both commands collect the same local report. It includes versions, installed
+artifacts, helper ownership, active sessions, readiness checks, packet/TCP/DNS
+statistics, interfaces, routes, resolvers, network-service DNS settings, proxy
+settings, accessible firewall state, known process identities, and recent events.
+
+Missing or unsupported sources have a status and reason. Without an active
+session, the command still collects helper, artifact, and operating-system facts.
+Old pinned Traforo images do not provide the new counters; those values remain
+unavailable until a compatible release is installed. A helper-active interface
+does not prove that a VPC resource is ready. One snapshot provides cumulative
+traffic counts, not throughput.
+
+The command does not start a tunnel, install software, request administrator
+access, query AWS, or change networking. Local reports include resource identities
+and network addresses. Review a report before sharing it. Credentials, private
+keys, tokens, helper capabilities, raw logs, process arguments, and environment
+values are excluded. Uploads are not provided by this command.
