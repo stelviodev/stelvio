@@ -314,17 +314,135 @@ def _database_resources(app: str, env: str, *, sdk) -> list[str]:
     return remaining
 
 
-def _lambda_resources(prefix: str, *, sdk) -> list[str]:
+def _proof_lambda_prefix(app: str, env: str) -> str:
+    if (
+        not app
+        or not env
+        or any(
+            not (character.isalnum() or character in "-_")
+            for value in (app, env)
+            for character in value
+        )
+    ):
+        raise ValueError("Proof application and environment must be safe path components")
+    return f"{app}-{env}-"
+
+
+def _lambda_function_names(prefix: str, *, sdk) -> list[str]:
     functions = sdk.client("lambda")
-    remaining = []
-    for page in _pages(functions, "list_functions"):
-        remaining.extend(
-            f"Lambda function {function.get('FunctionName', 'unknown')}"
-            for function in page.get("Functions", [])
-            if function.get("FunctionName", "").startswith(prefix)
+    return sorted(
+        function.get("FunctionName", "")
+        for page in _pages(functions, "list_functions")
+        for function in page.get("Functions", [])
+        if function.get("FunctionName", "").startswith(prefix)
+    )
+
+
+def _lambda_log_group_names(
+    prefix: str, *, sdk, function_names: Sequence[str] | None = None
+) -> list[str]:
+    logs = sdk.client("logs")
+    log_group_prefix = f"/aws/lambda/{prefix}"
+    expected_names = (
+        {f"/aws/lambda/{name}" for name in function_names} if function_names is not None else None
+    )
+    return sorted(
+        group["logGroupName"]
+        for page in _pages(logs, "describe_log_groups", logGroupNamePrefix=log_group_prefix)
+        for group in page.get("logGroups", [])
+        if group.get("logGroupName", "").startswith(log_group_prefix)
+        and (expected_names is None or group["logGroupName"] in expected_names)
+    )
+
+
+def _validate_proof_lambda_names(
+    app: str, env: str, function_names: Sequence[str]
+) -> tuple[str, ...]:
+    prefix = _proof_lambda_prefix(app, env)
+    names = tuple(function_names)
+    if any(not isinstance(name, str) or not name.startswith(prefix) for name in names) or len(
+        set(names)
+    ) != len(names):
+        raise ValueError("Lambda function names must be unique and owned by the proof app")
+    return names
+
+
+def assert_proof_lambda_namespace_empty(*, sdk, app: str, env: str) -> None:
+    """Refuse a proof namespace that already contains Lambda resources."""
+    prefix = _proof_lambda_prefix(app, env)
+    bounded_sdk = _BoundedSession(sdk, monotonic() + 30)
+    functions = _lambda_function_names(prefix, sdk=bounded_sdk)
+    groups = _lambda_log_group_names(prefix, sdk=bounded_sdk)
+    if functions or groups:
+        raise RuntimeError(
+            "Refusing to reuse a proof Lambda namespace that is not empty: "
+            + ", ".join([*(f"function {name}" for name in functions), *groups])
         )
 
-    return remaining
+
+def validate_proof_lambda_function_names(
+    *, app: str, env: str, function_names: Sequence[str]
+) -> tuple[str, ...]:
+    """Validate exact Lambda names returned by the deployed proof stack outputs."""
+    return _validate_proof_lambda_names(app, env, function_names)
+
+
+def capture_proof_lambda_log_groups(
+    *, sdk, app: str, env: str, function_names: Sequence[str]
+) -> tuple[str, ...]:
+    """Capture log groups only for Functions deployed by this proof session."""
+    prefix = _proof_lambda_prefix(app, env)
+    names = _validate_proof_lambda_names(app, env, function_names)
+    if not names:
+        return ()
+    bounded_sdk = _BoundedSession(sdk, monotonic() + 30)
+    return tuple(_lambda_log_group_names(prefix, sdk=bounded_sdk, function_names=names))
+
+
+def delete_proof_lambda_log_groups(
+    *, sdk, app: str, env: str, function_names: Sequence[str], log_group_names: Sequence[str]
+) -> None:
+    """Delete only captured groups for known proof Functions after they are gone."""
+    prefix = _proof_lambda_prefix(app, env)
+    functions = _validate_proof_lambda_names(app, env, function_names)
+    names = tuple(log_group_names)
+    owned_groups = {f"/aws/lambda/{name}" for name in functions}
+    if (
+        any(not isinstance(name, str) for name in names)
+        or len(set(names)) != len(names)
+        or not set(names) <= owned_groups
+    ):
+        raise ValueError("Lambda log groups must match unique Functions deployed by the proof app")
+    if not names:
+        return
+
+    deadline = monotonic() + ABSENCE_TIMEOUT
+    while True:
+        bounded_sdk = _BoundedSession(sdk, deadline)
+        remaining_functions = set(_lambda_function_names(prefix, sdk=bounded_sdk)) & set(functions)
+        if not remaining_functions:
+            break
+        delay = min(ABSENCE_POLL_INTERVAL, deadline - monotonic())
+        if delay <= 0:
+            raise RuntimeError(
+                "Refusing to delete proof Lambda log groups while Functions remain: "
+                + ", ".join(sorted(remaining_functions))
+            )
+        sleep(delay)
+
+    logs = bounded_sdk.client("logs")
+    for name in names:
+        try:
+            logs.delete_log_group(logGroupName=name)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != "ResourceNotFoundException":
+                raise
+
+
+def _lambda_resources(prefix: str, *, sdk) -> list[str]:
+    functions = [f"Lambda function {name}" for name in _lambda_function_names(prefix, sdk=sdk)]
+    groups = [f"Lambda log group {name}" for name in _lambda_log_group_names(prefix, sdk=sdk)]
+    return [*functions, *groups]
 
 
 def _iam_resources(prefix: str, *, sdk) -> list[str]:

@@ -35,12 +35,15 @@ def test_mixed_dev_proof_project_covers_enabled_disabled_and_plain_functions(tmp
     assert "plain_function = Function('plain'" in source
     assert "export_output('function3_url'" in source
     assert "export_output('function4_url'" in source
+    assert "export_output('function3_name'" in source
+    assert "export_output('function4_name'" in source
 
 
 def test_non_vpc_proof_project_has_no_vpc_resource(tmp_path):
     source = _write_cli_session_project(tmp_path, no_vpc=True)
 
     assert "Function('plain', handler='handlers/plain.handler'" in source
+    assert "export_output('function1_name'" in source
     assert "Vpc(" not in source
 
 
@@ -126,7 +129,10 @@ def _empty_session() -> _Session:
         }
     )
     ssm = _Client(pages={"list_documents": [{"DocumentIdentifiers": []}]})
-    return _Session({"ec2": ec2, "docdb": docdb, "lambda": functions, "iam": iam, "ssm": ssm})
+    logs = _Client(pages={"describe_log_groups": [{"logGroups": []}]})
+    return _Session(
+        {"ec2": ec2, "docdb": docdb, "lambda": functions, "iam": iam, "ssm": ssm, "logs": logs}
+    )
 
 
 def test_audit_covers_application_and_bastion_supporting_resources():
@@ -178,6 +184,14 @@ def test_audit_covers_application_and_bastion_supporting_resources():
     session.clients["lambda"].pages["list_functions"] = [
         {"Functions": [{"FunctionName": "demo-test-function"}]}
     ]
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {
+            "logGroups": [
+                {"logGroupName": "/aws/lambda/demo-test-function"},
+                {"logGroupName": "/aws/lambda/demo-production-function"},
+            ]
+        }
+    ]
     session.clients["iam"].pages.update(
         {
             "list_roles": [{"Roles": [{"RoleName": "demo-test-role"}]}],
@@ -209,6 +223,7 @@ def test_audit_covers_application_and_bastion_supporting_resources():
         "DocumentDB DBSubnetGroupName demo-test-subnets",
         "DocumentDB DBClusterParameterGroupName demo-test-params",
         "Lambda function demo-test-function",
+        "Lambda log group /aws/lambda/demo-test-function",
         "IAM RoleName demo-test-role",
         "IAM InstanceProfileName demo-test-profile",
         "IAM PolicyName demo-test-policy",
@@ -248,6 +263,286 @@ def test_audit_accepts_terminated_instances_deleted_nat_and_filters_vpc_lookup()
     assert all(
         "VpcIds" not in kwargs for operation, kwargs in ec2.calls if operation == "describe_vpcs"
     )
+
+
+def test_audit_finds_orphaned_lambda_log_groups_after_functions_are_gone():
+    session = _empty_session()
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {"logGroups": [{"logGroupName": "/aws/lambda/demo-test-removed-function"}]}
+    ]
+
+    with pytest.raises(
+        AssertionError, match="Lambda log group /aws/lambda/demo-test-removed-function"
+    ):
+        assert_tunnel.assert_application_absent(
+            "demo",
+            "test",
+            sdk=session,
+            options=assert_tunnel.AbsenceAuditOptions(timeout=0),
+        )
+
+
+def test_proof_namespace_preflight_rejects_existing_function_or_log_group():
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-owned-by-other"}]}
+    ]
+
+    with pytest.raises(RuntimeError, match="function demo-test-owned-by-other"):
+        assert_tunnel.assert_proof_lambda_namespace_empty(sdk=session, app="demo", env="test")
+
+    session.clients["lambda"].pages["list_functions"] = [{"Functions": []}]
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {"logGroups": [{"logGroupName": "/aws/lambda/demo-test-orphan"}]}
+    ]
+    with pytest.raises(RuntimeError, match="/aws/lambda/demo-test-orphan"):
+        assert_tunnel.assert_proof_lambda_namespace_empty(sdk=session, app="demo", env="test")
+
+
+def test_proof_function_names_are_validated_from_deployment_outputs():
+    assert assert_tunnel.validate_proof_lambda_function_names(
+        app="demo",
+        env="test",
+        function_names=("demo-test-api", "demo-test-disabled", "demo-test-plain"),
+    ) == ("demo-test-api", "demo-test-disabled", "demo-test-plain")
+    with pytest.raises(ValueError, match="owned by the proof app"):
+        assert_tunnel.validate_proof_lambda_function_names(
+            app="demo", env="test", function_names=("other-test-api",)
+        )
+
+
+def test_proof_log_group_capture_matches_only_deployed_function_names():
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-function"}]}
+    ]
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {
+            "logGroups": [
+                {"logGroupName": "/aws/lambda/demo-test-function"},
+                {"logGroupName": "/aws/lambda/demo-test-extra"},
+                {"logGroupName": "/aws/lambda/demo-prod-function"},
+            ]
+        }
+    ]
+
+    assert assert_tunnel.capture_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=("demo-test-function",),
+    ) == ("/aws/lambda/demo-test-function",)
+    assert session.clients["logs"].calls == [
+        ("describe_log_groups", {"logGroupNamePrefix": "/aws/lambda/demo-test-"})
+    ]
+
+
+def test_proof_log_group_capture_rejects_an_untracked_function_name():
+    session = _empty_session()
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {"logGroups": [{"logGroupName": "/aws/lambda/demo-test-other"}]}
+    ]
+
+    assert (
+        assert_tunnel.capture_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=("demo-test-function",),
+        )
+        == ()
+    )
+
+
+def test_same_prefix_function_created_after_preflight_is_never_deleted():
+    session = _empty_session()
+    proof_names = ("demo-test-function",)
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {
+            "logGroups": [
+                {"logGroupName": "/aws/lambda/demo-test-function"},
+                {"logGroupName": "/aws/lambda/demo-test-concurrent"},
+            ]
+        }
+    ]
+    captured = assert_tunnel.capture_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=proof_names,
+    )
+    assert captured == ("/aws/lambda/demo-test-function",)
+
+    # This function appeared after preflight and is absent from the names in
+    # this deployment's outputs. Its similarly prefixed group must stay intact.
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-concurrent"}]}
+    ]
+    session.clients["logs"].direct["delete_log_group"] = {}
+    assert_tunnel.delete_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=proof_names,
+        log_group_names=captured,
+    )
+    assert session.clients["logs"].calls[-1] == (
+        "delete_log_group",
+        {"logGroupName": "/aws/lambda/demo-test-function"},
+    )
+    assert all(
+        kwargs["logGroupName"] != "/aws/lambda/demo-test-concurrent"
+        for operation, kwargs in session.clients["logs"].calls
+        if operation == "delete_log_group"
+    )
+
+
+def test_proof_log_group_cleanup_waits_for_function_absence_and_deletes_only_captured_names(
+    monkeypatch,
+):
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-function"}]}
+    ]
+
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_TIMEOUT", 0)
+    with pytest.raises(RuntimeError, match="while Functions remain"):
+        assert_tunnel.delete_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=("demo-test-function",),
+            log_group_names=("/aws/lambda/demo-test-function",),
+        )
+
+    assert session.clients["logs"].calls == []
+
+    session.clients["lambda"].pages["list_functions"] = [{"Functions": []}]
+    session.clients["logs"].direct["delete_log_group"] = {}
+    assert_tunnel.delete_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=("demo-test-function", "demo-test-plain"),
+        log_group_names=(
+            "/aws/lambda/demo-test-function",
+            "/aws/lambda/demo-test-plain",
+        ),
+    )
+    assert session.clients["logs"].calls == [
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-function"}),
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-plain"}),
+    ]
+
+
+def test_proof_log_group_cleanup_waits_until_functions_disappear(monkeypatch):
+    session = _empty_session()
+    clock = _Clock()
+    monkeypatch.setattr(assert_tunnel, "monotonic", clock.monotonic)
+    monkeypatch.setattr(assert_tunnel, "sleep", clock.sleep)
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_TIMEOUT", 5)
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_POLL_INTERVAL", 2)
+    function_states = iter([["demo-test-function"], []])
+    monkeypatch.setattr(
+        assert_tunnel,
+        "_lambda_function_names",
+        lambda *_args, **_kwargs: next(function_states),
+    )
+    session.clients["logs"].direct["delete_log_group"] = {}
+
+    assert_tunnel.delete_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=("demo-test-function",),
+        log_group_names=("/aws/lambda/demo-test-function",),
+    )
+
+    assert clock.now == 2
+    assert clock.sleeps == [2]
+    assert session.clients["logs"].calls == [
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-function"})
+    ]
+
+
+@pytest.mark.parametrize(
+    ("function_names", "log_group_names"),
+    [
+        (("demo-test-function",), ("/aws/lambda/demo-production-function",)),
+        (("demo-test-function",), ("/aws/lambda/demo-test-other",)),
+    ],
+)
+def test_proof_log_group_cleanup_rejects_names_outside_the_deployed_function_set(
+    function_names, log_group_names
+):
+    session = _empty_session()
+    with pytest.raises(ValueError, match="match unique Functions"):
+        assert_tunnel.delete_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=function_names,
+            log_group_names=log_group_names,
+        )
+    assert session.clients["logs"].calls == []
+
+
+def test_dev_destroy_captures_then_removes_log_groups_before_absence_audit(monkeypatch):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._deployed = True
+    session.no_vpc = True
+    session._mode = "dev"
+    session.process = None
+    session._outputs = {}
+    session.app = "demo"
+    session.environment_name = "test"
+    session._proof_lambda_function_names = ("demo-test-plain",)
+    session.aws = object()
+    operations = []
+    session.command = lambda *args, **kwargs: operations.append("destroy")
+    session._assert_aws_resources_absent = lambda: operations.append("audit")
+    session._clear_proof_host_trust = lambda: operations.append("clear-trust")
+
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", SimpleNamespace(exists=lambda: False))
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", lambda **_kwargs: ())
+    monkeypatch.setattr(
+        cli_session,
+        "capture_proof_lambda_log_groups",
+        lambda **_kwargs: operations.append("capture") or ("/aws/lambda/demo-test-plain",),
+    )
+    monkeypatch.setattr(
+        cli_session,
+        "delete_proof_lambda_log_groups",
+        lambda **_kwargs: operations.append("delete"),
+    )
+
+    session.destroy()
+
+    assert operations == ["capture", "destroy", "delete", "audit", "clear-trust"]
+
+
+def test_dev_cleanup_deletes_only_log_groups_captured_before_destroy(monkeypatch):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._mode = "dev"
+    session.aws = object()
+    session.app = "demo"
+    session.environment_name = "test"
+    deleted = []
+    monkeypatch.setattr(
+        cli_session,
+        "capture_proof_lambda_log_groups",
+        lambda **_kwargs: pytest.fail("Cleanup must not widen the captured deletion set"),
+    )
+    monkeypatch.setattr(
+        cli_session,
+        "delete_proof_lambda_log_groups",
+        lambda **kwargs: deleted.extend(kwargs["log_group_names"]),
+    )
+
+    errors = session._remove_dev_lambda_log_groups(("/aws/lambda/demo-test-before-destroy",))
+
+    assert errors == []
+    assert deleted == ["/aws/lambda/demo-test-before-destroy"]
 
 
 def test_captures_exact_bastion_volume_ids_before_destroy():
