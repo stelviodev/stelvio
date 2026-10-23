@@ -152,6 +152,17 @@ func TestTwoVPCLargeStreamsAndHalfClose(t *testing.T) {
 	if err := transfer(2); err != nil {
 		t.Fatalf("healthy VPC after reconnect: %v", err)
 	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for (m.totals[1].Active.Load() != 0 || m.totals[2].Active.Load() != 0) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if m.totals[1].Opened.Load() != 2 || m.totals[2].Opened.Load() != 3 {
+		t.Fatalf("incorrect per-unit stream totals: %v %v", m.totals[1].snapshot(), m.totals[2].snapshot())
+	}
+	if m.totals[1].Active.Load() != 0 || m.totals[2].Active.Load() != 0 {
+		t.Fatal("completed streams remain active")
+	}
 }
 
 type queuePackets struct {

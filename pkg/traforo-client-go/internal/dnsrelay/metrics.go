@@ -39,3 +39,10 @@ func (m *Metrics) duration(value uint64) {
 		}
 	}
 }
+
+// UpstreamEnabled reports the current generation's gate, not network reachability.
+func (r *Relay) UpstreamEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.closed && r.current != nil && r.current.ctx.Err() == nil
+}

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stelviodev/traforo/internal/diagnostics"
 	"github.com/stelviodev/traforo/internal/protocol"
 
 	"github.com/xjasonlyu/tun2socks/v2/core"
@@ -34,6 +35,7 @@ type packetCarrier interface {
 }
 
 type unit struct {
+	metrics     *tcpMetrics
 	id          uint32
 	generation  uint64
 	proxy       string
@@ -126,6 +128,9 @@ func (u *unit) HandleUDP(connection adapter.UDPConn) {
 func (u *unit) HandleTCP(connection adapter.TCPConn) {
 	u.mu.Lock()
 	if u.ctx.Err() != nil {
+		if u.metrics != nil {
+			u.metrics.Refused.Add(1)
+		}
 		u.mu.Unlock()
 		_ = connection.Close() // Best-effort close while refusing a new connection.
 		return
@@ -134,12 +139,30 @@ func (u *unit) HandleTCP(connection adapter.TCPConn) {
 	case u.slots <- struct{}{}:
 		u.workers.Add(1)
 	default:
+		if u.metrics != nil {
+			u.metrics.Refused.Add(1)
+		}
 		u.mu.Unlock()
 		_ = connection.Close() // Best-effort close after the worker limit is reached.
 		return
 	}
 	u.mu.Unlock()
+	if u.metrics != nil {
+		u.metrics.Opened.Add(1)
+		u.metrics.Active.Add(1)
+	}
 	go func() {
+		succeeded := false
+		defer func() {
+			if u.metrics != nil {
+				u.metrics.Active.Add(^uint64(0))
+				if succeeded {
+					u.metrics.Completed.Add(1)
+				} else {
+					u.metrics.Failed.Add(1)
+				}
+			}
+		}()
 		defer u.workers.Done()
 		defer func() { <-u.slots }()
 		if !u.retain(connection) {
@@ -181,7 +204,7 @@ func (u *unit) HandleTCP(connection adapter.TCPConn) {
 		if err = remote.SetDeadline(time.Time{}); err != nil {
 			return
 		}
-		done := make(chan struct{})
+		done := make(chan error, 1)
 		var once sync.Once
 		var finishErr error
 		finish := func() error {
@@ -196,19 +219,20 @@ func (u *unit) HandleTCP(connection adapter.TCPConn) {
 			return finishErr
 		}
 		go func() {
-			_, _ = io.Copy(remote, connection) // Stream termination is handled by half-close/deadline below.
+			_, copyError := io.Copy(remote, connection)
 			if half, ok := remote.(interface{ CloseWrite() error }); ok {
 				_ = half.CloseWrite()
 			}
 			_ = finish()
-			close(done)
+			done <- copyError
 		}()
-		_, _ = io.Copy(connection, remote) // Stream termination is handled by half-close/deadline below.
+		_, copyError := io.Copy(connection, remote) // Stream termination is handled by half-close/deadline below.
 		if half, ok := any(connection).(interface{ CloseWrite() error }); ok {
 			_ = half.CloseWrite()
 		}
 		_ = finish()
-		<-done
+		upstreamError := <-done
+		succeeded = copyError == nil && upstreamError == nil
 	}()
 }
 func (u *unit) close() {
@@ -232,13 +256,17 @@ func (u *unit) close() {
 }
 
 type manager struct {
-	mu              sync.Mutex
-	writer          sync.Mutex
-	units           map[uint32]*unit
-	generations     map[uint32]uint64 // Last accepted transport attempt by unit.
-	unitGenerations map[uint32]uint64 // Last helper generation; retained to fence old carrier frames.
-	carrier         *net.UnixConn
-	dns             map[uint32]*dnsUnit
+	diagnosticsEnabled bool
+	diagMu             sync.Mutex
+	diagUnits          []diagnosticUnit
+	totals             map[uint32]*tcpMetrics
+	mu                 sync.Mutex
+	writer             sync.Mutex
+	units              map[uint32]*unit
+	generations        map[uint32]uint64 // Last accepted transport attempt by unit.
+	unitGenerations    map[uint32]uint64 // Last helper generation; retained to fence old carrier frames.
+	carrier            *net.UnixConn
+	dns                map[uint32]*dnsUnit
 }
 
 func prefixes(values []string) ([]netip.Prefix, error) {
@@ -314,7 +342,13 @@ func (m *manager) apply(c command) error {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	u := &unit{id: c.Unit, generation: c.Generation, proxy: c.Proxy, cidrs: ranges, packets: make(chan []byte, packetQueue), ctx: ctx, cancel: cancel, carrier: m.carrier, writer: &m.writer, connections: make(map[net.Conn]struct{}), slots: make(chan struct{}, maxStreamsPerUnit)}
+	if m.totals == nil {
+		m.totals = make(map[uint32]*tcpMetrics)
+	}
+	if m.totals[c.Unit] == nil {
+		m.totals[c.Unit] = &tcpMetrics{}
+	}
+	u := &unit{metrics: m.totals[c.Unit], id: c.Unit, generation: c.Generation, proxy: c.Proxy, cidrs: ranges, packets: make(chan []byte, packetQueue), ctx: ctx, cancel: cancel, carrier: m.carrier, writer: &m.writer, connections: make(map[net.Conn]struct{}), slots: make(chan struct{}, maxStreamsPerUnit)}
 	endpoint, err := iobased.New(u, mtu, 0)
 	if err != nil {
 		cancel()
@@ -357,6 +391,9 @@ func (m *manager) dispatch() {
 			select {
 			case u.packets <- packet:
 			default:
+				if u.metrics != nil {
+					u.metrics.QueueDrops.Add(1)
+				}
 			}
 		}
 		m.mu.Unlock()
@@ -390,5 +427,11 @@ func serve(carrier *net.UnixConn, input io.Reader, output io.Writer) error {
 		m.close()
 		<-dispatchDone
 	}()
+	diagnosticConnection := inheritedDiagnostics()
+	if diagnosticConnection != nil {
+		m.diagnosticsEnabled = true
+		defer func() { _ = diagnosticConnection.Close() }()
+		go diagnostics.Serve(diagnosticConnection, m.diagnosticSnapshot)
+	}
 	return m.serveControl(input, output)
 }
