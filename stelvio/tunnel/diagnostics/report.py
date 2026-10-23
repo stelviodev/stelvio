@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from rich.console import Console
 
 from stelvio.tunnel.diagnostics.protocol import observation, timestamp
@@ -216,7 +218,7 @@ def helper() -> dict:
     client = NativeHelper(timeout=0.5)
     try:
         return observation(client.diagnostics())
-    except (OSError, RuntimeError, ValueError, EOFError):
+    except (OSError, RuntimeError, ValueError, TypeError, EOFError):
         try:
             value = asdict(client.status())
             for unit in value["units"]:
@@ -354,6 +356,13 @@ def _resolver_files(sections: dict) -> dict:
     return observation({"files": result, "omitted": max(0, len(candidates) - len(result))})
 
 
+def _source_result(collect: Callable[[], dict]) -> dict:
+    try:
+        return collect()
+    except Exception as error:
+        return observation(status="failed", code=type(error).__name__)
+
+
 def collect() -> dict:
     started = time.monotonic()
     deadline = started + 15
@@ -386,17 +395,17 @@ def collect() -> dict:
             sections[futures[future]] = observation(status="failed", code="report-deadline")
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    sections["helper"] = _helper_observation(sections, deadline)
+    sections["helper"] = _source_result(lambda: _helper_observation(sections, deadline))
     if sys.platform == "darwin" and time.monotonic() < deadline:
         try:
             sections["resolver_files"] = _resolver_files(sections)
-        except (OSError, ValueError, TypeError, KeyError) as error:
+        except Exception as error:
             sections["resolver_files"] = observation(status="failed", code=type(error).__name__)
         try:
             _network_details(report, deadline)
-        except (OSError, ValueError, TypeError, KeyError) as error:
+        except Exception as error:
             sections["network_details"] = observation(status="failed", code=type(error).__name__)
-        sections["processes"] = _processes(sections)
+        sections["processes"] = _source_result(lambda: _processes(sections))
     report["duration_seconds"] = round(time.monotonic() - started, 3)
     report["truncated"] = False
     return bound_report(report)

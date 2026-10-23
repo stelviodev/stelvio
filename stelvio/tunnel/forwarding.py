@@ -72,7 +72,9 @@ class Forwarding:
             hello = self._reply()
             if hello.get("version") != CONTROL_VERSION or hello.get("status") != "ready":
                 raise RuntimeError("Nonroot forwarder failed to start")  # noqa: TRY301
-            if hello.get("diagnostics") != 1:
+            support = hello.get("diagnostics")
+            self._diagnostics_supported = type(support) is int and support == 1
+            if not self._diagnostics_supported:
                 self._diagnostics.close()
         except BaseException:
             self.close()
@@ -246,6 +248,8 @@ class Forwarding:
         )
 
     def diagnostics(self) -> dict:
+        if not self._diagnostics_supported:
+            raise NotImplementedError("Forwarder statistics are unsupported by this image")
         from stelvio.tunnel.diagnostics.protocol import (  # noqa: PLC0415
             SOURCE_LIMIT,
             receive,

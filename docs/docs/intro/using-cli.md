@@ -435,3 +435,19 @@ See [Environments](../concepts/environments.md) for details on personal vs share
 
 - Use `stlv COMMAND --help` for command details
 - Use `-v` or `-vv` flags for more detailed error information
+
+
+### Collect tunnel diagnostics
+
+```bash
+stlv tunnel diagnose
+stlv tunnel diagnose --json > tunnel-report.json
+```
+
+Run the command from any directory as your ordinary user. Both forms collect the
+same local data, including partial results when a source is unavailable. The
+command does not start networking, query AWS, install artifacts, or change host
+routes and DNS. Statistics need a compatible Traforo image; older images remain
+usable with those fields unavailable. Local reports include network addresses
+and resource identities. Review the report before sharing it. Uploads are not
+included.

@@ -324,9 +324,16 @@ class NativeHelper:
 
         with self.connect() as connection:
             connection.sendall(HelperRequest(HelperOperation.DIAGNOSTICS).encode())
-            payload, descriptors = _receive(
-                connection, SOURCE_LIMIT, deadline=monotonic() + self.timeout
-            )
+            try:
+                payload, descriptors = _receive(
+                    connection, SOURCE_LIMIT, deadline=monotonic() + self.timeout
+                )
+            except HelperError as error:
+                if error.status == HelperStatus.INVALID:
+                    raise NotImplementedError(
+                        "Helper statistics are unsupported by this image"
+                    ) from error
+                raise
             if descriptors:
                 _close_descriptors(descriptors)
                 raise HelperError("Diagnostics must not return descriptors")
