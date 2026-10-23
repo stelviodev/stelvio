@@ -106,11 +106,11 @@ tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip them
 env vars are missing. `run_all.sh` is the single source of truth for test/worker counts —
 they're picked so tests divide evenly with no straggler; update them there when you add tests.
 
-The VPC tier holds every test that constructs a `Vpc` (VPC tests, VPC Function tests, and
-DocumentDB). The `integration_vpc` marker takes precedence over the standard `integration`
-marker, so `--integration` skips VPC tests and `--integration-vpc` selects them. Do not put
-VPC creates back in the standard tier: the account allows 5 VPCs per region and already has
-a default VPC.
+The VPC tier holds every test that constructs a `Vpc` (VPC tests and VPC Function
+tests). The `integration_vpc` marker takes precedence over the standard `integration`
+marker, so `--integration` skips VPC tests and `--integration-vpc` selects them. Do not
+put VPC creates back in the standard tier: the account allows 5 VPCs per region and
+already has a default VPC.
 
 ## Running them
 

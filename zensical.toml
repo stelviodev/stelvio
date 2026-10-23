@@ -120,7 +120,6 @@ Components = [
         { "Cognito" = "docs/components/aws/cognito.md" },
         { "AppSync" = "docs/components/aws/appsync.md" },
         { "Vpc" = "docs/components/aws/vpc.md" },
-        { "DocumentDB" = "docs/components/aws/document-db.md" },
     ] },
 ]
 
