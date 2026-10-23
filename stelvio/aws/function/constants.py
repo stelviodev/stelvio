@@ -7,6 +7,7 @@ LAMBDA_EXCLUDED_FILES = [".DS_Store", "stlv_resources.py"]  # exact file matches
 LAMBDA_EXCLUDED_DIRS = ["__pycache__"]
 LAMBDA_EXCLUDED_EXTENSIONS = [".pyc"]
 MAX_LAMBDA_LAYERS = 5
+MAX_DURABLE_EVENT_SOURCE_TIMEOUT = 900
 LAMBDA_BASIC_EXECUTION_ROLE = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 LAMBDA_VPC_ACCESS_EXECUTION_ROLE = (
     "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"

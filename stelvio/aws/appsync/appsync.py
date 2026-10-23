@@ -492,7 +492,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
             if auth_function is None:
                 raise RuntimeError("Primary LambdaAuth function was not created")
             api_args["lambda_authorizer_config"] = self._config.auth.to_authorizer_config(
-                auth_function.resources.function.arn
+                auth_function.invocation_arn
             )
 
         if self._config.additional_auth:
@@ -500,7 +500,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                 _build_additional_auth_provider(
                     auth,
                     lambda_authorizer_arn=(
-                        additional_auth_functions[index].resources.function.arn
+                        additional_auth_functions[index].invocation_arn
                         if index in additional_auth_functions
                         else None
                     ),
@@ -540,7 +540,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     {},
                     {
                         "action": "lambda:InvokeFunction",
-                        "function": auth_function.function_name,
+                        "function": auth_function.invocation_name,
                         "principal": "appsync.amazonaws.com",
                         "source_arn": graphql_api.arn,
                     },
@@ -557,7 +557,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
                     {},
                     {
                         "action": "lambda:InvokeFunction",
-                        "function": function.function_name,
+                        "function": function.invocation_name,
                         "principal": "appsync.amazonaws.com",
                         "source_arn": graphql_api.arn,
                     },

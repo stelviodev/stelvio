@@ -46,6 +46,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
                 self.resource_opts, pulumi.ResourceOptions(aliases=old_name_aliases(old_name))
             ),
             _as_is,
+            qualifier=self.function.invocation_qualifier,
         )
 
         # Create OAC if using IAM authentication (secure by default)
@@ -130,7 +131,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         return pulumi_aws.lambda_.Permission(
             context().prefix(f"{self.function.name}-cloudfront-permission-{self.idx}"),
             action="lambda:InvokeFunctionUrl",
-            function=self.function.resources.function.name,
+            function=self.function.invocation_name,
             principal="cloudfront.amazonaws.com",
             source_arn=distribution.arn,
             function_url_auth_type="AWS_IAM",

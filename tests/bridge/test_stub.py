@@ -780,3 +780,126 @@ def test_chunked_response_gets_reassembled(
 
     # Verify complete response was reassembled correctly
     assert result == {"statusCode": 200, "body": large_data}
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"Status": "PENDING"},
+        {"Status": "RETRY"},
+        {"Status": "SUCCEEDED", "Result": "123"},
+        {"Status": "FAILED", "Error": {"ErrorType": "UserError", "ErrorMessage": "failed"}},
+    ],
+)
+def test_durable_stub_returns_sdk_envelope_unchanged_and_uses_deadline(
+    reset_global_state, monkeypatch, response
+):
+    from unittest.mock import AsyncMock
+
+    stub = reset_global_state
+    monkeypatch.setattr(stub, "DURABLE", True)
+    monkeypatch.setattr(
+        stub, "get_or_create_connection", AsyncMock(return_value=(object(), False))
+    )
+    monkeypatch.setattr(stub, "ensure_subscribed", AsyncMock())
+    publish = AsyncMock()
+    monkeypatch.setattr(stub, "publish_with_chunking", publish)
+    wait = AsyncMock(return_value={"success": True, "result": response})
+    monkeypatch.setattr(stub, "wait_for_response", wait)
+    from tests.bridge.test_stub import make_lambda_context
+
+    context = make_lambda_context()
+    context.get_remaining_time_in_millis = lambda: 60000
+    event = {"DurableExecutionArn": "arn:durable-execution", "CheckpointToken": "token"}
+    assert stub.handler(event, context) == response
+    assert publish.call_args.args[2]["event"] == event
+    assert wait.call_args.kwargs["timeout"] == 58
+
+
+def test_durable_stub_transport_failure_raises(reset_global_state, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tests.bridge.test_stub import make_lambda_context
+
+    stub = reset_global_state
+    monkeypatch.setattr(stub, "DURABLE", True)
+    monkeypatch.setattr(
+        stub, "get_or_create_connection", AsyncMock(side_effect=OSError("offline"))
+    )
+    with pytest.raises(ConnectionError, match="could not connect"):
+        stub.handler({}, make_lambda_context())
+
+
+@pytest.mark.parametrize(
+    ("stage", "response", "error", "match"),
+    [
+        ("ensure_subscribed", None, ConnectionError, "could not subscribe"),
+        ("publish_with_chunking", None, ConnectionError, "could not publish"),
+        ("wait_for_response", "exception", ConnectionError, "could not receive"),
+        ("wait_for_response", None, TimeoutError, "did not respond"),
+        (
+            "wait_for_response",
+            {"success": False, "errorType": "ValueError", "error": "local failure"},
+            RuntimeError,
+            "Local durable invocation failed",
+        ),
+    ],
+)
+def test_durable_stub_failures_are_invocation_errors(  # noqa: PLR0913
+    reset_global_state, monkeypatch, stage, response, error, match
+):
+    stub = reset_global_state
+    monkeypatch.setattr(stub, "DURABLE", True)
+    monkeypatch.setattr(
+        stub, "get_or_create_connection", AsyncMock(return_value=(object(), False))
+    )
+    monkeypatch.setattr(stub, "ensure_subscribed", AsyncMock())
+    monkeypatch.setattr(stub, "publish_with_chunking", AsyncMock())
+    monkeypatch.setattr(stub, "wait_for_response", AsyncMock())
+    if stage != "wait_for_response" or response == "exception":
+        monkeypatch.setattr(stub, stage, AsyncMock(side_effect=OSError("offline")))
+    else:
+        monkeypatch.setattr(stub, stage, AsyncMock(return_value=response))
+    context = make_lambda_context()
+    context.get_remaining_time_in_millis = lambda: 60000
+    with pytest.raises(error, match=match):
+        stub.handler({}, context)
+
+
+def test_durable_invocation_envelope_survives_chunking(reset_global_state, monkeypatch):
+    from stelvio.bridge._chunking import reassemble_chunk
+
+    stub = reset_global_state
+    monkeypatch.setattr(stub, "DURABLE", True)
+    ws = AsyncMock()
+    monkeypatch.setattr(stub, "get_or_create_connection", AsyncMock(return_value=(ws, False)))
+    monkeypatch.setattr(stub, "ensure_subscribed", AsyncMock())
+    monkeypatch.setattr(
+        stub,
+        "wait_for_response",
+        AsyncMock(return_value={"success": True, "result": {"Status": "PENDING"}}),
+    )
+    context = make_lambda_context()
+    context.get_remaining_time_in_millis = lambda: 60000
+    event = {
+        "DurableExecutionArn": "arn:durable",
+        "CheckpointToken": "token",
+        "InitialExecutionState": {
+            "Operations": [
+                {
+                    "ExecutionDetails": {
+                        "InputPayload": json.dumps({"data": "x" * (MAX_CHUNK_SIZE * 3)})
+                    }
+                }
+            ]
+        },
+    }
+    assert stub.handler(event, context) == {"Status": "PENDING"}
+    assert ws.send.call_count > 1
+    buffers = {}
+    complete = None
+    for call in ws.send.call_args_list:
+        published = json.loads(call.args[0])
+        complete, done = reassemble_chunk(json.loads(published["events"][0]), buffers)
+    assert done
+    assert complete["event"] == event

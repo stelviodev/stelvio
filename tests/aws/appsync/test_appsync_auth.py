@@ -296,6 +296,41 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
     assert len(pulumi_mocks.created(R.FUNCTION)) == 1
 
 
+@pytest.mark.parametrize("additional", [False, True], ids=["primary", "additional"])
+def test_durable_lambda_authorizer_uses_alias_arn(pulumi_mocks, project_cwd, additional):
+    auth_fn = Function(
+        "durable-auth-fn",
+        handler="functions/simple.handler",
+        runtime="python3.14",
+        durable={"execution_timeout": 300},
+    )
+    auth = LambdaAuth(handler=auth_fn)
+    make_api(additional_auth=[auth]) if additional else make_api(auth=auth)
+
+    deploy_all()
+
+    authorizer = {"authorizerUri": authorizer_uri("durable-auth-fn") + ":live"}
+    expected = (
+        {
+            "additionalAuthenticationProviders": [
+                {
+                    "authenticationType": AUTH_TYPE_LAMBDA,
+                    "lambdaAuthorizerConfig": authorizer,
+                }
+            ]
+        }
+        if additional
+        else {"lambdaAuthorizerConfig": authorizer}
+    )
+    pulumi_mocks.assert_res("myapi", R.GRAPHQL_API, expected, partial=True)
+    pulumi_mocks.assert_res(
+        "myapi-auth-0-perm" if additional else "myapi-auth-perm",
+        R.LAMBDA_PERMISSION,
+        {"function": tn(TP + "durable-auth-fn") + ":live"},
+        partial=True,
+    )
+
+
 @pytest.mark.parametrize(
     ("auth_kwargs", "fn_name"),
     [

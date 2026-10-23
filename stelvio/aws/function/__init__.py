@@ -1,4 +1,11 @@
-from .config import FunctionConfig, FunctionConfigDict, FunctionUrlConfig, FunctionUrlConfigDict
+from .config import (
+    DurableConfig,
+    DurableConfigDict,
+    FunctionConfig,
+    FunctionConfigDict,
+    FunctionUrlConfig,
+    FunctionUrlConfigDict,
+)
 from .function import Function, FunctionCustomizationDict, FunctionResources
 
 
@@ -79,6 +86,8 @@ def resolve_handler(
 
 
 __all__ = [
+    "DurableConfig",
+    "DurableConfigDict",
     "Function",
     "FunctionConfig",
     "FunctionConfigDict",

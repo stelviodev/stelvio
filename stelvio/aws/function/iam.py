@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 
 import pulumi
@@ -6,6 +7,7 @@ from pulumi_aws.iam import (
     GetPolicyDocumentStatementPrincipalArgs,
     Policy,
     Role,
+    RolePolicy,
     RolePolicyAttachment,
     get_policy_document,
 )
@@ -16,6 +18,43 @@ from stelvio.component import child_label, resource_name
 from .constants import LAMBDA_BASIC_EXECUTION_ROLE, LAMBDA_VPC_ACCESS_EXECUTION_ROLE
 
 _ROLE_ATTACHMENT_SUFFIX = "-r-p-attachment"
+
+
+def _create_durable_policy(
+    name: str,
+    role: Role,
+    function_name: pulumi.Input[str],
+    region: str,
+    opts: pulumi.ResourceOptions,
+) -> RolePolicy:
+    checkpoint_arn = pulumi.Output.all(role.arn, function_name).apply(
+        lambda values: (
+            f"arn:{values[0].split(':')[1]}:lambda:{region}:"
+            f"{values[0].split(':')[4]}:function:{values[1]}:*"
+        )
+    )
+    return RolePolicy(
+        resource_name(name, limit=128, suffix="-durable"),
+        role=role.name,
+        policy=checkpoint_arn.apply(
+            lambda arn: json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "lambda:CheckpointDurableExecution",
+                                "lambda:GetDurableExecutionState",
+                            ],
+                            "Resource": arn,
+                        }
+                    ],
+                }
+            )
+        ),
+        opts=opts,
+    )
 
 
 def _create_lambda_role(

@@ -4,8 +4,8 @@
 # This file is the single source of truth for default worker counts. Counts are
 # chosen so tests divide evenly across workers with no straggler left running
 # alone at the end. Adjust these defaults when adding or removing tests:
-#   integration       — 187 tests / 11 workers (VPC-creating cases moved out)
-#   integration_vpc   —   8 tests /  4 workers (account VPC quota is 10,
+#   integration       — 190 tests / 11 workers (VPC-creating cases moved out)
+#   integration_vpc   —   9 tests /  4 workers (account VPC quota is 10,
 #                       including the default VPC)
 #   integration_cf    —  14 tests /  7 workers
 #   integration_dns   —  10 tests /  3 workers
@@ -84,10 +84,10 @@ run_tier() {
     pids+=($!)
 }
 
-# Standard tier — 11 workers for 187 tests (no VPC creates)
+# Standard tier — 11 workers for 190 tests (no VPC creates)
 run_tier --integration "$INTEGRATION_WORKERS"
 
-# VPC tier — 4 workers for 8 tests (quota is 10 VPCs including the default VPC)
+# VPC tier — 4 workers for 9 tests (quota is 10 VPCs including the default VPC)
 run_tier --integration-vpc "$VPC_WORKERS"
 
 # CloudFront tier — 7 workers for 14 tests (slow teardown, mostly waiting on AWS)

@@ -1,5 +1,14 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import final
+
+
+@dataclass(frozen=True)
+class DurableCleanupRequest:
+    root: Path
+    profile: str | None
+    region: str
+    execution_arn: str
 
 
 @final
@@ -12,3 +21,6 @@ class BridgeInvocationResult:
     process_time_local: float
     status_code: int
     handler_name: str | None = None
+    durable_execution_arn: str | None = None
+    durable_status: str | None = None
+    durable_cleanup: DurableCleanupRequest | None = None

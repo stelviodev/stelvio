@@ -46,6 +46,7 @@ class R(StrEnum):
     SECRET_ROTATION = "aws:secretsmanager/secretRotation:SecretRotation"  # noqa: S105
     # Lambda
     FUNCTION = "aws:lambda/function:Function"
+    LAMBDA_ALIAS = "aws:lambda/alias:Alias"
     FUNCTION_URL = "aws:lambda/functionUrl:FunctionUrl"
     EVENT_SOURCE_MAPPING = "aws:lambda/eventSourceMapping:EventSourceMapping"
     LAYER_VERSION = "aws:lambda/layerVersion:LayerVersion"
@@ -190,9 +191,16 @@ OUTPUT_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     # Lambda
     R.FUNCTION: {
+        "version": "1",
         "arn": "arn:aws:lambda:{region}:{account}:function:{name}",
         "invokeArn": "arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/"
         "arn:aws:lambda:{region}:{account}:function:{name}/invocations",
+    },
+    R.LAMBDA_ALIAS: {
+        "name": "{in[name]}",
+        "arn": "arn:aws:lambda:{region}:{account}:function:{in[functionName]}:{in[name]}",
+        "invokeArn": "arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/"
+        "arn:aws:lambda:{region}:{account}:function:{in[functionName]}:{in[name]}/invocations",
     },
     R.FUNCTION_URL: {"functionUrl": "https://{id}.lambda-url.{region}.on.aws/"},
     R.EVENT_SOURCE_MAPPING: {"arn": "arn:aws:lambda:{region}:{account}:event-source-mapping:{id}"},

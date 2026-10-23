@@ -229,7 +229,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
         return Permission(
             resource_name(f"{self.name}-authorizer-{auth_name}-permission", limit=128),
             action="lambda:InvokeFunction",
-            function=function.function_name,
+            function=function.invocation_name,
             principal="apigateway.amazonaws.com",
             source_arn=pulumi.Output.all(rest_api.execution_arn, authorizer.id).apply(
                 lambda args: f"{args[0]}/authorizers/{args[1]}"
@@ -824,7 +824,7 @@ class RestApi(Component[RestApiResources, RestApiCustomizationDict], LinkableMix
                 f"{self.name}-permission-{function.name}", limit=PERMISSION_NAME_MAX_LENGTH
             ),
             action="lambda:InvokeFunction",
-            function=function.function_name,
+            function=function.invocation_name,
             principal="apigateway.amazonaws.com",
             source_arn=rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
             opts=self._resource_opts(),

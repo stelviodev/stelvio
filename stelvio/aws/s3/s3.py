@@ -184,7 +184,7 @@ class BucketNotifySubscription(
                     {},
                     {
                         "action": "lambda:InvokeFunction",
-                        "function": function.resources.function.name,
+                        "function": function.invocation_name,
                         "principal": "s3.amazonaws.com",
                         "source_arn": self._bucket_arn,
                     },
@@ -256,7 +256,7 @@ class BucketNotifySubscription(
                     "function target, but got None. This is an internal error."
                 )
 
-            target_arn = function.resources.function.arn
+            target_arn = function.invocation_arn
             target_type = "lambda"
         elif self._queue is not None:
             target_arn = self._resolve_queue_arn()

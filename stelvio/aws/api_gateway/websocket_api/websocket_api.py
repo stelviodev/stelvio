@@ -398,7 +398,7 @@ class WebsocketApi(
                     limit=PERMISSION_NAME_MAX_LENGTH,
                 ),
                 action="lambda:InvokeFunction",
-                function=function.function_name,
+                function=function.invocation_name,
                 principal="apigateway.amazonaws.com",
                 source_arn=Output.concat(api.execution_arn, "/*/*"),
                 opts=self._resource_opts(),
@@ -532,7 +532,7 @@ class WebsocketApi(
                     f"{self.name}-auth-permission-{name}", limit=PERMISSION_NAME_MAX_LENGTH
                 ),
                 action="lambda:InvokeFunction",
-                function=auth.function.function_name,
+                function=auth.function.invocation_name,
                 principal="apigateway.amazonaws.com",
                 source_arn=Output.concat(api.execution_arn, "/authorizers/", authorizer.id),
                 opts=self._resource_opts(),

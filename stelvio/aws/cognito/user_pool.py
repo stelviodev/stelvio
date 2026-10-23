@@ -212,7 +212,7 @@ class UserPool(
             for trigger_name, handler in self._config.triggers.items():
                 fn = self._create_trigger_function(trigger_name, handler)
                 trigger_functions[trigger_name] = fn
-                lambda_config[trigger_name] = fn.resources.function.arn
+                lambda_config[trigger_name] = fn.invocation_arn
         return trigger_functions, lambda_config
 
     def _create_pool_trigger_permissions(
@@ -380,7 +380,7 @@ class UserPool(
                 {},
                 {
                     "action": "lambda:InvokeFunction",
-                    "function": fn.function_name,
+                    "function": fn.invocation_name,
                     "principal": "cognito-idp.amazonaws.com",
                     "source_arn": pool.arn,
                 },
