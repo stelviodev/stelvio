@@ -397,7 +397,7 @@ def test_same_prefix_function_created_after_preflight_is_never_deleted():
     )
 
 
-def test_proof_log_group_cleanup_waits_for_function_absence_and_deletes_only_captured_names(
+def test_proof_log_group_cleanup_waits_for_function_absence_and_deletes_only_owned_names(
     monkeypatch,
 ):
     session = _empty_session()
@@ -521,7 +521,7 @@ def test_dev_destroy_captures_then_removes_log_groups_before_absence_audit(monke
     assert operations == ["capture", "destroy", "delete", "audit", "clear-trust"]
 
 
-def test_dev_cleanup_deletes_only_log_groups_captured_before_destroy(monkeypatch):
+def test_dev_cleanup_passes_captured_evidence_to_owned_group_cleanup(monkeypatch):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._mode = "dev"
     session.aws = object()
@@ -531,7 +531,7 @@ def test_dev_cleanup_deletes_only_log_groups_captured_before_destroy(monkeypatch
     monkeypatch.setattr(
         cli_session,
         "capture_proof_lambda_log_groups",
-        lambda **_kwargs: pytest.fail("Cleanup must not widen the captured deletion set"),
+        lambda **_kwargs: pytest.fail("The owned-group cleanup handles deletion after destroy"),
     )
     monkeypatch.setattr(
         cli_session,
@@ -543,6 +543,93 @@ def test_dev_cleanup_deletes_only_log_groups_captured_before_destroy(monkeypatch
 
     assert errors == []
     assert deleted == ["/aws/lambda/demo-test-before-destroy"]
+
+
+@pytest.mark.parametrize("captured", [(), ("/aws/lambda/demo-test-first",)])
+def test_dev_destroy_removes_late_log_groups_for_verified_functions(monkeypatch, captured):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._deployed = True
+    session.no_vpc = True
+    session._mode = "dev"
+    session.process = None
+    session._outputs = {}
+    session.app = "demo"
+    session.environment_name = "test"
+    session._proof_lambda_function_names = ("demo-test-first", "demo-test-late")
+    session.aws = _empty_session()
+    logs = session.aws.clients["logs"]
+    groups = set(captured)
+    foreign = "/aws/lambda/demo-test-untracked"
+
+    def destroy(*_args, **_kwargs):
+        # Lambda creates logs asynchronously, after the pre-destroy capture.
+        groups.update({"/aws/lambda/demo-test-late", foreign})
+        logs.pages["describe_log_groups"] = [
+            {"logGroups": [{"logGroupName": name} for name in groups]}
+        ]
+
+    def delete(**kwargs):
+        name = kwargs["logGroupName"]
+        if name not in groups:
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException"}}, "DeleteLogGroup")
+        groups.remove(name)
+
+    session.command = destroy
+    logs.direct["delete_log_group"] = delete
+
+    def assert_owned_groups_absent():
+        assert groups == {foreign}, "Late proof log group remains after destroy"
+
+    session._assert_aws_resources_absent = assert_owned_groups_absent
+    session._clear_proof_host_trust = lambda: None
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", SimpleNamespace(exists=lambda: False))
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", lambda **_kwargs: ())
+    monkeypatch.setattr(cli_session, "capture_proof_lambda_log_groups", lambda **_kwargs: captured)
+
+    session.destroy()
+    assert groups == {foreign}
+
+
+def test_empty_capture_does_not_allow_cleanup_while_function_is_live(monkeypatch):
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-function"}]}
+    ]
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_TIMEOUT", 0)
+    with pytest.raises(RuntimeError, match="while Functions remain"):
+        assert_tunnel.delete_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=("demo-test-function",),
+            log_group_names=(),
+        )
+    assert session.clients["logs"].calls == []
+
+
+@pytest.mark.parametrize("code", ["ResourceNotFoundException", "AccessDeniedException"])
+def test_proof_log_cleanup_ignores_only_missing_groups(code):
+    session = _empty_session()
+
+    def delete(**_kwargs):
+        raise ClientError({"Error": {"Code": code}}, "DeleteLogGroup")
+
+    session.clients["logs"].direct["delete_log_group"] = delete
+    kwargs = {
+        "sdk": session,
+        "app": "demo",
+        "env": "test",
+        "function_names": ("demo-test-function",),
+        "log_group_names": (),
+    }
+    if code == "ResourceNotFoundException":
+        assert_tunnel.delete_proof_lambda_log_groups(**kwargs)
+    else:
+        with pytest.raises(ClientError, match=code):
+            assert_tunnel.delete_proof_lambda_log_groups(**kwargs)
+    assert session.clients["logs"].calls == [
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-function"})
+    ]
 
 
 def test_captures_exact_bastion_volume_ids_before_destroy():
