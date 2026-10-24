@@ -150,7 +150,12 @@ Function. The DocumentDB handlers verify TLS, member discovery, and reads/writes
 using distinct markers that are checked against both databases. The test stops one
 bastion, requires the structured `VpcUnavailableError` before handler import,
 confirms the peer and independent endpoints remain usable, then waits for both the
-advanced helper generation and a fresh network-ready report before retrying. It also
+advanced helper generation and a fresh network-ready report before retrying.
+Within one command, observed generations must never decrease. Recovery can need several
+attempts: after the first activation, each configured failure and retry advances
+two more generations. The observer requires a fresh ready report and a valid
+retirement/activation cycle in the same log snapshot, within one timeout. It does not require a
+single attempt. The scenario also
 rotates the proof-owned bastion SSH host key, checks terminal `ssh-host-key`
 admission failure and DNS `SERVFAIL`, and restarts dev mode while the changed key
 is still present. The new command must reject the same key and retain the original
