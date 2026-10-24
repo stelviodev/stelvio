@@ -402,7 +402,7 @@ def capture_proof_lambda_log_groups(
 def delete_proof_lambda_log_groups(
     *, sdk, app: str, env: str, function_names: Sequence[str], log_group_names: Sequence[str]
 ) -> None:
-    """Delete only captured groups for known proof Functions after they are gone."""
+    """Delete exact groups for verified proof Functions after they are gone."""
     prefix = _proof_lambda_prefix(app, env)
     functions = _validate_proof_lambda_names(app, env, function_names)
     names = tuple(log_group_names)
@@ -413,7 +413,7 @@ def delete_proof_lambda_log_groups(
         or not set(names) <= owned_groups
     ):
         raise ValueError("Lambda log groups must match unique Functions deployed by the proof app")
-    if not names:
+    if not functions:
         return
 
     deadline = monotonic() + ABSENCE_TIMEOUT
@@ -431,7 +431,10 @@ def delete_proof_lambda_log_groups(
         sleep(delay)
 
     logs = bounded_sdk.client("logs")
-    for name in names:
+    # Log delivery can create a group during destroy, after capture. Use the
+    # exact names from deployment outputs, not a prefix or a listing snapshot.
+    # Deleting an absent group is safe and avoids listing-consistency races.
+    for name in sorted(owned_groups):
         try:
             logs.delete_log_group(logGroupName=name)
         except ClientError as error:
