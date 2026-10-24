@@ -62,6 +62,41 @@ SSM byte stream. It checks successful authentication, persistent key reuse,
 key-change rejection by a new transport, and explicit trust reset. It restores
 its processes and temporary files. It does not establish live SSM acceptance.
 
+## Shared session and isolated runtime
+
+`test_supervisor.py` exercises independent VPC workers with deterministic
+transport, helper, DNS, and discovery adapters. It covers generation advancement
+after retained DNS cleanup, stable listener ports, stale control rejection,
+DNS rejection and recovery, terminal local-artifact and SSH host-key failures, and retained helper
+evidence when transport cleanup is uncertain. Readiness checks require the VPC
+DNS path and resource addresses as well as a live SOCKS transport.
+
+Host-key regressions cover refusal before forwarding and after an established
+connection fails. They require no further retries, retained DNS rejection, and
+blocked dependent invocations while unrelated endpoints remain available. Status
+diagnostics are bounded and reject control characters. A fresh Python process
+must reuse the persisted host pin and cannot replace it with another key.
+
+`test_wire.py`, `test_runtime.py`, `test_dev_session.py`, and `test_evidence.py`
+cover bounded IPC framing, session metadata validation, captured environment
+isolation in a real child process, parent/lease death, bounded status and shutdown,
+admission freshness, no-op sessions, and durable SSM ownership receipts. The
+ordinary child-process tests use local fixtures only. They do not deploy AWS
+resources, install the helper, or mutate host networking. The optional
+`STLV_TEST_TRAFORO_IMAGE` lane is separate and exercises Python/Go interoperability
+with a previously verified image.
+
+Run the focused session suite with:
+
+```bash
+uv run pytest \
+  tests/tunnel/test_wire.py \
+  tests/tunnel/test_evidence.py \
+  tests/tunnel/test_supervisor.py \
+  tests/tunnel/test_runtime.py \
+  tests/tunnel/test_dev_session.py -q
+```
+
 ## Unit tests
 
 Run the Python tunnel suite with the normal repository checks:
@@ -206,3 +241,36 @@ termination do not assert that AWS history immediately displays `Terminated`.
 Run the local response and ownership regressions with
 `uv run pytest tests/tunnel/test_transport.py -q`. Live AWS acceptance is a
 separate opt-in check; unit results do not certify it.
+
+## Shared-session subnet routing and conflicts
+
+Run the session boundary regressions without changing host networking:
+
+```bash
+uv run pytest tests/tunnel/test_forwarding.py tests/tunnel/test_supervisor.py \
+  tests/tunnel/test_dev_session.py tests/tunnel/test_runtime.py -q
+```
+
+They require the same private and isolated destination ranges in helper requests
+and forwarder controls. Reconnects, member refresh, and lost-reply replay keep the
+selection and DNS port stable. Empty or changed selections fail before SSH, with
+no whole-VPC fallback. Full VPC ownership overlap checks remain independent of
+this smaller route set.
+
+Readiness checks the resolver through SOCKS, each named resource through SOCKS
+and ordinary host TCP, and system-resolver delivery using a generation-bound
+observation. A successful SOCKS connection does not mask a failed direct resource
+path. The resolver-only direct probe is intentionally absent: the owning VPC
+resolver uses a separate SOCKS path.
+
+Conflict tests carry decoded range and interface facts from the worker through
+the bounded runtime status to the command. They reject untrusted exception text,
+invalid status causes, nonprintable text, and misplaced or oversized diagnostics.
+A conflict blocks dependent invocations but leaves other healthy VPCs and plain
+handlers usable. Cleanup failure retains the diagnostic and ownership evidence.
+Invalid-detail tests use a fixed session identifier containing `123` and check only
+the reports after the invalid status. Startup identifiers must not count as leaked
+diagnostics. The tests require a generic failure report and blocked VPC admission.
+These tests use isolated adapters, not actual LAN or VPN mutations. Native route
+conflict and host-baseline acceptance require the privileged tier in the final
+stack; unit success does not certify that acceptance.
