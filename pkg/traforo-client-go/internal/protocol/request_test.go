@@ -44,6 +44,57 @@ func TestIndependentWire(t *testing.T) {
 		}
 	}
 }
+
+// diagnosticsRequest reproduces the minimized fuzz input without using the
+// production header size or operation constants.
+func diagnosticsRequest() []byte {
+	p := make([]byte, 56)
+	copy(p, "STLVTUN1")
+	p[8] = 7
+	return p
+}
+
+func TestDiagnosticsIndependentWire(t *testing.T) {
+	p := diagnosticsRequest()
+	if Diagnostics != 7 {
+		t.Fatal("diagnostics wire operation changed", Diagnostics)
+	}
+	if r, err := Decode(p); err != nil || r.Operation != Diagnostics {
+		t.Fatal("rejected anonymous diagnostics request", r, err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		offset int
+		value  byte
+	}{
+		{"keep-dns", 9, 1},
+		{"invalid-flags", 9, 2},
+		{"reserved-first", 10, 1},
+		{"reserved-second", 11, 1},
+		{"body-length", 15, 1},
+		{"session", 16, 1},
+		{"capability", 32, 1},
+		{"generation", 55, 1},
+		{"unsupported-operation", 8, 8},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			packet := append([]byte(nil), p...)
+			packet[test.offset] = test.value
+			if _, err := Decode(packet); err != ErrInvalid {
+				t.Fatalf("accepted invalid diagnostics frame: %v", err)
+			}
+		})
+	}
+	t.Run("trailing-data", func(t *testing.T) {
+		packet := append(append([]byte(nil), p...), 0)
+		binary.BigEndian.PutUint32(packet[12:], 1)
+		if _, err := Decode(packet); err != ErrInvalid {
+			t.Fatalf("accepted diagnostics body: %v", err)
+		}
+	})
+}
+
 func TestConfigureIndependentWire(t *testing.T) {
 	p := configure()
 	r, e := Decode(p)
@@ -137,13 +188,14 @@ func tcpPacket(source, destination uint32) []byte {
 
 func FuzzRequest(f *testing.F) {
 	f.Add(request(Status))
+	f.Add(diagnosticsRequest())
 	f.Add(configure())
 	f.Add(subnetRequest(subnetRanges(20), nil))
 	f.Add(subnetRequest(subnetRanges(32), nil))
 	f.Add(subnetRequest(subnetRanges(33), nil))
 	f.Fuzz(func(t *testing.T, p []byte) {
 		r, e := Decode(p)
-		if e == nil && (r.Operation < Status || r.Operation > Reconcile || len(p) > Header+MaxBody) {
+		if e == nil && (r.Operation < Status || r.Operation > Diagnostics || len(p) > Header+MaxBody) {
 			t.Fatal("invalid accepted request")
 		}
 	})

@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
     import boto3
 
+    from stelvio.tunnel.diagnostics.runtime import Events
     from stelvio.tunnel.forwarding import Forwarding
     from stelvio.tunnel.helper_client import NativeLease
     from stelvio.tunnel.manifest import SessionDescription, VpcNetwork
@@ -116,7 +117,10 @@ class VpcWorker:
         discovery: ResourceDiscovery,
         inventory_check: Callable[[VpcNetwork], VpcNetwork] | None = None,
         inventory_terminal: Callable[[str], None] | None = None,
+        diagnostics_events: Events | None = None,
     ) -> None:
+        self.diagnostics_events = diagnostics_events
+        self._check_diagnostics = {}
         self.description = description
         self.network = network
         self._route_cidrs = network.route_cidrs
@@ -172,6 +176,7 @@ class VpcWorker:
         with self._lock:
             if state == "ready":
                 self._ever_ready = True
+            previous = self._status
             self._status = VpcStatus(
                 self.network.identity,
                 state,
@@ -182,6 +187,38 @@ class VpcWorker:
                 self._phase,
                 self._failure_detail if cause in STATUS_DETAIL_CAUSES else None,
             )
+        if self.diagnostics_events and (previous.state, previous.cause) != (state, cause):
+            self.diagnostics_events.append("vpc-" + state, self.unit, cause)
+
+    def _set_phase(self, phase: str) -> None:
+        with self._lock:
+            self._phase = phase
+        if self.diagnostics_events:
+            self.diagnostics_events.append("phase-" + phase, self.unit)
+
+    def diagnostics(self) -> dict:
+        from dataclasses import asdict  # noqa: PLC0415
+
+        from stelvio.tunnel.host_trust import fingerprint  # noqa: PLC0415
+
+        with self._lock:
+            value = asdict(self._status)
+            value.update(
+                phase=self._phase,
+                unit=self.unit,
+                generation=self._host_generation,
+                dns_revision=self._dns_revision_current,
+                dns_port=self._dns_port,
+                checks=dict(self._check_diagnostics),
+            )
+        process = self.transport.process
+        value["partition"] = self.transport.partition
+        value["transport_pid"] = process.pid if process else None
+        value["ssh_fingerprint"] = fingerprint(self.transport.pin) if self.transport.pin else None
+        value["ssh_trust"] = "verified" if self.transport.pin else "unavailable"
+        value["ranges"] = [str(cidr) for cidr in self.network.route_cidrs]
+        value["resources"] = [asdict(resource) for resource in self._resources()]
+        return value
 
     def start(self) -> None:
         self._thread.start()
@@ -363,6 +400,30 @@ class VpcWorker:
         )
 
     def _probe(self, revision: int) -> None:
+        from stelvio.tunnel.diagnostics.protocol import timestamp  # noqa: PLC0415
+
+        started = time.monotonic()
+        attempted = timestamp()
+        try:
+            self._perform_probe(revision)
+        except Exception:
+            with self._lock:
+                self._check_diagnostics.update(
+                    attempted_at=attempted,
+                    result="failed",
+                    duration_seconds=time.monotonic() - started,
+                )
+            raise
+        else:
+            with self._lock:
+                self._check_diagnostics.update(
+                    attempted_at=attempted,
+                    result="passed",
+                    last_success_at=timestamp(),
+                    duration_seconds=time.monotonic() - started,
+                )
+
+    def _perform_probe(self, revision: int) -> None:
         if revision != self._dns_revision_current or self._dns_generation != self._host_generation:
             raise ValueError("Stale DNS readiness revision")
         self._dns("probe")
@@ -459,7 +520,7 @@ class VpcWorker:
             self._retire_host()
 
     def _attempt_connection(self) -> None:
-        self._phase = "vpc-inventory"
+        self._set_phase("vpc-inventory")
         self._host_generation = self._next_host_generation()
         resolved = resolve_vpc_network(self.network, self.session.client("ec2", config=AWS_IO))
         if self.inventory_check is None:
@@ -475,21 +536,21 @@ class VpcWorker:
                 "VPC destination subnets changed during this session"
             )
         self.discovery.begin(self.network.identity, self._attempt)
-        self._phase = "resource-discovery"
+        self._set_phase("resource-discovery")
         self.discovery.refresh(
             self.network.identity, self._attempt, self.session.client("docdb", config=AWS_IO)
         )
-        self._phase = "authenticated-ssh"
+        self._set_phase("authenticated-ssh")
         connector = self.transport.start()
-        self._phase = "forwarding"
+        self._set_phase("forwarding")
         self.forwarding.add(
             self.unit, self._host_generation, self._attempt, self.network, connector.proxy_port
         )
         self._stack_attempt = self._attempt
         view = self._view()
-        self._phase = "host-configuration"
+        self._set_phase("host-configuration")
         self._configure(view)
-        self._phase = "readiness"
+        self._set_phase("readiness")
         deadline = time.monotonic() + 30
         while True:
             try:

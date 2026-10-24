@@ -26,10 +26,12 @@ const (
 )
 
 type client struct {
-	fd       int
-	peer     darwin.Peer
-	data     []byte
-	deadline time.Time
+	fd             int
+	peer           darwin.Peer
+	data           []byte
+	deadline       time.Time
+	output         []byte
+	diagnosticOnly bool
 }
 type grant struct {
 	active, failed bool
@@ -60,6 +62,11 @@ type service struct {
 	owned, uncertain, working, revoke, stopping bool
 	cleanupAfter, stopDeadline                  time.Time
 	cleanupBackoff                              time.Duration
+	epoch                                       string
+	started                                     time.Time
+	metrics                                     map[uint32]*packetMetrics
+	invalidFrames                               uint64
+	lastFailure                                 string
 	completion                                  chan jobResult
 }
 
@@ -235,6 +242,9 @@ func (s *service) refresh() {
 	}
 }
 func (s *service) acquire(c *client, r protocol.Request) {
+	s.metrics = make(map[uint32]*packetMetrics)
+	s.invalidFrames = 0
+
 	if !darwin.Alive(c.peer) {
 		replyClose(c.fd, Uncertain)
 		c.fd = -1
@@ -306,6 +316,11 @@ func (s *service) acquire(c *client, r protocol.Request) {
 	}
 }
 func (s *service) complete(j jobResult) {
+	if j.err != nil {
+		s.lastFailure = "host-operation"
+	} else {
+		s.lastFailure = ""
+	}
 	s.working = false
 	s.state = j.state
 	s.devices = j.devices
@@ -369,7 +384,21 @@ func (s *service) validChange(c client, r protocol.Request) bool {
 	return validChange(s.state, c.data, r)
 }
 func (s *service) handle(c *client, r protocol.Request) {
+	if r.Operation == protocol.Diagnostics {
+		s.beginDiagnostics(c)
+		return
+	}
+	if (r.Operation == protocol.Status || r.Operation == protocol.Acquire || r.Operation == protocol.Reconcile) && s.owned && (s.lease >= 0 || s.ownerAlive()) && c.peer != s.peer {
+		replyClose(c.fd, Busy)
+		c.fd = -1
+		return
+	}
+
 	reject := func(status uint16) { replyClose(c.fd, status); c.fd = -1 }
+	if c.diagnosticOnly {
+		reject(Busy)
+		return
+	}
 	if r.Operation == protocol.Status {
 		body := make([]byte, 21)
 		copy(body, "STLVHLP1")
@@ -471,13 +500,14 @@ func (s *service) accept() {
 		_ = unix.Close(fd) // Reject and discard an unauthenticated client.
 		return
 	}
-	if s.owned && (s.lease >= 0 || s.ownerAlive()) && peer != s.peer {
-		replyClose(fd, Busy)
-		return
-	}
+
+	diagnosticOnly := s.owned && (s.lease >= 0 || s.ownerAlive()) && peer != s.peer
 	for i := range s.clients {
+		if (diagnosticOnly && i >= 2) || (!diagnosticOnly && i < 2) {
+			continue
+		}
 		if s.clients[i].fd < 0 {
-			s.clients[i] = client{fd: fd, peer: peer, deadline: time.Now().Add(10 * time.Second)}
+			s.clients[i] = client{diagnosticOnly: diagnosticOnly, fd: fd, peer: peer, deadline: time.Now().Add(10 * time.Second)}
 			return
 		}
 	}
@@ -494,6 +524,7 @@ func (s *service) pumpReturn() {
 		return
 	}
 	if _, frameError := protocol.DecodeFrame(buf[:n]); frameError != nil || binary.BigEndian.Uint32(buf[12:]) != protocol.IPv4 {
+		s.invalidFrames++
 		return
 	}
 	id, generation := binary.BigEndian.Uint32(buf), binary.BigEndian.Uint64(buf[4:])
@@ -501,10 +532,19 @@ func (s *service) pumpReturn() {
 		if !g.active || g.request.Unit != id {
 			continue
 		}
-		if generation != g.generation || !protocol.PacketAllowed(buf[16:n], g.request, uint32(0xc0000201+2*i), false) {
+		metrics := s.packetMetrics(id)
+		metrics.ReturnReceived++
+		metrics.ReturnBytesReceived += uint64(n - 16)
+		if generation != g.generation {
+			metrics.StaleGeneration++
+			return
+		}
+		if !protocol.PacketAllowed(buf[16:n], g.request, uint32(0xc0000201+2*i), false) {
+			metrics.DestinationRejected++
 			return
 		}
 		if !g.device.Current() {
+			metrics.DeviceErrors++
 			s.grants[i].active = false
 			s.grants[i].failed = true
 			return
@@ -512,18 +552,26 @@ func (s *service) pumpReturn() {
 		packet := buf[12:n]
 		n, e = unix.SendmsgN(g.device.FD, packet, nil, nil, unix.MSG_DONTWAIT)
 		if e == unix.EAGAIN || e == unix.EINTR {
+			metrics.DeviceWriteDropped++
 			return
 		}
 		if e != nil || n != len(packet) {
+			metrics.DeviceErrors++
 			s.grants[i].active = false
 			s.grants[i].failed = true
+		} else {
+			metrics.ReturnDelivered++
+			metrics.ReturnBytesDelivered += uint64(n - 4)
 		}
 		return
 	}
+	s.invalidFrames++
 }
 func (s *service) pumpHost(i int) {
 	g := s.grants[i]
+	metrics := s.packetMetrics(g.request.Unit)
 	if !g.device.Current() {
+		metrics.DeviceErrors++
 		s.grants[i].active = false
 		s.grants[i].failed = true
 		return
@@ -534,11 +582,17 @@ func (s *service) pumpHost(i int) {
 		return
 	}
 	if e != nil || n > 1504 {
+		metrics.DeviceErrors++
 		s.grants[i].active = false
 		s.grants[i].failed = true
 		return
 	}
+	metrics.HostReceived++
+	if n >= 4 && binary.BigEndian.Uint32(buf) == protocol.IPv4 {
+		metrics.HostBytesReceived += uint64(n - 4)
+	}
 	if n < 24 || binary.BigEndian.Uint32(buf) != protocol.IPv4 || !protocol.PacketAllowed(buf[4:n], g.request, uint32(0xc0000201+2*i), true) {
+		metrics.DestinationRejected++
 		return
 	}
 	wire := make([]byte, 12+n)
@@ -547,11 +601,16 @@ func (s *service) pumpHost(i int) {
 	copy(wire[12:], buf[:n])
 	sent, e := unix.SendmsgN(s.carrier, wire, nil, nil, unix.MSG_DONTWAIT)
 	if e == unix.EAGAIN || e == unix.EINTR {
+		metrics.CarrierDropped++
 		return
 	}
 	if e != nil || sent != len(wire) {
+		metrics.CarrierErrors++
 		s.grants[i].active = false
 		s.grants[i].failed = true
+	} else {
+		metrics.HostDelivered++
+		metrics.HostBytesDelivered += uint64(n - 4)
 	}
 }
 func serve() (returnErr error) {
@@ -574,7 +633,7 @@ func serve() (returnErr error) {
 		return e
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(listener)) }()
-	s := service{store: Store{image, lease}, gate: -1, listener: listener, lease: -1, carrier: -1, devices: initDevices(), completion: make(chan jobResult, 1)}
+	s := service{epoch: randomEpoch(), started: time.Now(), metrics: make(map[uint32]*packetMetrics), store: Store{image, lease}, gate: -1, listener: listener, lease: -1, carrier: -1, devices: initDevices(), completion: make(chan jobResult, 1)}
 	for i := range s.clients {
 		s.clients[i].fd = -1
 	}
@@ -600,6 +659,9 @@ func serve() (returnErr error) {
 	state, exists, e := s.store.Load()
 	s.state = state
 	s.uncertain = e != nil
+	if e != nil {
+		s.lastFailure = "journal-load"
+	}
 	if exists {
 		s.owned = true
 		s.peer = state.Peer
@@ -654,7 +716,11 @@ func serve() (returnErr error) {
 		fds[1] = unix.PollFd{Fd: int32(s.lease), Events: unix.POLLIN}
 		fds[2] = unix.PollFd{Fd: int32(s.carrier), Events: unix.POLLIN}
 		for i, c := range s.clients {
-			fds[3+i] = unix.PollFd{Fd: int32(c.fd), Events: unix.POLLIN}
+			events := int16(unix.POLLIN)
+			if c.output != nil {
+				events = unix.POLLOUT
+			}
+			fds[3+i] = unix.PollFd{Fd: int32(c.fd), Events: events}
 		}
 		for i, g := range s.grants {
 			fd := -1
@@ -679,6 +745,14 @@ func serve() (returnErr error) {
 		if fds[0].Revents != 0 && !s.stopping {
 			s.accept()
 		}
+		if s.carrier >= 0 && fds[2].Revents != 0 {
+			s.pumpReturn()
+		}
+		for i, g := range s.grants {
+			if g.active && fds[11+i].Fd == int32(g.device.FD) && fds[11+i].Revents != 0 {
+				s.pumpHost(i)
+			}
+		}
 		for i := range s.clients {
 			c := &s.clients[i]
 			if c.fd < 0 {
@@ -689,6 +763,10 @@ func serve() (returnErr error) {
 				continue
 			}
 			if fds[3+i].Fd != int32(c.fd) || fds[3+i].Revents == 0 {
+				continue
+			}
+			if c.output != nil {
+				c.writeDiagnostics()
 				continue
 			}
 			r, complete, e := c.receive()
@@ -702,13 +780,6 @@ func serve() (returnErr error) {
 				}
 			}
 		}
-		if s.carrier >= 0 && fds[2].Revents != 0 {
-			s.pumpReturn()
-		}
-		for i, g := range s.grants {
-			if g.active && fds[11+i].Fd == int32(g.device.FD) && fds[11+i].Revents != 0 {
-				s.pumpHost(i)
-			}
-		}
+
 	}
 }

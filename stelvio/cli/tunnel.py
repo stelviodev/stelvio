@@ -147,3 +147,26 @@ def start(env: str | None) -> None:
 
     if interrupted:
         click.echo("Tunnel stopped.")
+
+
+@tunnel.command("diagnose")
+@click.option("--json", "as_json", is_flag=True, help="Print one JSON diagnostic report.")
+def diagnose(as_json: bool) -> None:
+    """Read local tunnel and network state without changing networking."""
+    import json  # noqa: PLC0415
+    import os  # noqa: PLC0415
+
+    from rich.console import Console  # noqa: PLC0415
+
+    from stelvio.tunnel.diagnostics.report import collect, render  # noqa: PLC0415
+
+    if hasattr(os, "geteuid") and not os.geteuid():
+        raise click.ClickException("Run tunnel diagnose as your ordinary user")
+    try:
+        report = collect()
+        if as_json:
+            click.echo(json.dumps(report, allow_nan=False, indent=2))
+        else:
+            render(report, Console())
+    except (OSError, RuntimeError, ValueError, TypeError) as error:
+        raise click.ClickException("Cannot create the tunnel diagnostic report") from error
