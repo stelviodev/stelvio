@@ -15,7 +15,8 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 
 - Your Lambdas get replaced with a small stub Lambda.
 - The stub forwards each invocation over an AppSync Events channel.
-- The `stlv dev` process runs a local dev server, executes your real handler, then sends the result back to AWS.
+- The `stlv dev` process captures deployed networking state, starts managed VPC access when a handler needs it, then starts the AppSync bridge.
+- The bridge admits each invocation after its enabled VPC dependencies are ready. It executes the local handler and sends the result back to AWS.
 - The bridge checks AppSync connection and subscription acknowledgements before it accepts invocations.
 
 Your public entrypoint (API Gateway URL / Function URL) stays the same — you hit it like normal.
@@ -103,6 +104,11 @@ network session. For intentional rotation, stop the affected tunnels, explicitly
 reset that instance's trust, and restart. A new runtime process reads the same
 persistent pin; restarting alone does not accept a changed key.
 
+The bridge remains available during this refusal. It returns
+`VpcUnavailableError` for Functions that need the affected VPC before importing
+their handlers. Other Functions can still run. `stlv dev` and `stlv tunnel start`
+use the same pins, so changing commands does not bypass host-key checks.
+
 `READY` means the scoped resolver answered through the VPC path, the helper's
 routes and resolver files are active, the transport and forwarder are healthy,
 and each discovered resource hostname resolved to an address inside the selected
@@ -124,6 +130,12 @@ does not make a VPC ready. New invocations that depend on an unready VPC are
 rejected before handler execution; unrelated VPCs and handlers without a VPC can
 continue.
 
+The bridge checks current session status for each invocation. It rejects an expired
+invocation or one whose required VPC is starting, reconnecting, failed, or has stale
+status. It performs this check before importing the handler module. An artifact
+failure stops dev startup with repair instructions; a failure in one VPC does not
+block Functions that use a healthy VPC or no enabled VPC.
+
 With no enabled VPC dependencies, Stelvio skips helper activation. A VPC whose
 bastion policy is disabled is reported and left to the developer's local network.
 On normal shutdown, each worker stops its owned SSH/SSM transport and retires its
@@ -133,6 +145,28 @@ transport cleanup that cannot be certified leaves its ownership receipts and
 helper evidence available through `stlv tunnel status`; Stelvio reports the
 existing recovery commands instead of claiming the VPC is ready. This status is
 local helper ownership state and does not verify AWS or database connectivity.
+
+### Dev-mode route conflicts and admission
+
+`stlv dev` uses the same selected private and isolated subnet routes as
+`stlv tunnel start`. The dev bridge has no separate route policy. Public subnets
+and unused VPC space keep their existing host routes; the primary VPC resolver
+uses the separate SOCKS path. Reconnects and member discovery do not expand the
+selection to the whole VPC block.
+
+A terminal route conflict fails that VPC worker. The dev command stays running,
+prints the requested and conflicting ranges and interface index when available,
+and rejects dependent invocations before handler lookup or import. Other ready
+VPCs and handlers without managed VPC dependencies can continue. The public
+invocation response identifies unavailable VPC dependencies; local route details
+remain in the dev console. Invalid runtime diagnostics fail admission for all
+managed VPC dependencies and are not printed.
+
+Fix the LAN or VPN overlap, stop the dev command, inspect retained ownership with
+`stlv tunnel status`, and run `stlv tunnel cleanup` if cleanup is uncertain. Restart
+`stlv dev` to acquire a new session. A terminal configuration failure is not retried
+in place. Keep journals and foreign routes intact so cleanup can prove ownership.
+The standalone command instead exits with an error on a terminal VPC failure.
 
 ### Standalone access
 

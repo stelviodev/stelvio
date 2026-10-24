@@ -118,7 +118,84 @@ Per-identity lock files remain in place. Unit tests cover pin ownership, foreign
 instance refusal, command uncertainty, and cleanup ordering. Live AWS acceptance
 is pending until this explicitly enabled lane is run.
 
+`tests/test_cli_dev.py` and `tests/bridge/test_dev_admission.py` verify that `stlv dev`
+captures the session before deployment cleanup, starts networking before AppSync,
+closes ownership after bridge exit, and rejects expired or unavailable dependent
+invocations before handler dispatch. Function tests verify that rejection happens
+before importing user code. Non-VPC dispatch remains available.
+
+The dev-command scenario in `test_standalone.py` first pins a key through
+standalone mode, then runs fresh dev commands through the real shared session,
+SSH transport, and bridge admission code with controlled external boundaries.
+It checks that changed keys block dependent handler dispatch across restarts,
+ordinary handlers still run, diagnostics include fingerprints and reset guidance,
+and the original key works again in a fresh session. It does not contact AWS or
+start AppSync.
+
+Run the focused dev integration checks with:
+
+```bash
+uv run pytest \
+  tests/test_cli_dev.py \
+  tests/bridge/test_dev_admission.py \
+  tests/aws/function/test_function_dev_mode.py \
+  tests/tunnel/test_dev_session.py -q
+```
+
+## Dev mode AWS acceptance
+
+The opt-in dev scenario uses public Function URLs to reach local handlers. Its proof
+app combines `bastion=True`, `bastion={}`, a disabled-bastion VPC, and a non-VPC
+Function. The DocumentDB handlers verify TLS, member discovery, and reads/writes
+using distinct markers that are checked against both databases. The test stops one
+bastion, requires the structured `VpcUnavailableError` before handler import,
+confirms the peer and independent endpoints remain usable, then waits for both the
+advanced helper generation and a fresh network-ready report before retrying.
+Within one command, observed generations must never decrease. Recovery can need several
+attempts: after the first activation, each configured failure and retry advances
+two more generations. The observer requires a fresh ready report and a valid
+retirement/activation cycle in the same log snapshot, within one timeout. It does not require a
+single attempt. The scenario also
+rotates the proof-owned bastion SSH host key, checks terminal `ssh-host-key`
+admission failure and DNS `SERVFAIL`, and restarts dev mode while the changed key
+is still present. The new command must reject the same key and retain the original
+pin while independent endpoints remain usable. The test restores the original key
+and starts a fresh session to verify recovery. SIGINT and SIGKILL cleanup,
+restart, SSM termination, retained bastions,
+stable resolver ports, and unchanged deployment state are checked as well.
+
+A separate opt-in case invokes a real non-VPC Function URL while the helper is
+uninstalled. The exclusive `macos_host` fixture restores the exact helper image
+captured before the run.
+
+This lane deploys a three-VPC proof app (two bastion-enabled VPCs and one disabled
+VPC) and changes host networking. It requires an authorized AWS profile and
+expected account, macOS 15 or later, an installed helper, an idle host, and no
+parallel test workers:
+
+```bash
+STLV_TEST_AWS_PROFILE=<authorized-profile> \
+STLV_TEST_TUNNEL_AWS_ACCOUNT=<expected-account-id> \
+uv run pytest \
+  tests/integration/test_tunnel.py \
+  --integration-macos-privileged --integration-tunnel -n 0 -q
+```
+
+The fixtures check the account before deployment. Dev and standalone acceptance
+share the guarded, nonce-owned host-key rotation fixture described above. Unknown
+Run Command outcomes stop further fault commands and require proof teardown;
+they do not trigger a racing restoration. The non-VPC case
+temporarily uninstalls the helper and lets `macos_host` restore the original bytes.
+The AWS fixture destroys each proof app only after helper cleanup is certified.
+These tests are separate from `tests/integration/run_all.sh` and remain pending
+until explicitly authorized and run.
+
 ## Unit tests
+
+The CLI teardown unit tests use a temporary helper path and explicit VPC policy.
+They cover both helper presence and absence without an installed helper or macOS.
+An absent helper permits non-VPC teardown only; active or uncertain helper state
+blocks destruction and trust-record removal. These checks do not change host networking.
 
 Run the Python tunnel suite with the normal repository checks:
 
@@ -361,4 +438,116 @@ ARNs; missing ARNs or failed AWS requests fail the audit rather than certifying
 cleanup. Both ownership tags must match before an otherwise unrelated name is
 reported as belonging to the proof application.
 
+Dev acceptance captures exact Lambda log groups for its random proof app before
+destroy. After AWS confirms the proof Functions are gone, it deletes their exact
+default log-group names from the verified deployment outputs. This includes
+groups that Lambda creates during destroy, even when the earlier capture was
+empty. Missing
+groups are safe to delete. It then checks the proof app/environment prefix until
+all groups are absent.
+A pre-existing group under a newly selected proof name stops setup before deploy.
+The AWS test identity needs logs:DescribeLogGroups and logs:DeleteLogGroup. Cleanup
+never deletes a group for an untracked Function, even with the same app prefix.
+The independent audit remains read-only and reports any remaining group.
+`test_dev_destroy_removes_late_log_groups_for_verified_functions` covers both an
+empty capture and an existing group when another group appears during destroy.
+
 These checks do not certify a live acceptance run.
+
+
+## Dev-mode subnet routing and diagnostics
+
+```bash
+uv run pytest tests/tunnel/test_dev_session.py tests/test_cli_dev.py \
+  tests/bridge/test_dev_admission.py -q
+```
+
+The combined boundary regression runs dev command capture, the actual shared
+session and admission code, and actual bridge message dispatch with controlled
+runtime and publish adapters. It verifies two-VPC subnet selection, preservation
+of full ownership CIDRs, console conflict diagnostics, and cleanup. A conflicted
+VPC is rejected before handler lookup while a healthy VPC and a plain handler
+still dispatch. Malformed diagnostics block managed dependencies and are not
+printed. Public invocation errors must not contain local route diagnostics.
+These tests do not start an AppSync connection or mutate host networking.
+
+The opt-in dev AWS scenarios reuse `assert_selected_routes()` after readiness,
+transport recovery, process restart, and recovery from a host-key failure. They
+retain the exact-route and excluded-address evidence described above, alongside
+Function URL, DocumentDB TLS/member discovery/read-write, admission, and baseline
+restoration checks. Collection alone does not certify live acceptance. Run the
+privileged/AWS lane only with the required authorization and exclusive host
+ownership. Native Intel acceptance remains pending until run on Intel hardware.
+
+
+## Automated dev startup
+
+AWS dev acceptance uses `stlv dev ENV --yes` for its proof-owned shared
+environment. CLI subprocesses receive closed stdin, so an unexpected interactive
+prompt fails instead of waiting for input. Production shared-environment
+confirmation remains enabled when `--yes` is omitted. Deterministic tests check
+the subprocess arguments, captured local-binary selection, and real CLI
+confirmation behavior before the opt-in AWS run. Standalone acceptance still uses
+`stlv tunnel start ENV` without deployment confirmation flags.
+
+## Deployment state baselines
+
+Standalone acceptance captures the deployed checkpoint before `stlv tunnel start`.
+Startup and shutdown must leave those exact bytes unchanged because the command
+does not deploy.
+
+Each `stlv dev` startup deploys fresh endpoint IDs. The acceptance fixture discards
+the previous baseline when it starts a dev command and captures a new one after
+both networking and the invocation bridge are ready. It compares exact checkpoint
+bytes from that point through shutdown. Later readiness checks do not refresh the
+baseline, and failed startup cannot reuse an earlier command's checkpoint.
+
+The reconnect/SIGKILL and host-key restart scenarios both use this lifecycle. Do
+not compare raw checkpoints across separate dev deployments or normalize away
+changes during a running session. Mocked regressions in
+`tests/integration/test_tunnel_audit.py` check baseline capture, restart, startup
+failure, and unexpected state changes without AWS or host mutations.
+
+## SSM cleanup and history finalization
+
+Each shutdown check requires matching production start, observed-session, and
+completion receipts. It reads only those exact private files and retains the
+original receipts. Missing or unsafe evidence fails acceptance. A completion
+receipt establishes the production cleanup acknowledgement; separate helper,
+host-baseline, and local-process checks remain hard gates.
+
+The audit paginates active-session inventory and requires three consecutive
+observations without the captured sessions, one second apart, within its
+60-second observation budget. It also verifies exact session, target, and reason
+in history. `Terminated` finalizes history. An inactive, acknowledged session
+with an owned `Terminating` history record and a valid end time may pass
+functional cleanup with a visible delayed-finalization diagnostic. Other history
+states, mismatched ownership, API failures, or active sessions still fail.
+
+Every check saves a unique private `ssm-cleanup-*.json` file in the generated
+proof project, including observations, completion receipts, and the separate
+functional-cleanup and history-finalization results. No credentials or session
+tokens are recorded. Failed audits retain their evidence too.
+
+Run the mocked regressions without AWS or host changes:
+
+```bash
+uv run pytest tests/integration/test_ssm_cleanup.py tests/integration/test_tunnel_audit.py -n 0
+```
+
+These local tests do not certify live acceptance. Record privileged and AWS
+results for each new candidate; previous failed runs retain their original result.
+
+
+### Worker-status checks in CLI acceptance
+
+Rich can wrap a worker-status message between fields in captured CLI output.
+The acceptance fixture reads one complete record across at most four lines and
+4096 characters. It requires the requested VPC identity, state, numeric attempt,
+exact cause, and DNS-retention flag in that record. A cause from another VPC or
+an unrelated message cannot satisfy the check. Incomplete records remain pending
+until more output arrives; command exit and timeout still fail the check.
+
+`tests/integration/test_tunnel_audit.py` covers unwrapped and wrapped records,
+partial output, neighboring VPCs, invalid fields, bounds, and command exit. The
+privileged AWS host-key scenario verifies the full rejection and restart path.

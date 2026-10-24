@@ -162,6 +162,13 @@ private destination ranges and cannot fall back to routing the entire VPC.
 A terminal VPC failure ends the standalone command; it does not leave a partially
 ready foreground session running. Keep any ownership evidence when cleanup fails.
 
+In `stlv dev`, a route conflict blocks invocations for that VPC before handler
+import. The dev command and unrelated handlers stay available. Read the subnet
+conflict in the local console, fix the LAN or VPN overlap, then stop and restart
+dev mode. If ownership is uncertain, keep the journal and use `stlv tunnel status`
+and `stlv tunnel cleanup` before the restart. The public Function response reports
+unavailable VPC dependencies without copying local route diagnostics.
+
 ### Managed VPC transport identity and authorization
 
 Managed VPC access stops when the captured AWS account or region differs from the
@@ -229,6 +236,14 @@ rm -rf .stelvio/lambda_dependencies
 ### Dev mode bridge does not connect
 
 The bridge waits up to 10 seconds for each AppSync connection or subscription acknowledgement. If it times out, check network access and the AppSync API key, then restart `stlv dev`.
+
+`stlv dev` starts managed networking before it starts the bridge. If the output says
+that a VPC is unavailable, only Functions that depend on that VPC are blocked. Check
+the reported phase and cause, then verify the selected AWS profile, bastion state,
+SSM access, and DocumentDB membership. A local image or plugin error is terminal;
+repair it with `stlv tunnel install` and restart dev. If cleanup is uncertain, retain
+the helper evidence and run `stlv tunnel status`, then `stlv tunnel cleanup` after
+dev has stopped.
 
 ## Getting Help
 
