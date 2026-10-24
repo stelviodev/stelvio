@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import os
+import platform
 from pathlib import Path
 
 from .store import digest, event, write_json
@@ -46,21 +47,42 @@ def pytest_sessionfinish(session, exitstatus):
 def pytest_configure(config):
     if not (
         config.getoption("integration_macos_privileged", default=False)
+        or config.getoption("integration_linux_privileged", default=False)
         or config.getoption("integration_tunnel", default=False)
     ):
         return
     from stelvio.tunnel import installation
     from tests.integration.cli_session import StandaloneCliSession
-    from tests.integration.macos_host import MacOSHost
 
-    original_bootstrap = installation._bootstrap
+    if platform.system() == "Linux":
+        from tests.integration.linux_host import LinuxHost as MacOSHost
+    else:
+        from tests.integration.macos_host import MacOSHost
+
+    if platform.system() == "Linux":
+        from stelvio.tunnel import linux_installation as admin
+    else:
+        admin = installation
+    original_bootstrap = admin.bootstrap if platform.system() == "Linux" else admin._bootstrap
 
     @functools.wraps(original_bootstrap)
     def bootstrap(asset, digest, *, cleanup=False):
         event(ROOT, "admin_image_intent", path=str(asset), digest=digest)
-        return original_bootstrap(asset, digest, cleanup=cleanup)
+        return original_bootstrap(
+            asset,
+            digest,
+            **({"remove": cleanup} if platform.system() == "Linux" else {"cleanup": cleanup}),
+        )
 
-    installation._bootstrap = bootstrap
+    if platform.system() == "Linux":
+
+        @functools.wraps(original_bootstrap)
+        def linux_bootstrap(asset, digest, *, remove=False):
+            return bootstrap(asset, digest, cleanup=remove)
+
+        admin.bootstrap = linux_bootstrap
+    else:
+        installation._bootstrap = bootstrap
     original_save = MacOSHost.save
 
     @functools.wraps(original_save)

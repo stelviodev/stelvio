@@ -37,6 +37,10 @@ def file_info(path):
 
 
 def snapshot():
+    if platform.system() == "Linux":
+        from .linux_host import snapshot as linux_snapshot
+
+        return linux_snapshot()
     if platform.system() != "Darwin" or os.geteuid() == 0:
         raise RuntimeError("Native acceptance requires macOS and an ordinary user")
     resolvers = Path("/etc/resolver")
@@ -115,6 +119,11 @@ def network_processes(text):
 
 
 def compare(before, after):
+    if before.get("platform") == "linux":
+        from .linux_host import compare as linux_compare
+
+        return linux_compare(before, after)
+
     def installed(value):
         return (
             {key: item for key, item in value.items() if key not in {"inode", "device"}}

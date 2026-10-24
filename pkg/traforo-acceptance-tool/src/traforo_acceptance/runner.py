@@ -69,7 +69,11 @@ def artifact(path):
 def authorize(root, data, env, execute, yes):
     candidate.validate(root / "source", data["selected"])
     before = host.snapshot()
-    if int(before["os"].split(".")[0]) < 15:
+    if before.get("platform") == "linux":
+        release = platform.freedesktop_os_release()
+        if release.get("ID") != "debian" or release.get("VERSION_ID") != "13":
+            raise RuntimeError("Linux native acceptance requires Debian 13")
+    elif int(before["os"].split(".")[0]) < 15:
         raise RuntimeError("Live acceptance requires macOS 15+")
     if before["administration_remnants"]:
         raise RuntimeError("Administration remnants exist; do not overwrite them")
@@ -215,6 +219,19 @@ def stage_commands(name, root, env):
                 source,
             )
         ]
+    if name == "native" and platform.system() == "Linux":
+        return [
+            (
+                pytest
+                + [
+                    "tests/integration/test_tunnel_linux.py",
+                    "--integration-linux-privileged",
+                    "-x",
+                    "-vv",
+                ],
+                source,
+            )
+        ]
     if name == "native":
         return [
             (
@@ -229,7 +246,9 @@ def stage_commands(name, root, env):
                     )
                 ]
                 + [
-                    "--integration-macos-privileged",
+                    "--integration-linux-privileged"
+                    if platform.system() == "Linux"
+                    else "--integration-macos-privileged",
                     "-x",
                     "-vv",
                     "-k",
@@ -244,7 +263,9 @@ def stage_commands(name, root, env):
                 pytest
                 + [
                     "tests/integration/test_tunnel_lambda.py",
-                    "--integration-macos-privileged",
+                    "--integration-linux-privileged"
+                    if platform.system() == "Linux"
+                    else "--integration-macos-privileged",
                     "--integration-tunnel",
                     "-x",
                     "-vv",
@@ -258,7 +279,9 @@ def stage_commands(name, root, env):
                 pytest
                 + [
                     f"tests/integration/test_tunnel.py::{AWS_TESTS[name]}",
-                    "--integration-macos-privileged",
+                    "--integration-linux-privileged"
+                    if platform.system() == "Linux"
+                    else "--integration-macos-privileged",
                     "--integration-tunnel",
                     "-x",
                     "-vv",
@@ -291,7 +314,7 @@ def safe_ssh_path(path):
         if info.st_uid not in (0, os.getuid()) or info.st_mode & 0o022:
             raise RuntimeError(
                 f"OpenSSH StrictModes rejects writable/foreign ancestor {parent}; "
-                "use the default run directory in the macOS private user temporary folder"
+                "use a private run directory beneath your home directory on Linux"
             )
 
 
@@ -379,7 +402,7 @@ def execute_stages(root: Path, yes=False):
                     if digest(image) != record["sha256"]:
                         raise RuntimeError("Build artifact digest mismatch")
                     artifacts[record["architecture"]] = artifact(image)
-                machine = platform.machine()
+                machine = {"aarch64": "arm64"}.get(platform.machine(), platform.machine())
                 artifacts["binary"] = artifacts[machine]
                 artifacts["provenance"] = artifact(manifest)
             if name == "distribution":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import stat
 import sys
 from pathlib import Path
@@ -16,6 +17,21 @@ def restore_images(installer, status, backup, expected, images):
     current = installer._installed_digest()
     if current is not None and current not in images:
         raise RuntimeError("Installed image is not a recorded test image")
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_installation import authorize, bootstrap
+
+        state = status()
+        if state.owned or state.uncertain or state.mutating or state.units:
+            raise RuntimeError("Live or uncertain Linux helper; restoration refused")
+        if backup and current != expected:
+            path = Path(backup)
+            if digest(path) != expected:
+                raise RuntimeError("Original Linux helper backup changed")
+            authorize(bootstrap(path, expected))
+            installer._wait_ready()
+        elif not backup and current is not None:
+            installer.uninstall_helper()
+        return
     directory = installer.INSTALLED_HELPER.parent
     remnants = list(directory.glob(".stelvio-traforo.*"))
     remnants = [p for p in remnants if p.name != ".stelvio-traforo.admin.lock"]
@@ -78,7 +94,10 @@ def main():
 
     if os.geteuid() == 0:
         raise RuntimeError("Run recovery as the ordinary run owner")
-    fd = os.open("/Library/LaunchDaemons", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    fd = os.open(
+        "/etc/systemd/system" if platform.system() == "Linux" else "/Library/LaunchDaemons",
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         restore_images(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import tempfile
 import traceback
 from pathlib import Path
@@ -118,7 +119,12 @@ def run(
             run_dir = run_dir.absolute()
             run_dir.mkdir(mode=0o700, parents=False, exist_ok=False)
         else:
-            run_dir = Path(tempfile.mkdtemp(prefix="traforo-acceptance-")).resolve()
+            if platform.system() == "Linux":
+                parent = Path.home() / ".local/state/stelvio/traforo-acceptance"
+                parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                run_dir = Path(tempfile.mkdtemp(prefix="run-", dir=parent)).resolve()
+            else:
+                run_dir = Path(tempfile.mkdtemp(prefix="traforo-acceptance-")).resolve()
         store = Store(run_dir)
         data = {
             "schema": SCHEMA,

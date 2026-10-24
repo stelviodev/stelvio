@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import platform
 import re
 import subprocess
 from pathlib import Path
@@ -97,6 +98,10 @@ def validate(source: Path, selected=()) -> None:
         "tests/integration/macos_host.py": {"MacOSHost", "prepare", "save", "restore"},
         "pkg/traforo-client-go/scripts/build.py": {"build", "goreleaser_version"},
     }
+    if platform.system() == "Linux":
+        required.pop("tests/integration/macos_host.py")
+        required["tests/integration/linux_host.py"] = {"LinuxHost", "prepare", "save", "restore"}
+        required["tests/integration/test_tunnel_linux.py"] = set()
     if "aws-lambda-vpc" in selected:
         required["tests/integration/lambda_tunnel_session.py"] = {
             "LambdaTunnelSession",

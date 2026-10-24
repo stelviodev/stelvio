@@ -45,3 +45,10 @@ def commit(repo: Path, message):
 
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], check=True)
+
+
+@pytest.fixture(autouse=True)
+def macos_adapter_fixtures(monkeypatch):
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
