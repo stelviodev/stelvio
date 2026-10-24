@@ -439,13 +439,18 @@ cleanup. Both ownership tags must match before an otherwise unrelated name is
 reported as belonging to the proof application.
 
 Dev acceptance captures exact Lambda log groups for its random proof app before
-destroy. It removes those groups only after AWS confirms the proof Functions are
-gone, then checks the proof app/environment prefix until all groups are absent.
+destroy. After AWS confirms the proof Functions are gone, it deletes their exact
+default log-group names from the verified deployment outputs. This includes
+groups that Lambda creates during destroy, even when the earlier capture was
+empty. Missing
+groups are safe to delete. It then checks the proof app/environment prefix until
+all groups are absent.
 A pre-existing group under a newly selected proof name stops setup before deploy.
 The AWS test identity needs logs:DescribeLogGroups and logs:DeleteLogGroup. Cleanup
-deletes only names captured before destroy, after Functions are absent. The audit
-reports any group that remains or appears later; it never adds that group to the
-deletion set.
+never deletes a group for an untracked Function, even with the same app prefix.
+The independent audit remains read-only and reports any remaining group.
+`test_dev_destroy_removes_late_log_groups_for_verified_functions` covers both an
+empty capture and an existing group when another group appears during destroy.
 
 These checks do not certify a live acceptance run.
 
