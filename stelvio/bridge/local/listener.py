@@ -4,6 +4,7 @@ import contextlib
 import datetime
 import json
 import signal
+import socket
 import threading
 import traceback
 import uuid
@@ -310,6 +311,34 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
 
 
 @contextlib.contextmanager
+def _signal_wakeup(loop: asyncio.AbstractEventLoop) -> Iterator[None]:
+    """Wake the selector even when a worker receives the OS signal.
+
+    Python runs signal handlers on the main thread. Without a wakeup fd, that
+    thread can stay asleep in select before our handler can schedule cancellation.
+    """
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        reader.setblocking(False)
+        writer.setblocking(False)
+
+        def drain() -> None:
+            with contextlib.suppress(BlockingIOError):
+                while reader.recv(4096):
+                    pass
+
+        loop.add_reader(reader.fileno(), drain)
+        try:
+            previous_fd = signal.set_wakeup_fd(writer.fileno(), warn_on_full_buffer=False)
+            try:
+                yield
+            finally:
+                signal.set_wakeup_fd(previous_fd)
+        finally:
+            loop.remove_reader(reader.fileno())
+
+
+@contextlib.contextmanager
 def _cancel_on_sigint(loop: asyncio.AbstractEventLoop, task: asyncio.Task[None]) -> Iterator[None]:
     """Defer Ctrl+C until asyncio finishes its current task transition."""
     if (
@@ -331,17 +360,18 @@ def _cancel_on_sigint(loop: asyncio.AbstractEventLoop, task: asyncio.Task[None])
         else:
             raise KeyboardInterrupt
 
-    previous_handler = signal.signal(signal.SIGINT, handle_sigint)
-    try:
+    with _signal_wakeup(loop):
+        previous_handler = signal.signal(signal.SIGINT, handle_sigint)
         try:
-            yield
-        except asyncio.CancelledError:
-            if interrupt_count:
-                raise KeyboardInterrupt from None
-            raise
-    finally:
-        if signal.getsignal(signal.SIGINT) is handle_sigint:
-            signal.signal(signal.SIGINT, previous_handler)
+            try:
+                yield
+            except asyncio.CancelledError:
+                if interrupt_count:
+                    raise KeyboardInterrupt from None
+                raise
+        finally:
+            if signal.getsignal(signal.SIGINT) is handle_sigint:
+                signal.signal(signal.SIGINT, previous_handler)
 
 
 def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
@@ -349,18 +379,20 @@ def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> Non
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     task = loop.create_task(main(region=region, profile=profile, app_name=app_name, env=env))
-    with _cancel_on_sigint(loop, task):
-        try:
-            loop.run_until_complete(task)
-        finally:
-            pending = asyncio.all_tasks(loop)
-            for future in pending:
-                future.cancel()
+    try:
+        with contextlib.ExitStack() as cleanup:
             try:
+                cleanup.enter_context(_cancel_on_sigint(loop, task))
+                loop.run_until_complete(task)
+            finally:
+                pending = asyncio.all_tasks(loop)
+                for future in pending:
+                    future.cancel()
                 if pending:
                     loop.run_until_complete(
                         asyncio.wait(pending, timeout=ASYNC_TASK_SHUTDOWN_TIMEOUT)
                     )
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
+    finally:
+        # Remove signal readers before closing the loop, even after setup failure.
+        loop.close()
+        asyncio.set_event_loop(None)
