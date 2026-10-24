@@ -189,4 +189,11 @@ def monitor(session_id: object) -> None:
         )
     from stelvio.tunnel.monitor.app import TunnelMonitor  # noqa: PLC0415
 
-    TunnelMonitor(str(session_id) if session_id else None).run()
+    # Textual's Unix driver writes to sys.__stderr__. Stelvio redirects fd 2
+    # for native gRPC noise. Use the stdout terminal validated above.
+    original = sys.__stderr__
+    try:
+        sys.__stderr__ = sys.stdout
+        TunnelMonitor(str(session_id) if session_id else None).run()
+    finally:
+        sys.__stderr__ = original
