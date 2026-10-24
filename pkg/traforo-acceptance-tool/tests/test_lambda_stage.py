@@ -79,7 +79,7 @@ def test_command_runs_shared_module_once_with_both_flags(run_root):
     assert cwd == run_root / "source"
 
 
-def test_five_call_results_required_and_skip_is_not_pass(run_root):
+def test_seven_call_results_required_and_skip_is_not_pass(run_root):
     names = sorted(LAMBDA_TESTS)
     for name in names[:-1]:
         event(
@@ -90,7 +90,7 @@ def test_five_call_results_required_and_skip_is_not_pass(run_root):
             outcome="passed",
             nodeid=f"tests/integration/test_tunnel_lambda.py::{name}",
         )
-    with pytest.raises(RuntimeError, match="five"):
+    with pytest.raises(RuntimeError, match="seven"):
         runner.validate_lambda_results(run_root)
     event(
         run_root,
@@ -132,7 +132,7 @@ def test_adapter_missing_fixture_fails_before_tools(tmp_path):
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-    with pytest.raises(RuntimeError, match="both ea1d9144 and e196a31d"):
+    with pytest.raises(RuntimeError, match="ea1d9144, e196a31d, and 49eafd2a"):
         candidate.validate(tmp_path, ["aws-lambda-vpc"])
 
 
@@ -363,6 +363,7 @@ def test_incomplete_faults_resolve_only_after_exact_bastion_absence(run_root, pr
 def observed(run_root, proof, api_sdk, monkeypatch):
     """A fake candidate, including subclass overrides and base-method delegation."""
     sdk, values = api_sdk
+    sdk.responses[("lambda", "get_function")] = error("ResourceNotFoundException")
     from traforo_acceptance import pytest_plugin
 
     class Api:
@@ -402,7 +403,12 @@ def observed(run_root, proof, api_sdk, monkeypatch):
             pass
 
         def _start(self, *args, **kwargs):
-            pass
+            self.process = SimpleNamespace(pid=123, args=args[0], poll=lambda: None)
+
+        def wait_host_key_refusal(self, instance_id):
+            if getattr(self, "refusal_fails", False):
+                raise AssertionError("wrong startup status")
+            return "cause=ssh-host-key"
 
         @contextmanager
         def rotated_host_key(self, instance):
@@ -423,12 +429,17 @@ def observed(run_root, proof, api_sdk, monkeypatch):
             self.project = Path(proof["project"])
             self.aws, self.apis = sdk, {1: Api(1), 2: Api(2)}
             self._outputs, self._manifest = {}, None
+            self.log_path = self.project / "cli.log"
 
         def deploy(self):
             for api in self.apis.values():
                 api.create()
             self.command("deploy", self.environment_name, "--yes")
-            self._manifest = object()
+            self._manifest = SimpleNamespace(
+                used_vpcs=[
+                    SimpleNamespace(identity=f"aws::net{n}", vpc_id=f"vpc{n}") for n in (1, 2, 3)
+                ]
+            )
             prefix = f"{self.app}-{self.environment_name}"
             for number in self.apis:
                 self._outputs.update(
@@ -438,6 +449,8 @@ def observed(run_root, proof, api_sdk, monkeypatch):
                         f"backend{number}_name": f"{prefix}-echo{number}",
                     }
                 )
+            for number in (3, 4):
+                self._outputs[f"function{number}_name"] = f"{prefix}-client{number}"
             self.write_evidence()
 
         def destroy(self):
@@ -501,6 +514,18 @@ def test_subclass_registration_and_shared_deployment_are_not_duplicated(run_root
     topology = next(r["targets"] for r in records if r["kind"] == "lambda_topology")
     assert len(topology) == 2
     assert all(len(v["functions"]) == 2 for v in topology.values())
+    record = next(r for r in records if r["kind"] == "lambda_topology")
+    assert len(record["functions"]) == 6
+    assert len(record["vpcs"]) == 3
+    assert record["clients"]["3"]["networking"] == "disabled"
+    assert record["clients"]["3"]["vpc_id"] == "vpc3"
+    assert record["clients"]["4"] == {
+        "name": f"{session.app}-{session.environment_name}-client4",
+        "vpc_id": None,
+        "networking": "none",
+    }
+    # Only the two managed targets require access metadata.
+    assert set(topology) == {"1", "2"}
 
 
 def test_second_creation_failure_retains_first_receipt_and_no_deploy_intent(run_root, observed):
@@ -549,7 +574,7 @@ def test_lambda_skip_or_failed_call_prevents_acceptance(run_root):
             nodeid=f"module::{name}",
             outcome="skipped" if index == 0 else "passed",
         )
-    with pytest.raises(RuntimeError, match="all five"):
+    with pytest.raises(RuntimeError, match="all seven"):
         runner.validate_lambda_results(run_root)
 
 
@@ -590,3 +615,234 @@ def test_gateway_and_captured_endpoint_requests_match_sdk_models(run_root, proof
     )
     lambda_aws.capture_proof(run_root, sdk, proof)
     assert lambda_aws.recover_apis(run_root, sdk, proof)[0]["outcome"] == "completed"
+
+
+@pytest.mark.parametrize("change", ["duplicate", "unexpected", "skipped", "failed"])
+def test_seven_case_gate_rejects_invalid_call_sets(run_root, change):
+    names = sorted(LAMBDA_TESTS)
+    assert len(names) == 7
+    for index, name in enumerate(names):
+        event(
+            run_root,
+            "test_result",
+            stage="aws-lambda-vpc",
+            phase="call",
+            nodeid=f"module::{name if change != 'unexpected' or index else 'test_unexpected'}",
+            outcome=change if index == 0 and change in {"skipped", "failed"} else "passed",
+        )
+    if change == "duplicate":
+        event(
+            run_root,
+            "test_result",
+            stage="aws-lambda-vpc",
+            phase="call",
+            nodeid=f"module::{names[0]}",
+            outcome="passed",
+        )
+    with pytest.raises(RuntimeError, match="all seven"):
+        runner.validate_lambda_results(run_root)
+
+
+def test_topology_survives_partial_deployment_without_manifest(run_root, observed):
+    session, _, _ = observed
+    session._outputs = {"function3_name": f"{session.app}-{session.environment_name}-client3"}
+    session.write_evidence()
+    record = next(r for r in reversed(events(run_root)) if r["kind"] == "lambda_topology")
+    assert record["functions"] == list(session._outputs.values())
+    assert record["targets"] == {} and record["vpcs"] == []
+    assert record["clients"]["3"]["networking"] == "disabled"
+    assert record["clients"]["3"]["vpc_id"] is None
+
+
+@pytest.mark.parametrize("survivor", ["client3", "client4", "vpc3"])
+def test_exact_inventory_finds_plain_peer_after_other_resources_are_absent(
+    run_root, proof, api_sdk, survivor
+):
+    sdk, _ = api_sdk
+    prefix = f"{proof['app']}-{proof['env']}-"
+    names = [
+        f"{prefix}{kind}{n}"
+        for kind, numbers in (("client", (1, 2, 3, 4)), ("backend", (1, 2)))
+        for n in numbers
+    ]
+    vpcs = [{"id": f"vpc{n}", "identity": f"aws::net{n}"} for n in (1, 2, 3)]
+    event(
+        run_root,
+        "lambda_topology",
+        **proof,
+        targets={},
+        functions=names,
+        vpcs=vpcs,
+        clients={"3": {"networking": "disabled"}},
+    )
+
+    def function(args):
+        name = args["FunctionName"]
+        if name != prefix + survivor:
+            raise error("ResourceNotFoundException")
+        return {
+            "Configuration": {
+                "FunctionName": name,
+                "FunctionArn": (
+                    f"arn:aws:lambda:{proof['region']}:{proof['account']}:function:{name}"
+                ),
+            }
+        }
+
+    def vpc(args):
+        if args.get("VpcIds") != [survivor]:
+            if "VpcIds" in args:
+                raise error("InvalidVpcID.NotFound")
+            return {}
+        return {
+            "Vpcs": [
+                {
+                    "VpcId": survivor,
+                    "OwnerId": proof["account"],
+                    "Tags": [
+                        {"Key": "stelvio:app", "Value": proof["app"]},
+                        {"Key": "stelvio:env", "Value": proof["env"]},
+                    ],
+                }
+            ]
+        }
+
+    sdk.responses[("lambda", "get_function")] = function
+    sdk.responses[("ec2", "describe_vpcs")] = vpc
+    snapshot = lambda_aws.capture_proof(run_root, sdk, proof)
+    key = "captured_vpcs" if survivor == "vpc3" else "captured_functions"
+    assert snapshot["remaining"] == {key: [survivor if survivor == "vpc3" else prefix + survivor]}
+    assert len([1 for s, op, _ in sdk.calls if s == "lambda" and op == "get_function"]) == 6
+    assert len([1 for s, op, a in sdk.calls if op == "describe_vpcs" and "VpcIds" in a]) == 3
+    assert snapshot["vpc_views"]["3"]["networking"] == "disabled"
+    assert not any(s == "docdb" for s, _, _ in sdk.calls)
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_each_command_and_host_key_startup_refusal_is_recorded(
+    run_root, observed, monkeypatch, failed
+):
+    from traforo_acceptance import ownership
+
+    session, _, _ = observed
+    monkeypatch.setattr(ownership, "process_record", lambda pid: {"pid": pid, "uid": 502})
+    session.refusal_fails = failed
+    for _ in range(2):
+        session._start(["tunnel", "start"], mode="tunnel")
+        session.process.poll = lambda: 1
+        if failed:
+            with pytest.raises(AssertionError):
+                session.wait_host_key_refusal("i1")
+        else:
+            session.wait_host_key_refusal("i1")
+    records = events(run_root)
+    assert sum(r["kind"] == "proof_command" for r in records) == 2
+    refusals = [r for r in records if r["kind"] == "startup_refusal_result"]
+    assert len(refusals) == 2
+    assert all(r["outcome"] == ("failed" if failed else "passed") for r in refusals)
+    assert all(r["exit_code"] == 1 and r["instance_id"] == "i1" for r in refusals)
+
+
+@pytest.mark.parametrize(
+    "missing", [None, "check_plain_clients", "wait_host_key_refusal", "new_cases"]
+)
+def test_candidate_requires_expanded_lambda_interfaces(tmp_path, missing):
+    cases = sorted(LAMBDA_TESTS)
+    if missing == "new_cases":
+        cases.remove("test_lambda_dev_sigkill_and_restart")
+        cases.remove("test_lambda_standalone_host_key_startup_refusal")
+    methods = {"deploy", "destroy", "stopped_bastion", "write_evidence", "check_plain_clients"}
+    base = {"deploy", "destroy", "wait_host_key_refusal"}
+    methods.discard(missing)
+    base.discard(missing)
+    fixtures = {
+        "tests/integration/cli_session.py": "class StandaloneCliSession:\n"
+        + "".join(f"    def {name}(self): pass\n" for name in sorted(base)),
+        "tests/integration/macos_host.py": (
+            "class MacOSHost: pass\ndef prepare(): pass\ndef save(): pass\ndef restore(): pass"
+        ),
+        "pkg/traforo-client-go/scripts/build.py": (
+            "def build(): pass\ndef goreleaser_version(): pass"
+        ),
+        "pkg/traforo-client-go/.github/workflows/release.yml": "version: v2.18.3",
+        "tests/integration/lambda_tunnel_session.py": (
+            "class LambdaTunnelSession:\n"
+            + "".join(f"    def {name}(self): pass\n" for name in sorted(methods))
+            + "class PrivateApi:\n    def create(self): pass\n    def destroy(self): pass\n"
+            "def retry_api_throttling(): pass\n"
+        ),
+        "tests/integration/test_tunnel_lambda.py": "\n".join(f"def {n}(): pass" for n in cases),
+        **dict.fromkeys(
+            [
+                "tests/integration/test_tunnel.py",
+                "tests/integration/test_tunnel_host.py",
+                "tests/integration/test_tunnel_dns.py",
+                "tests/integration/handlers/tunnel_lambda_app.py.txt",
+                "tests/integration/handlers/tunnel_lambda_probe.py",
+            ],
+            "",
+        ),
+    }
+    for relative, text in fixtures.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    if missing:
+        with pytest.raises(RuntimeError, match="unsupported interface|Unsupported Lambda"):
+            candidate.validate(tmp_path, ["aws-lambda-vpc"])
+    else:
+        candidate.validate(tmp_path, ["aws-lambda-vpc"])
+
+
+@pytest.mark.parametrize("resource", ["vpc", "function"])
+def test_exact_plain_resource_identity_mismatch_is_not_absence(run_root, proof, api_sdk, resource):
+    sdk, _ = api_sdk
+    name = f"{proof['app']}-{proof['env']}-client4"
+    if resource == "vpc":
+        sdk.responses[("ec2", "describe_vpcs")] = lambda args: (
+            {"Vpcs": [{"VpcId": "vpc3", "OwnerId": "999999999999"}]} if "VpcIds" in args else {}
+        )
+        previous = [{"vpc_records": [{"id": "vpc3"}]}]
+    else:
+        sdk.responses[("lambda", "get_function")] = {
+            "Configuration": {
+                "FunctionName": name,
+                "FunctionArn": "arn:aws:lambda:us-east-1:999999999999:function:foreign",
+            }
+        }
+        previous = [{"functions": [name]}]
+    with pytest.raises(RuntimeError, match="ownership changed|identity changed"):
+        aws.capture(sdk, proof, previous)
+
+
+def test_log_cleanup_refuses_exact_remaining_plain_function(run_root, proof, api_sdk, monkeypatch):
+    sdk, _ = api_sdk
+    event(run_root, "application_deploy_intent", **proof)
+    snapshot = {"remaining": {"captured_functions": ["client4"], "log_groups": ["log4"]}}
+    monkeypatch.setattr(recovery, "capture_proof", lambda *args: snapshot)
+    actions = recovery.recover_lambda_application(
+        run_root, sdk, proof, Path(proof["project"]), lambda *args: None, {}
+    )
+    assert any(a["outcome"] == "failed" and "Functions remain" in a["error"] for a in actions)
+    assert not any(operation == "delete_log_group" for _, operation, _ in sdk.calls)
+
+
+def test_report_preserves_all_seven_cases_and_phases_deterministically(run_root):
+    for name in sorted(LAMBDA_TESTS):
+        for phase in ("setup", "call", "teardown"):
+            event(
+                run_root,
+                "test_result",
+                stage="aws-lambda-vpc",
+                nodeid=f"module::{name}",
+                phase=phase,
+                outcome="passed",
+                duration=0.125,
+            )
+    report = generate(run_root)
+    assert len(report["test_results"]) == 21
+    text = (run_root / "report.md").read_text()
+    assert all(name in text for name in LAMBDA_TESTS)
+    assert "| teardown | passed | 0.125 |" in text
+    assert generate(run_root) == report
+    assert (run_root / "report.md").read_text() == text

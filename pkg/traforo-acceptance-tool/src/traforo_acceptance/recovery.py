@@ -174,7 +174,7 @@ def recover_lambda_application(root, sdk, proof, project, execute, env):
     try:
         current = capture_proof(root, sdk, proof, prior_snapshots(root, proof["app"]))
         event(root, "proof_inventory", **proof, snapshot=current)
-        if current["remaining"].get("functions"):
+        if current["remaining"].get("functions") or current["remaining"].get("captured_functions"):
             raise RuntimeError("Functions remain; refusing log deletion")
         allowed = {
             f"/aws/lambda/{name}"
@@ -262,7 +262,9 @@ def recover(root: Path, execute, env):
                 # Delete only exact function log groups captured before destruction,
                 # and only after all proof functions have disappeared.
                 current = aws.capture(sdk, proof, [snapshot])
-                if current["remaining"].get("functions"):
+                if current["remaining"].get("functions") or current["remaining"].get(
+                    "captured_functions"
+                ):
                     raise RuntimeError("Functions remain; refusing log deletion")
                 allowed = {
                     f"/aws/lambda/{name}"

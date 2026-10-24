@@ -278,11 +278,11 @@ def validate_lambda_results(root):
         and r["phase"] == "call"
     ]
     if (
-        len(calls) != 5
+        len(calls) != len(LAMBDA_TESTS)
         or {r["nodeid"].rsplit("::", 1)[-1] for r in calls} != LAMBDA_TESTS
         or any(r["outcome"] != "passed" for r in calls)
     ):
-        raise RuntimeError("aws-lambda-vpc requires all five Lambda cases to pass")
+        raise RuntimeError("aws-lambda-vpc requires all seven Lambda cases to pass")
 
 
 def safe_ssh_path(path):

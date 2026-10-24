@@ -188,11 +188,22 @@ def capture_proof(root: Path, sdk, proof, previous=()):
     records = [r for r in events(root) if r.get("app") == proof["app"]]
     topology = next((r["targets"] for r in reversed(records) if r["kind"] == "lambda_topology"), {})
     known = {
+        "functions": sorted(
+            {
+                name
+                for r in records
+                if r["kind"] == "lambda_topology"
+                for name in r.get("functions", [])
+            }
+        ),
+        "vpc_records": [
+            v for r in records if r["kind"] == "lambda_topology" for v in r.get("vpcs", [])
+        ],
         "endpoint_records": [
             dict(id=t["endpoint_id"], vpc=t["vpc_id"], interfaces=[])
             for t in topology.values()
             if t.get("endpoint_id")
-        ]
+        ],
     }
     snapshot = aws.capture(sdk, proof, [*previous, known])
     reader = aws.Reader(sdk)
@@ -209,6 +220,8 @@ def capture_proof(root: Path, sdk, proof, previous=()):
             }
             snapshot.setdefault("unknown", []).append(f"API {number}: {error}")
     snapshot["apis"] = apis
+    latest = next((r for r in reversed(records) if r["kind"] == "lambda_topology"), {})
+    snapshot["clients"] = latest.get("clients", {})
     if remaining := [v["api_id"] for v in apis.values() if v["outcome"] == "remaining"]:
         snapshot["remaining"]["private_apis"] = remaining
     faults = {}
@@ -275,4 +288,13 @@ def capture_proof(root: Path, sdk, proof, previous=()):
         }
         for number in (1, 2)
     }
+    for vpc in latest.get("vpcs", []):
+        if vpc["identity"].endswith("::net3"):
+            snapshot["vpc_views"]["3"] = {
+                "networking": "disabled",
+                "client": snapshot["clients"].get("3"),
+                "vpc": next(
+                    (v for v in snapshot.get("vpc_records", []) if v["id"] == vpc["id"]), None
+                ),
+            }
     return snapshot

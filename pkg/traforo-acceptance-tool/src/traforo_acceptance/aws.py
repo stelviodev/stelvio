@@ -75,7 +75,7 @@ def capture(sdk, proof, previous=()):
         {"Name": "tag:stelvio:env", "Values": [env]},
     ]
     remaining = {}
-    endpoint_records = {}
+    endpoint_records, vpc_records = {}, {}
     instances, volumes, secrets, functions = set(), set(), set(), set()
     for reservation in reader.pages("ec2", "describe_instances", "Reservations", Filters=filters):
         for instance in reservation["Instances"]:
@@ -99,6 +99,8 @@ def capture(sdk, proof, previous=()):
     ):
         parameters = {"Filter" if operation == "describe_nat_gateways" else "Filters": filters}
         rows = list(reader.pages("ec2", operation, key, **parameters))
+        if operation == "describe_vpcs" and proof.get("suite") == "lambda-vpc":
+            vpc_records.update({row["VpcId"]: {"id": row["VpcId"]} for row in rows})
         if operation == "describe_vpc_endpoints" and proof.get("suite") == "lambda-vpc":
             for row in rows:
                 endpoint_records[row["VpcEndpointId"]] = {
@@ -173,6 +175,44 @@ def capture(sdk, proof, previous=()):
                 remaining.setdefault("secrets", []).append(secret)
     if proof.get("suite") == "lambda-vpc":
         for prior in previous:
+            for row in prior.get("vpc_records", []):
+                vpc_records.setdefault(row["id"], dict(row))
+        for identifier, vpc in sorted(vpc_records.items()):
+            try:
+                rows = reader.call("ec2", "describe_vpcs", VpcIds=[identifier]).get("Vpcs", [])
+            except ClientError as error:
+                if error.response["Error"]["Code"] != "InvalidVpcID.NotFound":
+                    raise
+                rows = []
+            vpc["outcome"] = "absent"
+            for row in rows:
+                tags = {t["Key"]: t["Value"] for t in row.get("Tags", [])}
+                if (
+                    row["VpcId"] != identifier
+                    or row.get("OwnerId") != proof["account"]
+                    or tags.get("stelvio:app") != app
+                    or tags.get("stelvio:env") != env
+                ):
+                    raise RuntimeError("Captured VPC ownership changed")
+                vpc["outcome"] = "remaining"
+                remaining.setdefault("captured_vpcs", []).append(identifier)
+        for name in sorted(functions):
+            if not name.startswith(prefix):
+                raise RuntimeError("Captured Function namespace changed")
+            try:
+                config = reader.call("lambda", "get_function", FunctionName=name).get(
+                    "Configuration", {}
+                )
+            except ClientError as error:
+                if error.response["Error"]["Code"] != "ResourceNotFoundException":
+                    raise
+                continue
+            if config.get("FunctionName") != name or config.get("FunctionArn", "").split(":")[
+                2:
+            ] != ["lambda", proof["region"], proof["account"], "function", name]:
+                raise RuntimeError("Captured Function identity changed")
+            remaining.setdefault("captured_functions", []).append(name)
+        for prior in previous:
             for row in prior.get("endpoint_records", []):
                 known = endpoint_records.setdefault(row["id"], dict(row))
                 if known.get("vpc") != row.get("vpc"):
@@ -237,7 +277,10 @@ def capture(sdk, proof, previous=()):
         "functions": sorted(functions),
         "ssm_history": history,
         **(
-            {"endpoint_records": list(endpoint_records.values())}
+            {
+                "endpoint_records": list(endpoint_records.values()),
+                "vpc_records": list(vpc_records.values()),
+            }
             if proof.get("suite") == "lambda-vpc"
             else {}
         ),

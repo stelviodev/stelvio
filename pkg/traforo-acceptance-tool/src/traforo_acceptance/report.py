@@ -50,6 +50,7 @@ def generate(root: Path):
         "results": data["results"],
         "commands": commands,
         "failures": failures,
+        "test_results": [r for r in records if r["kind"] == "test_result"],
         "skips": skips,
         "recovery": data.get("recovery", []),
         "audit": data.get("audit", {}),
@@ -89,6 +90,22 @@ def generate(root: Path):
         lines.append(
             f"| {name} | {result.get('outcome', 'not-run')} | {result.get('runtime', '')} |"
         )
+    if report["test_results"]:
+        lines.extend(
+            [
+                "",
+                "### Test phases",
+                "",
+                "| Stage | Case | Phase | Outcome | Runtime (s) |",
+                "|---|---|---|---|---|",
+            ]
+        )
+        for case in report["test_results"]:
+            lines.append(
+                f"| {case.get('stage', '')} | {case.get('nodeid', 'unknown')} | "
+                f"{case.get('phase', 'unknown')} | "
+                f"{case['outcome']} | {case.get('duration', '')} |"
+            )
     for command in commands:
         lines.extend(
             [

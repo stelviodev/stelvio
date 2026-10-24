@@ -140,6 +140,16 @@ def pytest_configure(config):
         try:
             return original_start(session, *args, **kwargs)
         finally:
+            if session.process is not None:
+                event(
+                    ROOT,
+                    "proof_command",
+                    **registration(session),
+                    pid=session.process.pid,
+                    arguments=getattr(session.process, "args", None),
+                    mode=kwargs.get("mode"),
+                    exit_code=session.process.poll(),
+                )
             if session.process is not None and session.process.poll() is None:
                 event(
                     ROOT,

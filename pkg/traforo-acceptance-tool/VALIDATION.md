@@ -140,3 +140,48 @@ uv run pytest tests/integration/test_tunnel_lambda.py \
 The retained collection commands also load the tool's external pytest observer.
 Use the README command to run the actual stage only after reviewing its AWS costs,
 permissions, ownership checks, and authorization requirements.
+
+
+## Seven-case Lambda extension — 2026-10-24
+
+The current adapter requires PR #411's interfaces at
+`49eafd2a651dabd72b59c60bcea1e33f95b47a42`. The preceding five-case record applies
+only to its earlier candidate. This section supersedes it for current interface
+validation; it does not claim live acceptance.
+
+- Base: `f87bd5bcb6c155c875b1ac8685da1fda74b821c9`.
+- Ordered patches: `ea1d914483baf87ae43ec569e041d082bb8f799d`,
+  `e196a31d46bc90e9857f3c72b89ed58c9a64cc3a`,
+  `49eafd2a651dabd72b59c60bcea1e33f95b47a42`.
+- Source fingerprint: `6e9cc729a7617f111fc0b23bf2d28e5fae03707bc386fec6f19cf31545def28a`.
+- Resulting diff SHA-256: `02212b0848524ad7d93b17a11383154ddedf56e185e6d469c0fb82f1d5ebf33c`.
+- Evidence: `traforo-lambda-seven-validation-cyfdsr_1` in the host's private user-temporary directory.
+  Command logs, candidate identity, test output, and collection output are retained.
+  The candidate source fingerprint was unchanged after checks.
+
+| Check | Result |
+|---|---|
+| Tool unit tests | 90 passed |
+| Tool lint and non-writing format check | Passed |
+| Tool wheel and sdist | Built; observer and audit modules included |
+| Candidate adapter validation | Passed with all three explicit patches |
+| PR #411 fixture unit tests | 33 passed |
+| Lambda collection with external observer | Exactly seven tests |
+| Lambda plus separate non-VPC collection | Exactly eight tests |
+| Integration fixtures, host administration, AWS deployment | Not executed; live acceptance pending |
+
+New regressions cover the seven-case gate, new fixture interfaces, all six
+Function names, three VPCs, partial outputs without a manifest, disabled/non-VPC
+clients without managed access metadata, independent exact-ID absence checks,
+foreign identity refusal, per-command/startup-refusal records, retained log
+ownership, and deterministic reports with all case phases and timings. Existing
+API, endpoint, fault, DocumentDB, and report tests remain passing.
+
+Use the README's three-patch command for a live run. To reproduce nonprivileged
+fixture checks and collection, use the commands in the earlier section against
+this new candidate. Expected collection counts are seven and eight, respectively.
+These commands collect integration cases without executing their fixtures.
+
+No Go source, release pins, helper installation, host networking, AWS deployment,
+or PR #411 files were changed. Live SIGKILL/restart, startup refusal, and cleanup
+through the expanded runner remain unverified. Intel networking remains pending.

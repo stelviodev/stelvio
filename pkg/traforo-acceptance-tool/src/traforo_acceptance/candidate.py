@@ -107,6 +107,7 @@ def validate(source: Path, selected=()) -> None:
             "retry_api_throttling",
             "stopped_bastion",
             "write_evidence",
+            "check_plain_clients",
         }
         required["tests/integration/test_tunnel_lambda.py"] = set()
     for relative, names in required.items():
@@ -114,7 +115,8 @@ def validate(source: Path, selected=()) -> None:
         if not path.is_file():
             raise RuntimeError(
                 f"Adapter {ADAPTER}: missing {relative}. For aws-lambda-vpc, select a candidate "
-                "containing PR #411 at e196a31d, or explicitly apply both ea1d9144 and e196a31d "
+                "containing PR #411 at 49eafd2a, or explicitly apply "
+                "ea1d9144, e196a31d, and 49eafd2a "
                 "with --patch. No patches are fetched or applied automatically."
             )
         symbols = {
@@ -143,7 +145,13 @@ def validate(source: Path, selected=()) -> None:
         fixture = ast.parse((source / "tests/integration/lambda_tunnel_session.py").read_text())
         classes = {n.name: n for n in fixture.body if isinstance(n, ast.ClassDef)}
         for name, methods in {
-            "LambdaTunnelSession": {"deploy", "destroy", "stopped_bastion"},
+            "LambdaTunnelSession": {
+                "deploy",
+                "destroy",
+                "stopped_bastion",
+                "check_plain_clients",
+                "write_evidence",
+            },
             "PrivateApi": {"create", "destroy"},
         }.items():
             if name not in classes or not methods <= {
@@ -156,6 +164,19 @@ def validate(source: Path, selected=()) -> None:
         ):
             if not (source / relative).is_file():
                 raise RuntimeError(f"Missing Lambda fixture input: {relative}")
+        base = ast.parse((source / "tests/integration/cli_session.py").read_text())
+        base_class = next(
+            (
+                n
+                for n in base.body
+                if isinstance(n, ast.ClassDef) and n.name == "StandaloneCliSession"
+            ),
+            None,
+        )
+        if base_class is None or "wait_host_key_refusal" not in {
+            n.name for n in base_class.body if isinstance(n, ast.FunctionDef)
+        }:
+            raise RuntimeError("Unsupported Lambda adapter: missing wait_host_key_refusal")
     workflow = (source / "pkg/traforo-client-go/.github/workflows/release.yml").read_text()
     if not re.search(r"version:\s*[\"']?v?2\.18\.3", workflow):
         raise RuntimeError("Adapter requires review for this GoReleaser workflow")

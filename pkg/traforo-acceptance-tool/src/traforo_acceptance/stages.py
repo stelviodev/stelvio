@@ -77,5 +77,7 @@ LAMBDA_TESTS = {
     "test_lambda_standalone_partial_failure_and_recovery",
     "test_lambda_dev_private_https_and_partial_failure",
     "test_lambda_host_key_rejection_and_peer_isolation",
+    "test_lambda_dev_sigkill_and_restart",
+    "test_lambda_standalone_host_key_startup_refusal",
 }
 DOCUMENTDB_STAGES = {"aws-standalone", "aws-dev", "aws-host-key"}

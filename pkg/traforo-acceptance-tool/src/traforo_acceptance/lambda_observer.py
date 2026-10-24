@@ -21,6 +21,7 @@ def install(root, session_class, api_class, base_class, registration):
     create = api_class.create
     command = base_class.command
     evidence = session_class.write_evidence
+    refusal = session_class.wait_host_key_refusal
 
     def inventory(session):
         owned = registration(session)
@@ -43,6 +44,7 @@ def install(root, session_class, api_class, base_class, registration):
         try:
             return deploy(session)
         finally:
+            record_topology(session)
             event(root, "proof_outputs", **owned, outputs=getattr(session, "_outputs", {}))
             inventory(session)
 
@@ -84,13 +86,16 @@ def install(root, session_class, api_class, base_class, registration):
             event(root, "application_deploy_intent", **registration(session))
         return command(session, *args, **kwargs)
 
-    @functools.wraps(evidence)
-    def observed_evidence(session):
-        if getattr(session, "_manifest", None) is not None:
-            targets = {}
+    def record_topology(session):
+        # Outputs can exist before the manifest is loaded during a failed deploy.
+        outputs = getattr(session, "_outputs", {})
+        manifest = getattr(session, "_manifest", None)
+        targets, vpcs, clients = {}, [], {}
+        if manifest is not None:
+            for network in manifest.used_vpcs:
+                vpcs.append({"id": network.vpc_id, "identity": network.identity})
             for number in session.apis:
                 network = session.network(number)
-                outputs = session._outputs
                 targets[str(number)] = {
                     "vpc_id": network.vpc_id,
                     "instance_id": network.access.instance_id,
@@ -101,11 +106,45 @@ def install(root, session_class, api_class, base_class, registration):
                         if f"{kind}{number}_name" in outputs
                     ],
                 }
-            event(root, "lambda_topology", **registration(session), targets=targets)
+        for number in (1, 2, 3, 4):
+            name = outputs.get(f"function{number}_name")
+            if name:
+                vpc = next(
+                    (v["id"] for v in vpcs if v["identity"].endswith(f"::net{number}")), None
+                )
+                clients[str(number)] = {
+                    "name": name,
+                    "vpc_id": vpc,
+                    "networking": "managed"
+                    if number in session.apis
+                    else "disabled"
+                    if number == 3
+                    else "none",
+                }
+        functions = [
+            outputs[key]
+            for kind, numbers in (("function", (1, 2, 3, 4)), ("backend", (1, 2)))
+            for number in numbers
+            if (key := f"{kind}{number}_name") in outputs
+        ]
+        event(
+            root,
+            "lambda_topology",
+            **registration(session),
+            targets=targets,
+            clients=clients,
+            vpcs=vpcs,
+            functions=functions,
+        )
+
+    @functools.wraps(evidence)
+    def observed_evidence(session):
+        record_topology(session)
         return evidence(session)
 
     @functools.wraps(destroy)
     def observed_destroy(session):
+        record_topology(session)
         inventory(session)
         result = destroy(session)
         event(root, "proof_destroyed", **registration(session))
@@ -146,6 +185,30 @@ def install(root, session_class, api_class, base_class, registration):
 
         return observed
 
+    @functools.wraps(refusal)
+    def observed_refusal(session, instance_id):
+        fields = {
+            **registration(session),
+            "instance_id": instance_id,
+            "pid": session.process.pid,
+            "log": str(session.log_path),
+        }
+        event(root, "startup_refusal_enter", **fields)
+        passed = False
+        try:
+            result = refusal(session, instance_id)
+            passed = True
+            return result
+        finally:
+            event(
+                root,
+                "startup_refusal_result",
+                **fields,
+                outcome="passed" if passed else "failed",
+                exit_code=session.process.poll(),
+            )
+
+    session_class.wait_host_key_refusal = observed_refusal
     session_class.deploy = observed_deploy
     session_class.destroy = observed_destroy
     session_class.write_evidence = observed_evidence

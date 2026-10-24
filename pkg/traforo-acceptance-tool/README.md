@@ -54,7 +54,7 @@ those interfaces before tests and host changes. A changed interface must have a
 reviewed adapter update, not a guessed fallback.
 
 Full acceptance now includes `aws-lambda-vpc`. The candidate must contain PR #411
-at `e196a31d46bc90e9857f3c72b89ed58c9a64cc3a` or its equivalent reviewed interfaces.
+at `49eafd2a651dabd72b59c60bcea1e33f95b47a42` or its equivalent reviewed interfaces.
 Preparation fails before installation or deployment when those inputs are missing.
 The runner never fetches or applies those changes automatically.
 
@@ -113,7 +113,7 @@ native suite or all unit tests. A partial pass is not full acceptance.
 | distribution | Wheel and sdist | 60 min |
 | interop | Archive, isolated wheel, DNS/runtime and local SSH interoperability | 60 min |
 | native | Installer, routing/DNS, lifecycle and administration suite | 60 min |
-| aws-lambda-vpc | Five shared-app, two-VPC private API/Lambda cases | 2 hours |
+| aws-lambda-vpc | Seven shared-app, managed/disabled/non-VPC Lambda cases | 2 hours |
 | aws-standalone | Database access, reconnect, SIGINT and owner death | 4 hours |
 | aws-dev | Function URL to local handler to DocumentDB | 4 hours |
 | aws-host-key | Key change rejection and new-session recovery | 4 hours |
@@ -136,9 +136,11 @@ this before the SSH interoperability stage. Evidence is retained, not deleted.
 
 ## Multi-VPC Lambda networking stage
 
-`aws-lambda-vpc` runs all five tests in one pytest process. They share one
-application with two VPCs, two deployment-owned bastions, two private REST APIs,
-two interface endpoints, and separate client/backend Functions. No DocumentDB
+`aws-lambda-vpc` runs all seven tests in one pytest process. They share one
+application with two managed VPCs, a third VPC with `bastion=False`, and a fourth
+client without VPC attachment. The application has four client Functions, two
+backend Functions, two deployment-owned bastions, two private REST APIs, and two
+interface endpoints. The plain clients make no private API request. No DocumentDB
 cluster or `pymongo` installation is needed for this stage. The independent
 Lambda inventory does not require DocumentDB read permissions.
 
@@ -148,34 +150,51 @@ traforo-acceptance run COMMIT --only aws-lambda-vpc
 # Networking acceptance, including the separate non-VPC case:
 traforo-acceptance run COMMIT --only aws-lambda-vpc --only aws-non-vpc
 
-# Apply both incremental commits to the original stack candidate:
+# Apply all three incremental commits to the original stack candidate:
 traforo-acceptance run f87bd5bcb6c155c875b1ac8685da1fda74b821c9 \
   --patch ea1d914483baf87ae43ec569e041d082bb8f799d \
   --patch e196a31d46bc90e9857f3c72b89ed58c9a64cc3a \
+  --patch 49eafd2a651dabd72b59c60bcea1e33f95b47a42 \
   --only aws-lambda-vpc
 
 # Explicit omission makes the report a partial round:
 traforo-acceptance run COMMIT --skip aws-lambda-vpc
 ```
 
-Alternatively, select `e196a31d` itself as the candidate. Applying only its delta
-to the original stack is insufficient; it builds on `ea1d9144`.
+Alternatively, select `49eafd2a` itself as the candidate. Its delta alone is
+insufficient on the original stack: it builds on `ea1d9144` and `e196a31d`.
 
 The suite checks simultaneous private HTTPS access, distinct DNS views and
 interfaces, SIGINT/SIGKILL, transport recovery, and a stopped bastion with a
 healthy peer. Dev invocations must be rejected before handler entry for the
 failed VPC. The host-key case checks persistent rejection across runtime restarts
-without accepting a changed key. Normal tunnel exit leaves both bastions intact.
+without accepting a changed key. The disabled and non-VPC clients must return
+fresh nonces from local handlers during network failures and runtime restarts.
+The disabled VPC emits exactly one startup warning and has no managed network unit.
+
+A separate dev lifecycle case kills the actual `stlv dev` command with SIGKILL,
+checks cleanup, starts it again, and invokes all four clients with unchanged pins.
+Another case attempts standalone startup twice with a changed host key. Each
+attempt must exit with status 1, name the instance and trust-reset command, never
+report `Network READY`, and leave no owned transports or host networking state.
+After the fixture restores the original key, a fresh command must connect.
+Normal tunnel exit leaves both bastions intact.
+
+The separate `aws-non-vpc` stage proves clean-machine/no-helper operation. Plain
+clients in this shared managed dev session do not replace that check.
 
 The stage runs before the other AWS stages in a full round. It supplements the
-DocumentDB stages, which still check TLS/member discovery, authentication, and
-read/write behavior. The two-hour deadline includes fixture teardown; the
-10–40-minute estimate is provisional, not a live validation result for this tool.
+DocumentDB stages, which still check production resource discovery/readiness,
+exact endpoint/member DNS ownership, database TLS, replica discovery,
+authentication, and read/write behavior. The two-hour deadline includes fixture
+teardown; the 10–40-minute estimate is provisional, not a live validation result for this tool.
 
 Permissions include the normal tunnel deployment permissions, private API
 Gateway administration, interface endpoints, Lambda/IAM/log administration,
 EC2 stop/start for proof bastions, and SSM Run Command for the host-key fault.
-Costs include two bastions and two interface endpoints until application teardown.
+Costs include two bastions, two interface endpoints, six Functions, and the
+third VPC’s associated resources until application teardown. There is no third
+bastion or API.
 The same account confirmation, private plugin checks, local Traforo override,
 and exclusive host requirements apply.
 
@@ -192,9 +211,11 @@ throttle errors receive bounded retries: at most ten attempts within 90 seconds.
 Uncertain deletions receive a state read, not a repeated mutation.
 
 The independent audit checks both APIs, endpoint IDs, captured interface IDs,
-volumes, Functions, logs, IAM, sessions, and host restoration. A missing first
-endpoint cannot hide its peer. Reports include separate VPC views and fault
-entry/exit records. No private key material is recorded. If a fault is interrupted,
+volumes, all six Functions, all three VPCs, logs, IAM, sessions, and host
+restoration. Each captured Function name and VPC ID is checked separately; a
+missing managed resource cannot hide a remaining plain client or disabled VPC.
+Reports include all seven cases and phases with timings, separate VPC views, and
+fault entry/exit records. No private key material is recorded. If a fault is interrupted,
 recovery removes the owned application without restarting bastions or resetting
 SSH trust. It retains unresolved ownership and cleanup errors.
 
@@ -208,6 +229,7 @@ fuzz inputs, and deterministic `report.json` / `report.md` files.
 The external pytest observer records setup, call, and teardown immediately. A
 teardown failure is visible before the rest of the session finishes. Failure
 records include node ID, phase, file/line when available, and the full traceback.
+Reports retain passed, failed, and skipped test phases as well as their timings.
 Go records retain package/test failure identity. Commands retain exact argument
 arrays, working directory, selected nonsecret environment values, exit status,
 runtime, and the output needed to reproduce the failure.
