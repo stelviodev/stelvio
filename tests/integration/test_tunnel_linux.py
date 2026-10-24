@@ -1,5 +1,7 @@
+# ruff: noqa: S603 - fixed system tools and UUID-derived test resource names
 """Explicit privileged Debian acceptance; no AWS operations."""
 
+import json
 import socket
 import subprocess
 import sys
@@ -30,7 +32,20 @@ pytestmark = pytest.mark.integration_linux_privileged
 
 
 def test_linux_two_vpc_dns_packet_outage_and_reconnect():
-    assert_two_vpc_dns_and_packet_forwarding()
+    from .linux_host import route_to
+
+    def selected_routes():
+        interfaces = set()
+        for octet in (254, 253):
+            row = route_to(f"10.{octet}.9.19")
+            assert row["destination"] == f"10.{octet}.9.0"
+            assert row["mask"] == "255.255.255.0"
+            assert row["interface"].startswith("st")
+            interfaces.add(row["interface"])
+            assert not route_to(f"10.{octet}.0.2")["interface"].startswith("st")
+        assert len(interfaces) == 2
+
+    assert_two_vpc_dns_and_packet_forwarding(during_session=selected_routes)
 
 
 def test_linux_exact_hostname_readiness():
@@ -68,7 +83,7 @@ lease.configure(unit='00000001', generation=1, vpc_id='vpc-12345678',
 print('READY',flush=True)
 sys.stdin.read()
 """
-    process = subprocess.Popen(  # noqa: S603 - owned Python fixture process
+    process = subprocess.Popen(
         [sys.executable, "-c", script], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
     )
     try:
@@ -166,3 +181,67 @@ def test_linux_monitor_and_diagnostics_use_real_sources(macos_host, tmp_path):
     )
 
     test_two_unit_diagnostics_are_read_only_and_survive_failed_readers(macos_host, tmp_path)
+
+
+def test_linux_foreign_interface_is_never_adopted_or_deleted():
+    helper = NativeHelper()
+    session = str(uuid4())
+    # Match the proposed name, with a distinct foreign ownership alias.
+    name = "st" + session.replace("-", "")[:4] + "00000001d"
+    subprocess.run(
+        ["/usr/bin/sudo", "/usr/sbin/ip", "link", "add", name, "type", "dummy"],
+        check=True,
+        timeout=10,
+    )
+    try:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "/usr/sbin/ip",
+                "link",
+                "set",
+                "dev",
+                name,
+                "alias",
+                "foreign-test-owned",
+            ],
+            check=True,
+            timeout=10,
+        )
+        lease = helper.acquire(session)
+        try:
+            with pytest.raises(HelperError):
+                lease.configure(
+                    unit="00000001", generation=1, vpc_id="vpc-12345678", cidrs=("10.254.9.0/24",)
+                )
+        finally:
+            lease.close()
+        links = json.loads(
+            subprocess.check_output(
+                ["/usr/sbin/ip", "-j", "link", "show", name], text=True, timeout=5
+            )
+        )
+        assert links[0]["ifalias"] == "foreign-test-owned"
+        assert not helper.status().owned
+    finally:
+        subprocess.run(
+            ["/usr/bin/sudo", "/usr/sbin/ip", "link", "delete", name], check=True, timeout=10
+        )
+
+
+def test_linux_failed_replacement_restores_original_image_and_service():
+    import os
+    from pathlib import Path
+
+    from stelvio.tunnel import installation
+    from stelvio.tunnel.assets import select_traforo
+    from stelvio.tunnel.linux_installation import authorize, bootstrap
+
+    image = Path(os.environ["STLV_TEST_TRAFORO_FAILED_INSTALL"])
+    selection = select_traforo({"STLV_TRAFORO_DEV_BINARY": str(image)})
+    before = installation._installed_digest()
+    with pytest.raises(HelperError, match="administration failed"):
+        authorize(bootstrap(image, selection.digest))
+    installation._wait_ready()
+    assert installation._installed_digest() == before
+    assert not NativeHelper().status().owned

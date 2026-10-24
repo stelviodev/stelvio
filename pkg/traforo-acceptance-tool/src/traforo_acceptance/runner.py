@@ -220,7 +220,19 @@ def stage_commands(name, root, env):
             )
         ]
     if name == "native" and platform.system() == "Linux":
+        failed_image = root / "refuse-install"
+        env["STLV_TEST_TRAFORO_FAILED_INSTALL"] = str(failed_image)
         return [
+            (
+                [
+                    "go",
+                    "build",
+                    "-o",
+                    str(failed_image),
+                    "./internal/helper/linux/testdata/refuse-install",
+                ],
+                module,
+            ),
             (
                 pytest
                 + [
@@ -230,7 +242,7 @@ def stage_commands(name, root, env):
                     "-vv",
                 ],
                 source,
-            )
+            ),
         ]
     if name == "native":
         return [

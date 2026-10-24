@@ -217,6 +217,7 @@ def test_report_size_bound_preserves_errors(monkeypatch):
 
 
 def test_artifact_inspection_never_executes_or_creates_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(report.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(report.subprocess, "Popen", lambda *_args, **_kw: pytest.fail("executed"))
     path = tmp_path / "artifact"
     path.write_bytes(struct.pack("<8I", 0xFEEDFACF, 0x0100000C, 0, 2, 0, 0, 0, 0))

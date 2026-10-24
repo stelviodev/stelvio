@@ -126,6 +126,12 @@ def _mark_privileged_item(item, run_host, run_tunnel):
     linux_marker = item.get_closest_marker("integration_linux_privileged")
     if not item.get_closest_marker("integration_macos_privileged") and not linux_marker:
         return False
+    if not run_host:
+        option = (
+            "--integration-linux-privileged" if linux_marker else "--integration-macos-privileged"
+        )
+        item.add_marker(pytest.mark.skip(reason=f"need {option}"))
+        return True
     if linux_marker and platform.system() != "Linux":
         item.add_marker(pytest.mark.skip(reason="Linux host test"))
         return True

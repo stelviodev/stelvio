@@ -6,7 +6,9 @@ from traforo_acceptance import host, runner
 def test_linux_native_stage_never_selects_macos_host_tests(run_root, monkeypatch):
     monkeypatch.setattr(runner.platform, "system", lambda: "Linux")
     commands = runner.stage_commands("native", run_root, {})
-    argv, _ = commands[0]
+    argv, _ = next(
+        command for command in commands if "--integration-linux-privileged" in command[0]
+    )
     assert "--integration-linux-privileged" in argv
     assert "--integration-macos-privileged" not in argv
     assert "tests/integration/test_tunnel_linux.py" in argv

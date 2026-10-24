@@ -88,7 +88,8 @@ def compare(before, after):
         )
 
     return {
-        "interfaces": before["interfaces"] == after["interfaces"],
+        "interfaces": [tuple(row) for row in before["interfaces"]]
+        == [tuple(row) for row in after["interfaces"]],
         "routes": sorted(json.dumps(row, sort_keys=True) for row in before["routes"])
         == sorted(json.dumps(row, sort_keys=True) for row in after["routes"]),
         "dns": before["dns"] == after["dns"],

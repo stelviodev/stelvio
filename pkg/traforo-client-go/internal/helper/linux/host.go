@@ -339,3 +339,21 @@ func resolvedOwner() (string, error) {
 	e = c.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.GetNameOwner", 0, resolvedService).Store(&owner)
 	return owner, e
 }
+
+func resourceConflict(u Unit, retained bool) error {
+	if _, e := netlink.LinkByName(u.TUN); e == nil {
+		return errUncertain
+	} else if !absent(e) {
+		return e
+	}
+	if retained {
+		_, e := ownedLink(u.DNS, u.Alias, "dummy", u.DNSIndex)
+		return e
+	}
+	if _, e := netlink.LinkByName(u.DNS); e == nil {
+		return errUncertain
+	} else if !absent(e) {
+		return e
+	}
+	return nil
+}

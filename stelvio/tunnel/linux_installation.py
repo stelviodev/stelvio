@@ -65,14 +65,44 @@ fi
 retired=/usr/local/libexec/.stelvio-traforo.retired
 [ ! -e "$retired" ] && [ ! -L "$retired" ]
 stage=$(mktemp /usr/local/libexec/.stelvio-traforo.XXXXXXXX)
+backup=$(mktemp -d /var/lib/stelvio/tunnel/.transaction.XXXXXXXX)
+had_service=no
+had_receipt=no
+if [ -e /etc/systemd/system/stelvio-traforo.service ]; then
+ safe_file /etc/systemd/system/stelvio-traforo.service
+ cp -p /etc/systemd/system/stelvio-traforo.service "$backup/service"
+ had_service=yes
+fi
+if [ -e /var/lib/stelvio/tunnel/installation.json ]; then
+ safe_file /var/lib/stelvio/tunnel/installation.json
+ cp -p /var/lib/stelvio/tunnel/installation.json "$backup/receipt"
+ had_receipt=yes
+fi
+remove_backup() {{
+ for f in "$backup/service" "$backup/receipt"; do
+  if [ -e "$f" ]; then safe_file "$f"; rm "$f"; fi
+ done
+ rmdir "$backup"
+}}
 rollback() {{
  rc=$?
  rm -f "$stage"
  if [ "$rc" != 0 ] && [ -e "$retired" ]; then
   safe_file "$retired"
+  systemctl stop stelvio-traforo.service || true
   mv -f "$retired" "$installed"
-  "$installed" helper install || true
+  if [ "$had_service" = yes ]; then
+   safe_file "$backup/service"
+   cp -p "$backup/service" /etc/systemd/system/stelvio-traforo.service
+  fi
+  if [ "$had_receipt" = yes ]; then
+   safe_file "$backup/receipt"
+   cp -p "$backup/receipt" /var/lib/stelvio/tunnel/installation.json
+  fi
+  systemctl daemon-reload
+  systemctl start stelvio-traforo.service
  fi
+ remove_backup
  exit "$rc"
 }}
 trap rollback EXIT
@@ -90,6 +120,7 @@ fi
 mv "$stage" "$installed"
 "$installed" helper install
 if [ -e "$retired" ]; then safe_file "$retired"; rm "$retired"; fi
+remove_backup
 trap - EXIT
 """
 

@@ -327,6 +327,7 @@ func (s *service) configure(r protocol.Request) error {
 		return protocol.ErrInvalid
 	}
 	index := -1
+	added := false
 	slots := map[int]bool{}
 	for i, u := range s.state.Units {
 		slots[u.Slot] = true
@@ -403,19 +404,30 @@ func (s *service) configure(r protocol.Request) error {
 		tun, dns, alias := names(s.state, r.Unit)
 		s.state.Units = append(s.state.Units, Unit{Request: r, Slot: slot, Phase: 1, TUN: tun, DNS: dns, Alias: alias, Local: uint32(0xc0000201 + 2*slot)})
 		index = len(s.state.Units) - 1
+		added = true
 	}
 	u := s.state.Units[index]
+	retained := u.Phase == 4
+	failPreflight := func(e error) error {
+		if added {
+			s.state.Units = s.state.Units[:index]
+		}
+		return e
+	}
 	if u.Phase == 5 {
 		u.DNSIndex = 0
 	}
 	u.Request = r
 	u.Phase = 1
 	u.TUNIndex = 0
+	if e := resourceConflict(u, retained); e != nil {
+		return failPreflight(e)
+	}
 	if e := routeConflict(r, 0); e != nil {
-		return e
+		return failPreflight(e)
 	}
 	if e := resolverConflict(u); e != nil {
-		return e
+		return failPreflight(e)
 	}
 	s.state.Units[index] = u
 	if e := save(&s.state); e != nil {

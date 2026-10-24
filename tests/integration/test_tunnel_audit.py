@@ -1026,6 +1026,7 @@ def test_standalone_route_acceptance_requires_exact_subnets_and_exclusions(
 ):
     from ipaddress import IPv4Address, IPv4Network
 
+    monkeypatch.setattr(cli_session.sys, "platform", "darwin")
     session = object.__new__(cli_session.StandaloneCliSession)
     session.project = tmp_path
     networks = []
