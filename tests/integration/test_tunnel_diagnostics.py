@@ -18,6 +18,7 @@ from stelvio.tunnel.helper_client import NativeHelper
 from stelvio.tunnel.helper_protocol import ResolverEndpoint
 
 from .tunnel_dns_fixture import SocksDnsFixture, native_network, packet_network
+from .tunnel_monitor_fixture import MonitorProcess, assert_monitor_vpcs
 
 pytestmark = mark.integration_macos_privileged
 
@@ -84,6 +85,8 @@ def test_two_unit_diagnostics_are_read_only_and_survive_failed_readers(macos_hos
                     "ranges": [str(cidr) for cidr in network.route_cidrs],
                     "state": "ready",
                     "generation": 1,
+                    "attempt": 1,
+                    "dns_port": port,
                     "dns_revision": 1,
                 }
             )
@@ -112,6 +115,24 @@ def test_two_unit_diagnostics_are_read_only_and_survive_failed_readers(macos_hos
         assert first["sources"] == second["sources"] or (
             first["sources"]["helper"]["observed_at"] == second["sources"]["helper"]["observed_at"]
         )
+        model = assert_monitor_vpcs(first, ready=2)
+        with MonitorProcess(owner, log_path=tmp_path / "monitor-terminal.log") as monitor:
+            monitor.wait("READY")
+            monitor.wait("2 / 2 VPCs")
+            time.sleep(1.1)
+            later = snapshot(service.path)
+            model.update(later, time.monotonic())
+            with socket.create_connection(("10.254.9.19", 27017), timeout=3) as connection:
+                connection.sendall(b"traffic with monitor")
+                assert connection.recv(256) == b"traffic with monitor"
+        assert helper.status() == before
+        monitor = MonitorProcess(owner, log_path=tmp_path / "monitor-killed.log")
+        try:
+            monitor.wait("READY")
+        finally:
+            monitor.close(kill=True)
+        assert forwarding.healthy()
+        assert helper.status() == before
         host_units = first["sources"]["helper"]["data"]["units"]
         assert len(host_units) == 2
         assert all(unit["counters"]["host_delivered_bytes"] > 0 for unit in host_units)

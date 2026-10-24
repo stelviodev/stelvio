@@ -12,6 +12,7 @@ from stelvio.tunnel.host_trust import fingerprint
 
 from .cli_session import STARTUP_TIMEOUT
 from .lambda_tunnel_session import LambdaTunnelSession, assert_echo, private_request
+from .tunnel_monitor_fixture import MonitorProcess, app_snapshot, assert_monitor_vpcs
 
 pytestmark = [pytest.mark.integration_tunnel, pytest.mark.integration_macos_privileged]
 
@@ -140,6 +141,7 @@ def partial_failure(session, failed, *, dev=False):
             network.identity, "retained", after=initial.generation, timeout=120
         )
         assert retained.generation == initial.generation + 1
+        assert_monitor_vpcs(app_snapshot(session.app), ready=1)
         assert session.resolver_ports() == ports
         session.wait_dns_rcode(
             session.apis[failed].hostname, ports[session.apis[failed].hostname], expected=2
@@ -165,6 +167,7 @@ def partial_failure(session, failed, *, dev=False):
     )
     assert session.resolver_ports() == ports
     assert_two_vpc_access(session)
+    assert_monitor_vpcs(app_snapshot(session.app), ready=2)
     if dev:
         session.check_dev(uuid4().hex, failed)
         session.check_dev(uuid4().hex, healthy)
@@ -208,7 +211,20 @@ def test_lambda_standalone_partial_failure_and_recovery(lambda_session):
     session.start()
     session.wait_ready()
     assert_two_vpc_access(session)
-    partial_failure(session, 1)
+    value = app_snapshot(session.app)
+    assert_monitor_vpcs(value, ready=2)
+    owner = value["session"]["session_id"]
+    with MonitorProcess(owner, log_path=session.project / "monitor-recovery.log") as monitor:
+        monitor.wait("READY")
+        partial_failure(session, 1)
+        assert monitor.process.poll() is None
+    assert_two_vpc_access(session)
+    monitor = MonitorProcess(owner, log_path=session.project / "monitor-killed.log")
+    try:
+        monitor.wait("READY")
+    finally:
+        monitor.close(kill=True)
+    assert_two_vpc_access(session)
     receipts = session.active_ssm_sessions()
     assert len(receipts) == 2
     assert session.terminate(signal.SIGINT) == 0

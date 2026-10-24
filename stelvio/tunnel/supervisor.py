@@ -121,6 +121,7 @@ class VpcWorker:
     ) -> None:
         self.diagnostics_events = diagnostics_events
         self._check_diagnostics = {}
+        self._ready_since = None
         self.description = description
         self.network = network
         self._route_cidrs = network.route_cidrs
@@ -177,6 +178,10 @@ class VpcWorker:
             if state == "ready":
                 self._ever_ready = True
             previous = self._status
+            if state != "ready":
+                self._ready_since = None
+            elif previous.state != "ready":
+                self._ready_since = time.monotonic()
             self._status = VpcStatus(
                 self.network.identity,
                 state,
@@ -210,6 +215,9 @@ class VpcWorker:
                 dns_revision=self._dns_revision_current,
                 dns_port=self._dns_port,
                 checks=dict(self._check_diagnostics),
+                connected_seconds=(
+                    time.monotonic() - self._ready_since if self._ready_since is not None else None
+                ),
             )
         process = self.transport.process
         value["partition"] = self.transport.partition
