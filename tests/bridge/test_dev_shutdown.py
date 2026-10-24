@@ -5,6 +5,7 @@ import json
 import os
 import selectors
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -288,36 +289,127 @@ def test_bridge_runs_outside_main_thread(monkeypatch):
     installed.assert_not_called()
 
 
-@pytest.mark.parametrize("interrupt_phase", ["parent", "registration"])
+@pytest.mark.parametrize("interrupt_phase", ["parent", "registration", "worker"])
 def test_cli_interrupt_exits_with_blocked_handler(interrupt_phase):
     # Exercise main's real os._exit path without deploying or contacting AWS.
     with subprocess.Popen(  # noqa: S603
         [sys.executable, "-u", "-m", "tests.bridge.shutdown_child", interrupt_phase],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE,
     ) as child:
         try:
             output = b""
             deadline = time.monotonic() + 15
             with selectors.DefaultSelector() as selector:
                 selector.register(child.stdout, selectors.EVENT_READ)
-                while b"HANDLER_STARTED\n" not in output:
+                ready = b"LOOP_WAITING\n" if interrupt_phase == "worker" else b"HANDLER_STARTED\n"
+                while ready not in output:
                     remaining = deadline - time.monotonic()
                     assert remaining > 0, "Child did not start its handler"
                     assert selector.select(remaining), "Child did not start its handler"
                     chunk = os.read(child.stdout.fileno(), 4096)
-                    assert chunk, child.stderr.read().decode()
+                    assert chunk, "Child closed stdout before readiness"
                     output += chunk
 
             if interrupt_phase == "parent":
                 child.send_signal(signal.SIGINT)
+            if interrupt_phase == "worker":
+                child.stdin.write(b"\n")
+                child.stdin.flush()
             stdout, stderr = child.communicate(timeout=5)
             output += stdout
             diagnostics = f"stdout:\n{output.decode()}\nstderr:\n{stderr.decode()}"
             assert child.returncode == 1, diagnostics
             assert b"SOCKET_CLOSED\n" in output, diagnostics
             assert b"HANDLER_FINISHED\n" not in output, diagnostics
+        except (AssertionError, subprocess.TimeoutExpired) as error:
+            if child.poll() is None:
+                child.kill()
+            stdout, stderr = child.communicate(timeout=5)
+            pytest.fail(
+                f"{error}\n"
+                f"stdout:\n{(output + stdout).decode(errors='replace')}\n"
+                f"stderr:\n{stderr.decode(errors='replace')}"
+            )
         finally:
             if child.poll() is None:
                 child.kill()
                 child.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("failure", [None, "body", "cancel", "reader", "wakeup", "handler"])
+def test_sigint_restores_wakeup_fd_and_closes_sockets(monkeypatch, failure):
+    loop = asyncio.get_event_loop()
+    task = loop.create_task(asyncio.sleep(0))
+    sockets = []
+    set_wakeup_fd = signal.set_wakeup_fd
+    socketpair = socket.socketpair
+    remove_reader = MagicMock(wraps=loop.remove_reader)
+    monkeypatch.setattr(loop, "remove_reader", remove_reader)
+
+    def tracked_socketpair():
+        pair = socketpair()
+        sockets.extend(pair)
+        return pair
+
+    monkeypatch.setattr(listener.socket, "socketpair", tracked_socketpair)
+    failure_error = RuntimeError("signal setup failed")
+    if failure == "reader":
+        monkeypatch.setattr(loop, "add_reader", MagicMock(side_effect=failure_error))
+    if failure == "wakeup":
+        monkeypatch.setattr(signal, "set_wakeup_fd", MagicMock(side_effect=failure_error))
+    if failure == "handler":
+        monkeypatch.setattr(signal, "signal", MagicMock(side_effect=failure_error))
+
+    def fail_in_body():
+        assert failure in {"body", "cancel"}, "Signal setup unexpectedly succeeded"
+        if failure == "cancel":
+            raise asyncio.CancelledError("signal setup failed")
+        raise failure_error
+
+    previous_handler = signal.getsignal(signal.SIGINT)
+    prior_reader, prior_writer = socketpair()
+    with prior_reader, prior_writer:
+        prior_writer.setblocking(False)
+        previous_fd = set_wakeup_fd(prior_writer.fileno())
+        try:
+            if failure:
+                with (
+                    pytest.raises(
+                        asyncio.CancelledError if failure == "cancel" else RuntimeError,
+                        match="signal setup failed",
+                    ),
+                    listener._cancel_on_sigint(loop, task),
+                ):
+                    fail_in_body()
+            else:
+                with listener._cancel_on_sigint(loop, task):
+                    sockets[1].send(b"signal")
+                    loop.run_until_complete(task)
+                    with pytest.raises(BlockingIOError):
+                        sockets[0].recv(4096)
+            assert set_wakeup_fd(prior_writer.fileno()) == prior_writer.fileno()
+        finally:
+            set_wakeup_fd(previous_fd)
+
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert len(sockets) == 2
+    assert all(sock.fileno() == -1 for sock in sockets)
+    assert remove_reader.call_count == (0 if failure == "reader" else 1)
+
+
+def test_bridge_closes_loop_after_signal_setup_failure(monkeypatch):
+    loop = asyncio.new_event_loop()
+    monkeypatch.setattr(asyncio, "new_event_loop", lambda: loop)
+    main = AsyncMock()
+    monkeypatch.setattr(listener, "main", main)
+    monkeypatch.setattr(
+        signal, "set_wakeup_fd", MagicMock(side_effect=RuntimeError("signal setup failed"))
+    )
+
+    with pytest.raises(RuntimeError, match="signal setup failed"):
+        listener.run_bridge_server("us-east-1", "default", "app", "dev")
+
+    assert loop.is_closed()
+    main.assert_not_awaited()
