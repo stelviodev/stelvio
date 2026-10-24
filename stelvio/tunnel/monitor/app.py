@@ -360,7 +360,12 @@ class TunnelMonitor(App):
         ]
         actual = {(item.get("resource"), item.get("host"), item.get("port")) for item in current}
         status = "unavailable" if expected else "not applicable"
-        if not self.dashboard.disconnected and not checks.get("stale", True) and expected:
+        if (
+            not self.dashboard.disconnected
+            and not checks.get("stale", True)
+            and expected
+            and checks.get("result") != "unavailable"
+        ):
             status = (
                 "passed"
                 if actual == expected and all(item.get("result") == "passed" for item in current)
