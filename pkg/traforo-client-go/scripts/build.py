@@ -20,8 +20,9 @@ from stelvio.tunnel.assets import (
     DEVELOPMENT_BINARY_ENV,
     TRAFORO_VERSION,
     NativeAssetError,
+    _architecture,
     select_traforo,
-    validate_macho,
+    validate_executable,
 )
 from stelvio.tunnel.installation import _supported, install_helper
 
@@ -38,6 +39,7 @@ LIBRARIES = frozenset(
 INVENTORY_NAMES = frozenset(
     {
         ".goreleaser.yml",
+        ".goreleaser-linux.yml",
         ".gitattributes",
         "build.py",
         "CODE_OF_CONDUCT.md",
@@ -145,7 +147,7 @@ def release_binary(captured: Path, name: str, goarch: str) -> Path:
         entry
         for entry in artifacts
         if entry.get("name") == name
-        and entry.get("goos") == "darwin"
+        and entry.get("goos") == platform.system().lower()
         and entry.get("goarch") == goarch
         and entry.get("extra", {}).get("Format") == "binary"
     ]
@@ -164,7 +166,9 @@ def validate_artifact(
     snapshot: str,
 ) -> dict[str, object]:
     data = binary.read_bytes()
-    validate_macho(data, machine)
+    validate_executable(data, machine)
+    if platform.system() == "Linux":
+        return validate_linux_artifact(binary, machine, host_architecture, snapshot)
     expected = f"v{snapshot}"
     execution_status = "native" if machine == host_architecture else "Rosetta"
     if host_architecture == "x86_64" and machine == "arm64":
@@ -198,6 +202,27 @@ def validate_artifact(
         "version": expected,
         "direct_libraries": libraries,
         "execution": execution_status,
+    }
+
+
+def validate_linux_artifact(binary: Path, machine: str, host: str, snapshot: str) -> dict:
+    data = binary.read_bytes()
+    expected = f"v{snapshot}"
+    execution = "pending-native-" + machine
+    if machine == host:
+        if tool(str(binary), "version") != expected:
+            raise NativeAssetError("Linux image reports an unexpected version")
+        execution = "native"
+    elif expected.encode() not in data:
+        raise NativeAssetError("Cross-built Linux image lacks the injected version")
+    return {
+        "name": binary.name,
+        "architecture": machine,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+        "version": expected,
+        "direct_libraries": [],
+        "execution": execution,
     }
 
 
@@ -247,8 +272,9 @@ def _release_environment(captured: Path, git_dir: str, snapshot: str) -> dict[st
         GIT_WORK_TREE=str(captured),
         GORELEASER_CURRENT_TAG=f"v{TRAFORO_VERSION}",
         TRAFORO_SNAPSHOT_VERSION=snapshot,
-        SDKROOT=tool("/usr/bin/xcrun", "--show-sdk-path"),
     )
+    if platform.system() == "Darwin":
+        environment["SDKROOT"] = tool("/usr/bin/xcrun", "--show-sdk-path")
     return environment
 
 
@@ -260,6 +286,8 @@ def _run_release(
     commit: str,
 ) -> tuple[list[str], dict[str, object]]:
     command = [releaser, "release", "--snapshot", "--clean", "--skip=publish,announce"]
+    if platform.system() == "Linux":
+        command += ["--config", ".goreleaser-linux.yml"]
     subprocess.run(  # noqa: S603 - captured source, no publish or host install
         command,
         cwd=captured,
@@ -282,7 +310,7 @@ def _validate_bundle(
     bundle.mkdir()
     records: list[dict[str, object]] = []
     for machine, goarch in (("arm64", "arm64"), ("x86_64", "amd64")):
-        name = f"traforo-darwin-{goarch}"
+        name = f"traforo-{platform.system().lower()}-{goarch}"
         binary = release_binary(captured, name, goarch)
         record = validate_artifact(binary, machine, architecture, snapshot)
         record["name"] = name
@@ -321,7 +349,7 @@ def build(source: Path) -> Path:
     """Build both release images, validate them, and publish one bundle atomically."""
     source = source.resolve(strict=True)
     compiler, releaser, required_go, required = build_tools(source)
-    architecture = platform.machine()
+    architecture = _architecture()
     if architecture not in {"arm64", "x86_64"}:
         raise NativeAssetError("Traforo builds support macOS arm64 and x86_64")
     commit = tool("git", "rev-parse", "HEAD", cwd=source)
@@ -355,20 +383,25 @@ def build(source: Path) -> Path:
             "source_sha256": source_hash,
             "commit": commit,
             "version": f"v{snapshot}",
-            "minimum_macos": "15.0",
+            "minimum_macos": "15.0" if platform.system() == "Darwin" else None,
             "go_version": required_go,
             "goreleaser": required,
             "command": command[1:],
             "toolchain": tool(compiler, "version", cwd=captured, environment=environment),
-            "sdk": tool("/usr/bin/xcrun", "--show-sdk-version"),
-            "clang": tool("/usr/bin/xcrun", "clang", "--version").splitlines()[0],
+            "sdk": tool("/usr/bin/xcrun", "--show-sdk-version")
+            if platform.system() == "Darwin"
+            else None,
+            "clang": tool("/usr/bin/xcrun", "clang", "--version").splitlines()[0]
+            if platform.system() == "Darwin"
+            else None,
+            "os": platform.system().lower(),
             "artifacts": records,
             "release_metadata": release_metadata,
         }
         destination = _publish_bundle(output, stage, bundle, provenance)
 
     goarch = "arm64" if architecture == "arm64" else "amd64"
-    return destination / f"traforo-darwin-{goarch}"
+    return destination / f"traforo-{platform.system().lower()}-{goarch}"
 
 
 def main(argv: list[str] | None = None) -> None:

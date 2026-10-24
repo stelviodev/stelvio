@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import socket
+import sys
 import time
 from contextlib import contextmanager
 from ipaddress import ip_address
@@ -329,7 +330,7 @@ class LambdaTunnelSession(StandaloneCliSession):
         private = network.private_subnets
         assert all(any(address in subnet.cidr for subnet in private) for address in addresses)
         expected_interface = self._route_to(private[0].cidr.network_address + 1)["interface"]
-        assert expected_interface.startswith("utun")
+        assert expected_interface.startswith("st" if sys.platform == "linux" else "utun")
         for address in addresses:
             assert self._route_to(address)["interface"] == expected_interface
         payload = "private-lambda-payload:" + "0123456789abcdef" * 1024
@@ -352,6 +353,10 @@ class LambdaTunnelSession(StandaloneCliSession):
     def resolver_ports(self):
         ports = {}
         domains = {api.hostname for api in self.apis.values()}
+        if sys.platform == "linux":
+            from .linux_host import resolver_ports
+
+            return resolver_ports(domains)
         for path in Path("/etc/resolver").glob("stelvio.*"):
             entries = dict(
                 line.split(maxsplit=1)

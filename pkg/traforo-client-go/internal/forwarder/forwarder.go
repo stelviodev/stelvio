@@ -19,6 +19,7 @@ import (
 	"github.com/xjasonlyu/tun2socks/v2/core/adapter"
 	"github.com/xjasonlyu/tun2socks/v2/core/device/iobased"
 	"github.com/xjasonlyu/tun2socks/v2/transport/socks5"
+	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
@@ -373,7 +374,7 @@ func (m *manager) dispatch() {
 		if err != nil {
 			return
 		}
-		if flags != 0 {
+		if flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 {
 			continue
 		}
 		frame, err := protocol.DecodeFrame(buffer[:n])

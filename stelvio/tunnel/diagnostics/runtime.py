@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket
 import stat
+import sys
 import time
 from collections import deque
 from contextlib import suppress
@@ -40,7 +41,8 @@ MAX_DIRECTORY_ENTRIES = 4096
 
 
 def directory() -> Path:
-    return Path(f"/private/tmp/stlv-diag-{os.geteuid()}")
+    root = "/tmp" if sys.platform == "linux" else "/private/tmp"  # noqa: S108 - owned private child
+    return Path(f"{root}/stlv-diag-{os.geteuid()}")
 
 
 def _safe_directory(path: Path) -> None:

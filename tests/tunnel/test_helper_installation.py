@@ -164,7 +164,7 @@ def test_cleanup_passes_active_refusal_through_without_success_message(setup, mo
 
 
 def test_platform_refusal_precedes_asset_read_and_authorization(monkeypatch):
-    monkeypatch.setattr(installation.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(installation.platform, "system", lambda: "Windows")
 
     def forbidden(*args):
         raise AssertionError("Attempted unsupported platform setup")
@@ -359,3 +359,11 @@ def test_root_cli_registers_tunnel_commands_through_step_twelve():
     assert "cleanup" in result.output
     assert "uninstall" in result.output
     assert "start" in result.output
+
+
+@pytest.fixture(autouse=True)
+def _darwin_fixture_platform(monkeypatch):
+    """Synthetic Mach-O and macOS command fixtures retain their explicit platform."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")

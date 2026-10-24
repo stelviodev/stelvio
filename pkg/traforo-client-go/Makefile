@@ -30,7 +30,11 @@ fuzz:
 	$(GO) test -mod=readonly ./internal/protocol -run='^$$' -fuzz='^FuzzRequest$$' -fuzztime=30s -parallel=2
 
 fuzz-snapshot:
-	$(GO) test -mod=readonly ./internal/helper/darwin -run='^$$' -fuzz='^FuzzSnapshot$$' -fuzztime=30s -parallel=2
+	@if [ "$$(uname -s)" = Linux ]; then \
+		$(GO) test -mod=readonly ./internal/helper/linux -run='^$$' -fuzz='^FuzzLinuxSnapshot$$' -fuzztime=30s -parallel=2; \
+	else \
+		$(GO) test -mod=readonly ./internal/helper/darwin -run='^$$' -fuzz='^FuzzSnapshot$$' -fuzztime=30s -parallel=2; \
+	fi
 
 fuzz-dns:
 	$(GO) test -mod=readonly ./internal/dnsrelay -run='^$$' -fuzz='^FuzzAnswer$$' -fuzztime=30s -parallel=2

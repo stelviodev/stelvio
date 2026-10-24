@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || linux
 
 package forwarder
 
@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"net"
+	"net/netip"
 	"os"
 	"syscall"
 	"testing"
@@ -265,11 +266,11 @@ func TestUnitIdentityHistoryIsBounded(t *testing.T) {
 
 func TestDispatchRejectsMalformedFramesAndAncillaryDescriptors(t *testing.T) {
 	carrier, peer := pair(t)
-	m := &manager{carrier: carrier}
-	if err := m.apply(command{Operation: "add", Unit: 1, Generation: 7, Attempt: 1, Proxy: "127.0.0.1:1080", CIDRs: []string{"10.254.0.0/16"}}); err != nil {
-		t.Fatal(err)
-	}
-	u := m.units[1]
+	ctx, cancel := context.WithCancel(context.Background())
+	// This test observes dispatch's queue directly. A live stack would race
+	// the assertion by consuming the packet from that same queue.
+	u := &unit{id: 1, generation: 7, cidrs: []netip.Prefix{netip.MustParsePrefix("10.254.0.0/16")}, packets: make(chan []byte, 16), ctx: ctx, cancel: cancel}
+	m := &manager{carrier: carrier, units: map[uint32]*unit{1: u}}
 	dispatchDone := make(chan struct{})
 	go func() { defer close(dispatchDone); m.dispatch() }()
 	t.Cleanup(func() {

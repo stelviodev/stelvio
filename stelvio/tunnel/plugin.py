@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import platform
 import stat
 import struct
 import subprocess
@@ -54,6 +55,11 @@ def _private_acl(path: Path, label: str) -> None:
 
 
 def _valid(data: bytes, architecture: str) -> None:
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_plugin import validate  # noqa: PLC0415
+
+        validate(data, architecture)
+        return
     if not struct.calcsize("<8I") <= len(data) <= MAX_DOWNLOAD:
         raise PluginAssetError("AWS plugin executable exceeds size bounds")
     magic, cpu, _, kind = struct.unpack_from("<4I", data)
@@ -65,7 +71,8 @@ def _valid(data: bytes, architecture: str) -> None:
 
 def plugin_path() -> Path:
     architecture = _architecture()
-    return get_bin_path() / f"session-manager-plugin-{PLUGIN_VERSION}-{architecture}"
+    suffix = "-linux" if platform.system() == "Linux" else ""
+    return get_bin_path() / f"session-manager-plugin-{PLUGIN_VERSION}{suffix}-{architecture}"
 
 
 def _ready(path: Path, architecture: str) -> bool:
@@ -134,6 +141,10 @@ def ensure_plugin() -> Path:  # noqa: C901, PLR0912, PLR0915 - locked bounded in
     """Serialize download/verification/publication; killed downloads are never published."""
     import fcntl  # noqa: PLC0415 - macOS-only runtime operation
 
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_plugin import ensure  # noqa: PLC0415
+
+        return ensure()
     architecture = _architecture()
     path = plugin_path()
     try:

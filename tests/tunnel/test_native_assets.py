@@ -6,6 +6,7 @@ import struct
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
+import pytest
 from pytest import fixture, mark, raises
 
 from stelvio.tunnel import assets
@@ -259,7 +260,7 @@ def test_architecture_selection_and_validation(monkeypatch, machine, cpu):
     assets._binary(binary, machine)
 
 
-@mark.parametrize("system", ["Linux", "Windows"])
+@mark.parametrize("system", ["Windows", "FreeBSD"])
 def test_unsupported_platform_refused_before_io(monkeypatch, system):
     import sys
 
@@ -364,3 +365,11 @@ def test_v007_release_manifest(architecture, suffix, asset_id, digest):
         "api_url": f"https://api.github.com/repos/stelviodev/traforo/releases/assets/{asset_id}",
         "sha256": digest,
     }
+
+
+@pytest.fixture(autouse=True)
+def _darwin_fixture_platform(monkeypatch):
+    """Synthetic Mach-O and macOS command fixtures retain their explicit platform."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")

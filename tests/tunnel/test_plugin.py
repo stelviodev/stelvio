@@ -4,10 +4,12 @@ import hashlib
 import io
 import platform
 import struct
+import sys
 import zipfile
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
+import pytest
 from pytest import fixture, mark, raises
 
 from stelvio.tunnel import assets, plugin
@@ -23,7 +25,7 @@ def plugin_world(tmp_path, monkeypatch):
     archive = stream.getvalue()
     monkeypatch.setattr(plugin, "_architecture", lambda: "arm64")
     monkeypatch.setattr(plugin, "get_bin_path", lambda: tmp_path)
-    if platform.system() != "Darwin":
+    if sys.platform != "darwin":
         monkeypatch.setattr(plugin, "_no_acl", lambda *args, **kwargs: None)
         # The cache directory validator is shared with the Traforo asset module.
         # Its ACL inspector invokes macOS `ls -lde`, so stub it on non-Darwin CI.
@@ -284,3 +286,10 @@ def test_unsafe_plugin_lock_is_refused_without_download(plugin_world, tmp_path, 
         plugin.ensure_plugin()
 
     plugin_world.download.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def _darwin_fixture_platform(monkeypatch):
+    """Synthetic Mach-O and macOS command fixtures retain their explicit platform."""
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")

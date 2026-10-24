@@ -74,20 +74,28 @@ class NativeAssetError(RuntimeError):
 
 
 def _architecture() -> str:
-    machine = platform.machine()
-    if platform.system() != "Darwin" or machine not in MACHO_CPUS:
-        raise NativeAssetError("Traforo networking supports macOS arm64 and x86_64")
+    machine = {"aarch64": "arm64", "amd64": "x86_64"}.get(platform.machine(), platform.machine())
+    if platform.system() not in {"Darwin", "Linux"} or machine not in MACHO_CPUS:
+        raise NativeAssetError(
+            "Traforo networking supports macOS and Debian 13 on arm64 and x86_64"
+        )
     return machine
 
 
 def expected_digest() -> str:
     """Expected image identity, available without network or cache access."""
+    if platform.system() == "Linux":
+        raise NativeAssetError(
+            "Linux Traforo releases are not published; set STLV_TRAFORO_DEV_BINARY "
+            "to a validated local Linux build"
+        )
     return TARGETS[_architecture()]["sha256"]
 
 
 def traforo_path() -> Path:
     architecture = _architecture()
-    return get_bin_path() / f"stelvio-traforo-{TRAFORO_VERSION}-{architecture}"
+    suffix = "-linux" if platform.system() == "Linux" else ""
+    return get_bin_path() / f"stelvio-traforo-{TRAFORO_VERSION}{suffix}-{architecture}"
 
 
 def _validate_cache_directory(path: Path) -> None:
@@ -110,6 +118,18 @@ def validate_macho(data: bytes, architecture: str) -> None:
     magic, cpu, _, kind, *_ = MACHO_HEADER.unpack_from(data)
     if (magic, cpu, kind) != (0xFEEDFACF, MACHO_CPUS[architecture], 2):
         raise NativeAssetError("Traforo is not a matching Mach-O executable")
+
+
+def validate_executable(data: bytes, architecture: str) -> None:
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_platform import validate_elf  # noqa: PLC0415
+
+        try:
+            validate_elf(data, architecture, limit=MAX_BINARY_BYTES)
+        except ValueError as error:
+            raise NativeAssetError(str(error)) from error
+    else:
+        validate_macho(data, architecture)
 
 
 def _binary(data: bytes, architecture: str) -> None:
@@ -186,8 +206,16 @@ def _developer_permissions(info: os.stat_result) -> None:
         raise NativeAssetError("Developer Traforo has unsafe ownership or permissions")
 
 
-def _no_acl(path: Path, label: str) -> None:  # noqa: C901 - ACL metadata parser
+def _no_acl(path: Path, label: str) -> None:  # noqa: C901, PLR0912 - OS ACL metadata parser
     """Reject Darwin ACL grants that can change or replace a verified image."""
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_platform import no_acl  # noqa: PLC0415
+
+        try:
+            no_acl(path)
+        except (OSError, ValueError) as error:
+            raise NativeAssetError(f"Cannot trust {label} ACLs") from error
+        return
     try:
         process = subprocess.Popen(  # noqa: S603 - fixed system metadata inspector
             ["/bin/ls", "-lde", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -295,7 +323,7 @@ def select_traforo(environment: Mapping[str, str] | None = None) -> TraforoSelec
             _developer_permissions(info)
             _no_developer_acl(path)
             data = stream.read(MAX_BINARY_BYTES + 1)
-            validate_macho(data, architecture)
+            validate_executable(data, architecture)
             digest = hashlib.sha256(data).hexdigest()
             validate_version(path, allow_development=True)
             _no_developer_acl(path)
@@ -372,6 +400,7 @@ def _download(architecture: str) -> bytes:  # noqa: C901 - bounded authenticated
 def ensure_traforo() -> Path:
     """Verify cached image or download atomically; never compile or consult PATH."""
     architecture = _architecture()
+    expected_digest()
     import fcntl  # noqa: PLC0415 - only after the platform guard
 
     path = traforo_path()

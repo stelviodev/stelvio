@@ -266,7 +266,7 @@ def test_noninteractive_and_unsupported_commands_do_not_load_textual(monkeypatch
     result = CliRunner().invoke(tunnel, ["monitor"])
     assert result.exit_code == 1
     assert "diagnose --json" in result.output
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", "win32")
     result = CliRunner().invoke(tunnel, ["monitor"])
     assert "requires macOS" in result.output
     result = subprocess.run(  # noqa: S603 - isolated import check

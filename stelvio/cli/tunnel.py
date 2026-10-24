@@ -179,8 +179,8 @@ def monitor(session_id: object) -> None:
     import os  # noqa: PLC0415
     import sys  # noqa: PLC0415
 
-    if sys.platform != "darwin":
-        raise click.ClickException("Tunnel monitoring requires macOS")
+    if sys.platform not in {"darwin", "linux"}:
+        raise click.ClickException("Tunnel monitoring requires macOS or Debian Linux")
     if not os.geteuid() or os.getuid() != os.geteuid():
         raise click.ClickException("Run tunnel monitor as your ordinary user")
     if not sys.stdin.isatty() or not sys.stdout.isatty():

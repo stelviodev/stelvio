@@ -27,7 +27,11 @@ from stelvio.tunnel.helper_client import HelperBusyError, HelperError, NativeHel
 from stelvio.tunnel.plugin import ensure_plugin
 
 MIN_MACOS_MAJOR = 15
-INSTALLED_HELPER = Path("/Library/PrivilegedHelperTools/stelvio-traforo")
+INSTALLED_HELPER = (
+    Path("/usr/local/libexec/stelvio-traforo")
+    if platform.system() == "Linux"
+    else Path("/Library/PrivilegedHelperTools/stelvio-traforo")
+)
 ADMIN_LOCK = Path("/Library/PrivilegedHelperTools/.stelvio-traforo.admin.lock")
 SYSTEM_CHANGES = (
     "Install the native helper in /Library/PrivilegedHelperTools/stelvio-traforo; "
@@ -38,6 +42,18 @@ SYSTEM_CHANGES = (
 
 
 def _supported(*, activation: bool = True) -> None:
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_platform import supported  # noqa: PLC0415
+
+        if not supported(activation=activation) or platform.machine() not in {
+            "aarch64",
+            "arm64",
+            "x86_64",
+        }:
+            raise HelperError("Linux Traforo requires Debian 13 with systemd and systemd-resolved")
+        if not os.geteuid():
+            raise HelperError("Run stlv as your ordinary user; only the native helper is elevated")
+        return
     major = platform.mac_ver()[0].split(".")[0]
     if (
         platform.system() != "Darwin"
@@ -243,6 +259,12 @@ def _authorize(script: str) -> None:
 def install_helper(*, environment: Mapping[str, str] | None = None) -> TraforoSelection:
     """Install once; a compatible healthy installation needs no elevation."""
     _supported()
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_installation import (  # noqa: PLC0415 - platform backend
+            install_helper as linux_install,
+        )
+
+        return linux_install(environment=environment)
     selection = select_traforo(environment)
     ensure_plugin()
     digest = selection.digest
@@ -290,6 +312,13 @@ def _wait_ready() -> None:
 def uninstall_helper() -> None:
     """Remove the owned installation. Native admission excludes active sessions."""
     _supported(activation=False)
+    if platform.system() == "Linux":
+        from stelvio.tunnel.linux_installation import (  # noqa: PLC0415 - platform backend
+            uninstall_helper as linux_uninstall,
+        )
+
+        linux_uninstall()
+        return
     installed = _installed_digest()
     # Ordinary removal executes the trusted installed image and works offline.
     # Only interrupted replacement with no installed image needs its release cache.

@@ -343,3 +343,11 @@ def test_builder_main_does_not_install_after_build_failure(builder, monkeypatch)
         builder.module.main([])
 
     install.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def _darwin_fixture_platform(monkeypatch):
+    """Synthetic Mach-O and macOS command fixtures retain their explicit platform."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")

@@ -133,9 +133,9 @@ def _artifact(path: Path, digest: str | None, owner: int, architecture: str) -> 
             value["validation"] = "unsafe"
             return observation(value, status="failed", code="artifact-permissions")
         data = stream.read(MAX_ARTIFACT_BYTES + 1)
-        from stelvio.tunnel.assets import validate_macho  # noqa: PLC0415
+        from stelvio.tunnel.assets import validate_executable  # noqa: PLC0415
 
-        validate_macho(data, architecture)
+        validate_executable(data, architecture)
         after = os.fstat(stream.fileno())
         actual = hashlib.sha256(data).hexdigest()
         value["digest"] = actual
@@ -159,6 +159,10 @@ def _artifact(path: Path, digest: str | None, owner: int, architecture: str) -> 
 
 
 def artifacts() -> dict:
+    if sys.platform == "linux":
+        from stelvio.tunnel.diagnostics.linux import artifacts as linux_artifacts  # noqa: PLC0415
+
+        return linux_artifacts(_artifact)
     from stelvio.pulumi import get_stelvio_config_dir  # noqa: PLC0415
     from stelvio.tunnel.assets import (  # noqa: PLC0415
         DEVELOPMENT_BINARY_ENV,
@@ -322,7 +326,7 @@ def _source_result(collect: Callable[[], dict]) -> dict:
         return observation(status="failed", code=type(error).__name__)
 
 
-def collect() -> dict:
+def collect() -> dict:  # noqa: C901 - bounded platform collector dispatch
     started = time.monotonic()
     deadline = started + 15
     report = {"schema_version": 2, "generated_at": timestamp(), "sections": {}, "findings": []}
@@ -337,6 +341,11 @@ def collect() -> dict:
             collectors[name] = lambda name=name, args=args: parsers.parse_observation(
                 name, command(args, deadline)
             )
+    elif sys.platform == "linux":
+        from stelvio.tunnel.diagnostics import linux  # noqa: PLC0415
+
+        for name in linux.COMMANDS:
+            collectors[name] = lambda name=name: linux.collect(name, command, deadline)
     else:
         sections["macos"] = observation(status="unavailable", code="unsupported-platform")
     pool = ThreadPoolExecutor(max_workers=4)

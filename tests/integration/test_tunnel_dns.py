@@ -155,7 +155,7 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
     """Shared actual-host acceptance for the selected installed image."""
     import socket
 
-    assert platform.system() == "Darwin"
+    assert platform.system() in {"Darwin", "Linux"}
     helper = NativeHelper()
     initial = helper.status()
     assert not initial.owned

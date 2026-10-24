@@ -25,7 +25,11 @@ if TYPE_CHECKING:
 
     from stelvio.tunnel.helper_protocol import ResolverEndpoint
 
-STATE_DIRECTORY = Path("/Library/Application Support/Stelvio/tunnel")
+STATE_DIRECTORY = (
+    Path("/run/stelvio/tunnel")
+    if sys.platform == "linux"
+    else Path("/Library/Application Support/Stelvio/tunnel")
+)
 CONTROL_SOCKET = STATE_DIRECTORY / "helper.sock"
 HELPER_ABI = 1
 CARRIER_VERSION = 1
@@ -95,11 +99,18 @@ class HelperOwnershipState:
 
 
 def _platform() -> None:
-    if sys.platform != "darwin":
+    if sys.platform not in {"darwin", "linux"}:
         raise HelperError("VPC dev networking requires the macOS Traforo helper")
 
 
 def _root_peer(connection: socket.socket) -> None:
+    if sys.platform == "linux":
+        _, uid, _ = struct.unpack(
+            "3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
+        )
+        if uid != 0:
+            raise HelperError("The helper socket did not authenticate a root server")
+        return
     # Lazy platform loading keeps imports usable for ordinary non-VPC sessions.
     library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
     library.getpeereid.argtypes = [
@@ -114,6 +125,22 @@ def _root_peer(connection: socket.socket) -> None:
 
 
 def _socket_path() -> None:
+    if sys.platform == "linux":
+        from stelvio.tunnel.linux_platform import no_acl, root_paths  # noqa: PLC0415
+
+        try:
+            root_paths((Path("/run"), STATE_DIRECTORY.parent, STATE_DIRECTORY))
+            info = CONTROL_SOCKET.lstat()
+            if (
+                info.st_uid
+                or not stat.S_ISSOCK(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != SOCKET_MODE
+            ):
+                raise ValueError("Unsafe helper socket")  # noqa: TRY301 - boundary translation
+            no_acl(CONTROL_SOCKET)
+        except (OSError, ValueError) as error:
+            raise HelperError("The Linux helper namespace is unsafe or unavailable") from error
+        return
     for path in (
         Path("/Library"),
         Path("/Library/Application Support"),

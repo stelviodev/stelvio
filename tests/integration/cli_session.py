@@ -443,6 +443,13 @@ def run():
         return [json.loads(line) for line in self.invocation_path.read_text().splitlines()]
 
     def _route_to(self, address) -> dict[str, str]:
+        if sys.platform == "linux":
+            from .linux_host import route_to
+
+            fields = route_to(address)
+            with (self.project / "standalone-routes.jsonl").open("a") as evidence:
+                evidence.write(json.dumps({"address": str(address), "route": fields}) + "\n")
+            return fields
         from .macos_host import run
 
         output = run("/sbin/route", "-n", "get", "-inet", str(address)).stdout
@@ -468,7 +475,9 @@ def run():
                 assert "destination" in route, route
                 assert "mask" in route, route
                 assert IPv4Network(f"{route['destination']}/{route['mask']}") == cidr, route
-                assert route["interface"].startswith("utun"), route
+                assert route["interface"].startswith(
+                    "st" if sys.platform == "linux" else "utun"
+                ), route
                 unit_interfaces.add(route["interface"])
             assert len(unit_interfaces) == 1, unit_interfaces
             assert not (unit_interfaces & interfaces), "VPCs share a routed interface"
@@ -882,6 +891,10 @@ finally:
         domains = {
             hostname for resource in self.manifest.resources for hostname in resource.hostnames
         }
+        if sys.platform == "linux":
+            from .linux_host import resolver_ports
+
+            return resolver_ports(domains)
         ports = {}
         directory = Path("/etc/resolver")
         for path in directory.glob("stelvio.*"):

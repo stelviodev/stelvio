@@ -40,6 +40,12 @@ FORCE_DESTROY_BUCKET = {"bucket": {"force_destroy": True}}
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--integration-linux-privileged",
+        action="store_true",
+        default=False,
+        help="Exclusive Debian 13 native tests (use -n 0)",
+    )
+    parser.addoption(
         "--integration-macos-privileged",
         action="store_true",
         default=False,
@@ -79,7 +85,8 @@ def pytest_addoption(parser):
 
 def _validate_privileged_lane(config):
     run_tunnel = config.getoption("--integration-tunnel")
-    run_host = config.getoption("--integration-macos-privileged")
+    run_linux = config.getoption("--integration-linux-privileged", default=False)
+    run_host = config.getoption("--integration-macos-privileged") or run_linux
     if run_tunnel and not run_host:
         raise pytest.UsageError(
             "--integration-tunnel also requires --integration-macos-privileged"
@@ -99,7 +106,14 @@ def _validate_privileged_lane(config):
                 "--integration-tunnel may be combined"
             )
         version = platform.mac_ver()[0].split(".")[0]
-        if platform.system() != "Darwin" or not version.isdigit() or int(version) < 15:
+        if run_linux:
+            from stelvio.tunnel.linux_platform import supported
+
+            if platform.system() != "Linux" or not supported():
+                raise pytest.UsageError(
+                    "The Linux privileged lane requires Debian 13 and resolved"
+                )
+        elif platform.system() != "Darwin" or not version.isdigit() or int(version) < 15:
             raise pytest.UsageError("The privileged lane requires macOS 15+")
         if os.geteuid() == 0:
             raise pytest.UsageError(
@@ -109,8 +123,19 @@ def _validate_privileged_lane(config):
 
 
 def _mark_privileged_item(item, run_host, run_tunnel):
-    if not item.get_closest_marker("integration_macos_privileged"):
+    linux_marker = item.get_closest_marker("integration_linux_privileged")
+    if not item.get_closest_marker("integration_macos_privileged") and not linux_marker:
         return False
+    if linux_marker and platform.system() != "Linux":
+        item.add_marker(pytest.mark.skip(reason="Linux host test"))
+        return True
+    if (
+        not linux_marker
+        and platform.system() == "Linux"
+        and not item.get_closest_marker("integration_tunnel")
+    ):
+        item.add_marker(pytest.mark.skip(reason="macOS native test; use the Linux host suite"))
+        return True
     if not run_host:
         item.add_marker(pytest.mark.skip(reason="need --integration-macos-privileged"))
     elif item.get_closest_marker("integration_tunnel") and not run_tunnel:
@@ -314,9 +339,12 @@ def dns_certificate_arn():
 @pytest.fixture(scope="session")
 def macos_host(tmp_path_factory):
     """Preserve and restore the host before exclusive native acceptance."""
-    from .macos_host import MacOSHost
+    if platform.system() == "Linux":
+        from .linux_host import LinuxHost as Host
+    else:
+        from .macos_host import MacOSHost as Host
 
-    host = MacOSHost(tmp_path_factory.mktemp("macos-host"))
+    host = Host(tmp_path_factory.mktemp("macos-host"))
     try:
         host.prepare()
         yield host
@@ -329,7 +357,10 @@ def macos_host(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _privileged_host_baseline(request):
-    if not request.node.get_closest_marker("integration_macos_privileged"):
+    if not (
+        request.node.get_closest_marker("integration_macos_privileged")
+        or request.node.get_closest_marker("integration_linux_privileged")
+    ):
         yield
         return
     host = request.getfixturevalue("macos_host")

@@ -7,6 +7,7 @@ import struct
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
 from pytest import mark, raises
 
 from stelvio.tunnel import assets
@@ -308,3 +309,11 @@ def test_override_accepts_only_pinned_or_well_formed_snapshot_versions(
     else:
         with raises(assets.NativeAssetError, match="must report"):
             assets.select_traforo(environment)
+
+
+@pytest.fixture(autouse=True)
+def _darwin_fixture_platform(monkeypatch):
+    """Synthetic Mach-O and macOS command fixtures retain their explicit platform."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")

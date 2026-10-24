@@ -12,8 +12,10 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from functools import cache
+from pathlib import Path
 
 _BSD_INFO = 3
+_MAX_PROC_STAT = 4096
 
 
 class _BsdInfo(ctypes.Structure):
@@ -82,6 +84,8 @@ class ProcessIdentity:
 
 
 def identity(pid: int) -> ProcessIdentity | None:
+    if sys.platform == "linux":
+        return _linux_identity(pid)
     info = _BsdInfo()
     ctypes.set_errno(0)
     size = _libproc().proc_pidinfo(pid, _BSD_INFO, 0, ctypes.byref(info), ctypes.sizeof(info))
@@ -107,8 +111,14 @@ def unreaped_child(pid: int) -> bool:
     Darwin libproc stops returning BSD identity for zombies. waitid(WNOWAIT)
     proves the exact PID is still our waitable child; it cannot be reused.
     """
+    if sys.platform == "linux":
+        try:
+            result = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except ChildProcessError:
+            return False
+        return result is not None and result.si_pid == pid
     if sys.platform != "darwin":
-        raise RuntimeError("SSH process fencing requires the supported macOS host")
+        raise RuntimeError("SSH process fencing requires a supported Unix host")
     # Darwin siginfo_t begins with six 32-bit fields, then 64-bit data/padding.
     # An aligned full-size buffer avoids reading platform-dependent unused fields.
     info = (ctypes.c_uint64 * 13)()
@@ -148,3 +158,32 @@ def _snapshot(*, timeout: float = 5) -> dict[int, ProcessIdentity]:
             # signal them or infer their birth identity from a PID alone.
             processes[pid] = ProcessIdentity(pid, parent, group, uid, 0, 0, 0)
     return processes
+
+
+def _linux_identity(pid: int) -> ProcessIdentity | None:
+    if pid <= 0:
+        return None
+    path = Path(f"/proc/{pid}")
+    try:
+        with (path / "stat").open() as stream:
+            raw = stream.read(_MAX_PROC_STAT + 1)
+        if len(raw) > _MAX_PROC_STAT:
+            raise RuntimeError("Linux process identity exceeds bounds")
+        fields = raw[raw.rindex(") ") + 2 :].split()
+        uid = path.stat().st_uid
+        ticks = int(fields[19])
+        # Incorporate boot identity without reading token-bearing arguments.
+        boot = int(Path("/proc/sys/kernel/random/boot_id").read_text().replace("-", ""), 16)
+        return ProcessIdentity(
+            pid,
+            int(fields[1]),
+            int(fields[2]),
+            uid,
+            boot,
+            ticks,
+            5 if fields[0] == "Z" else 1,
+        )
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    except (OSError, ValueError, IndexError) as error:
+        raise RuntimeError("Cannot verify Linux process identity; signaling refused") from error

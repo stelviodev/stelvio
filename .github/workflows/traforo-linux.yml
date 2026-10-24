@@ -1,0 +1,44 @@
+name: Traforo Debian
+
+on:
+  pull_request:
+    paths:
+      - 'pkg/traforo-client-go/**'
+      - 'pkg/traforo-acceptance-tool/**'
+      - 'stelvio/tunnel/**'
+      - 'stelvio/cli/tunnel.py'
+      - 'tests/tunnel/**'
+      - 'tests/integration/*linux*'
+      - '.github/workflows/traforo-linux.yml'
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    container: debian:13
+    timeout-minutes: 20
+    steps:
+      - name: Install Debian build dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git build-essential curl xz-utils acl
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: pkg/traforo-client-go/go.sum
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.13.5'
+          python-version: '3.12'
+      - name: Test portable Linux boundaries
+        run: |
+          uv sync --locked
+          uv run pytest tests/tunnel/test_linux_platform.py -q
+          cd pkg/traforo-client-go
+          go test -mod=readonly -race ./...
+          go vet -mod=readonly ./...
+      - name: Build both Linux architectures
+        working-directory: pkg/traforo-client-go
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=readonly ./cmd/stelvio-traforo
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly ./cmd/stelvio-traforo

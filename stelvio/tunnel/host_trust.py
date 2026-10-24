@@ -86,7 +86,7 @@ class HostIdentity:
 
 
 def _acl(path: Path) -> None:
-    if sys.platform == "darwin":
+    if sys.platform in {"darwin", "linux"}:
         _no_acl(path, "SSH host trust")
 
 
