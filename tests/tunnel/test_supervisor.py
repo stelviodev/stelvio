@@ -816,3 +816,19 @@ def test_diagnostics_projects_discovered_resource_details(monkeypatch):
         }
     ]
     assert snapshot["ranges"] == ["10.254.16.0/20", "10.254.64.0/20"]
+
+
+def test_monitor_connected_time_tracks_uninterrupted_readiness(monkeypatch):
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    clock = [100.0]
+    monkeypatch.setattr("stelvio.tunnel.supervisor.time.monotonic", lambda: clock[0])
+    worker._publish("ready")
+    assert worker._ready_since == 100.0
+    clock[0] = 110.0
+    worker._publish("ready")
+    assert worker._ready_since == 100.0
+    worker._publish("retrying", "transport")
+    assert worker._ready_since is None
+    worker._publish("ready")
+    assert worker._ready_since == 110.0

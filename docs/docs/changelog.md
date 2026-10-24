@@ -16,7 +16,8 @@
   deployed private and isolated subnets through Session Manager. `stlv dev` uses
   the same session and checks each loaded Function's Vpc before running its handler.
   Use `stlv tunnel diagnose` for local session and networking observations, or add
-  `--json` for a structured report.
+  `--json` for a structured report. `stlv tunnel monitor` shows live traffic,
+  readiness, events and diagnostic TLS endpoint checks.
 
     → [Managed VPC transport](concepts/dev-mode.md#managed-vpc-transport)
 
