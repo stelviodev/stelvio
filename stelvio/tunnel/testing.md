@@ -608,11 +608,15 @@ capability in the existing ready handshake. Old images continue forwarding; the
 report marks missing diagnostics unavailable and uses legacy helper status where
 possible. Publishing and pinning a new release is a separate step.
 
-## Faster AWS acceptance with a private Lambda API
+## AWS networking acceptance with private Lambda APIs
 
-Run the additive Lambda suite when you need to test the AWS tunnel path without
-waiting for DocumentDB clusters. It supplements the DocumentDB suite; it does not
-replace database TLS/member discovery, authentication, or read/write checks.
+Use the Lambda suite for AWS networking acceptance without waiting for DocumentDB
+clusters. It covers two independent VPCs, private HTTPS and DNS, partial failure,
+reconnection, invocation admission, and host-key rejection. Add the existing
+non-VPC test to complete the AWS networking command below. Keep Go unit/race and
+native host/installation tests as separate gates. Run DocumentDB acceptance when
+checking database discovery, replica members, authentication, and read/write
+behavior; the Lambda suite does not replace these service-specific checks.
 
 ```bash
 # Build locally; this command does not install the helper.
@@ -624,6 +628,7 @@ export STLV_TEST_AWS_PROFILE=default
 export STLV_TEST_AWS_REGION=us-east-1
 export STLV_TEST_TUNNEL_AWS_ACCOUNT=<verified-account-id>
 uv run pytest tests/integration/test_tunnel_lambda.py \
+  tests/integration/test_tunnel.py::test_non_vpc_actual_dev_runs_without_installed_helper \
   --integration-macos-privileged --integration-tunnel -n 0 -vv
 ```
 
@@ -634,51 +639,72 @@ helper and independently checked network baseline afterward. The private Session
 Manager plugin must pass the normal version checks. No Traforo release download
 is needed with the developer override. `run_all.sh` never runs this suite.
 
-The suite shares one disposable application across three tests. A VPC-attached
-client Function makes the VPC eligible for ordinary CLI selection. A private
-API Gateway REST API reaches a separate Lambda backend that has no VPC attachment
-or public URL. An IPv4 interface endpoint sits in the VPC's private subnet and
-admits HTTPS from the bastion security group. The API policy restricts requests to
-that endpoint. Its API-ID hostname is a configured DNS domain for this VPC.
+Five Lambda tests share one disposable application with two VPCs. Each has its own
+bastion, private API Gateway REST API, IPv4 interface endpoint, Lambda backend,
+and VPC-attached client Function. The backends have no VPC attachment or public
+URL. Each endpoint admits HTTPS from only its owning bastion security group, and
+each API policy restricts requests to its own endpoint. The API-ID hostname is a
+configured DNS domain for that VPC. Backend identity includes the VPC number.
 
 Standalone requests follow host DNS and utun through Traforo, SSH and Session
-Manager to the private endpoint. The dev test invokes the client's public Function
-URL, then proves that its local handler called the private API. The public URL
-alone is not evidence of a tunnel. Requests use normal HTTPS hostname/certificate
-checks, fresh connections, and no environment HTTP proxy. Assertions check exact
-endpoint private addresses, subnet routes, backend identity, nonces, and payload
-digests. Requests must fail before startup and after shutdown.
+Manager to the private endpoint. The dev tests invoke each client's public Function
+URL, then prove that its local handler called the correct private API. The public
+URL alone is not evidence of a tunnel. Requests use normal HTTPS hostname and
+certificate checks, fresh connections, and no environment HTTP proxy.
 
-The tests cover SIGINT, SIGKILL, transport reconnection, stable resolver ports,
-new helper generations, local handler execution, terminated owned SSM sessions,
-unchanged standalone deployment state, and retained deployment-owned bastions.
-They do not add general Lambda resource discovery to Stelvio. The API is a
-custom-domain target, so the tests explicitly probe it after CLI readiness.
-Initial target connection failures have a 90-second readiness budget; a wrong
-backend identity or payload fails immediately. Dev Ctrl+C can return Click's
-abort status (1), while standalone Ctrl+C must return 0. Both paths must finish
-within the shutdown limit and certify the same host and transport cleanup.
+Assertions check simultaneous requests, exact endpoint private addresses, distinct
+subnet routes/interfaces, distinct DNS listener ports, nonces, and payload digests.
+Each DNS listener must refuse the other VPC's hostname with `REFUSED`. Both private
+APIs must be unreachable without their tunnels. The APIs are custom-domain
+targets, so the tests explicitly probe them after CLI readiness. Initial target
+connection failures have a 90-second readiness budget; a wrong backend identity
+or payload fails immediately.
 
-The AWS identity needs the usual tunnel deployment permissions, plus API Gateway
+The standalone fault test stops the first proof-owned bastion. The dev fault test
+stops the second, reversing the healthy and failed roles. Both require:
+
+- The failed unit retains its DNS listener and returns `SERVFAIL` for its own name.
+- Fresh HTTPS requests through the healthy peer still return its own backend data.
+- The healthy unit's generation and SSM session stay unchanged.
+- The dev bridge rejects failed-VPC invocations with `VpcUnavailableError` before
+  handler import or entry, while healthy-VPC invocations keep working.
+- Restart restores access with a fresh failed-unit generation, the same DNS ports,
+  unchanged SSH pins, and no replacement application infrastructure.
+
+Fault cleanup restarts only the verified proof bastion, including after an assertion
+fails. A separate test changes a proof bastion's host key, checks rejection and
+peer availability, confirms a new runtime cannot replace the pin, restores the
+original key, and requires a fresh session for recovery. It uses the existing
+bounded SSM fault fixture and never resets trust to accept the changed key.
+
+The suite also checks ordinary transport termination, SIGINT, SIGKILL, terminated
+owned SSM sessions, unchanged standalone deployment state, and retained deployment-
+owned bastions. Dev Ctrl+C can return Click's abort status (1), while standalone
+Ctrl+C must return 0. Both must meet the shutdown limit and certify cleanup.
+
+The AWS identity needs ordinary tunnel deployment permissions, plus API Gateway
 REST API administration, VPC interface endpoints, Lambda integration permissions,
-and log/IAM administration for the backend. The fixture checks the account before
-creating resources. It saves the exact API ID before application deployment, tags
-it with the proof identity, verifies ownership before deletion, and audits absence.
-It destroys the API and application even after partial setup failures.
+log/IAM administration, proof-owned EC2 stop/start, and SSM Run Command for the key
+fault. The account is checked before resource creation. The fixture saves each
+exact API ID before application deployment, verifies ownership before deletion,
+and audits API and endpoint absence independently. One missing endpoint must not
+hide a surviving peer. Quota-limited API create, deploy, and delete calls retry explicit throttle
+responses with bounded backoff; unknown mutation outcomes are not retried. See the
+[AWS management quotas](https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html).
 
-Costs include the running bastion, one interface endpoint, API calls, Lambda, and
-logs until teardown finishes. The suite removes DocumentDB provisioning delays;
-it still creates a VPC-attached client Function, so Lambda interface cleanup can
-remain slow. It uses one VPC; retain the existing suite for independent multi-VPC
-and database-specific acceptance.
+Costs include two running bastions, two interface endpoints, API calls, Lambda,
+and logs until teardown finishes. The suite removes DocumentDB delays; VPC-attached
+client Functions can still delay Lambda interface cleanup. Both bastions remain
+after normal tunnel exit and are removed only by application teardown.
 
-Keep the pytest temporary directory after failures. It contains `private-api.json`,
-`lambda-acceptance.json` (deployment, exercise, and teardown durations), command
-logs, and host baseline/restoration evidence. A cleanup or absence-audit failure
-fails acceptance. Record each run's commit, platform, binary digest, plugin version,
-results, durations, skips, and certified cleanup. Do not infer a pass from test
-collection or a prior candidate's result. Generated state can contain secrets;
-keep complete evidence private.
+Keep the pytest temporary directory after failures. It contains each
+`private-api-<number>.json`, `lambda-acceptance.json` (API IDs, endpoint IDs, volume
+IDs, and deployment/exercise/teardown durations), per-test CLI logs, SSM cleanup
+receipts, and host baseline/restoration evidence. Cleanup or audit failures fail
+acceptance. Record each run's commit, platform, binary digest, plugin version,
+results, durations, skips, and certified cleanup. Do not infer a pass from
+collection or a prior candidate. Generated state can contain secrets; keep full
+evidence private.
 
 The fixture's non-AWS checks run with:
 

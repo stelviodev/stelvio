@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import time
+from contextlib import contextmanager
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.error import URLError
@@ -28,15 +29,19 @@ from .cli_session import FAULT_IO, STARTUP_TIMEOUT, StandaloneCliSession
 class PrivateApi:
     """Keep an exact, tagged API receipt even when application deployment fails."""
 
-    def __init__(self, sdk, app: str, account: str, region: str, evidence: Path):
+    def __init__(  # noqa: PLR0913 - proof identity and distinct API name
+        self, sdk, app: str, account: str, region: str, evidence: Path, *, name=None
+    ):
         self.client = sdk.client("apigateway", config=FAULT_IO)
         self.app, self.account, self.region = app, account, region
+        self.name = name or app
         self.evidence = evidence
         self.api_id = None
 
     def create(self):
-        response = self.client.create_rest_api(
-            name=self.app,
+        response = retry_api_throttling(
+            self.client.create_rest_api,
+            name=self.name,
             endpointConfiguration={"types": ["PRIVATE"]},
             tags={"stelvio:app": self.app, "stelvio:env": "proof"},
         )
@@ -46,6 +51,7 @@ class PrivateApi:
                 {
                     "api_id": self.api_id,
                     "app": self.app,
+                    "name": self.name,
                     "account": self.account,
                     "region": self.region,
                 }
@@ -95,7 +101,9 @@ class PrivateApi:
             integrationHttpMethod="POST",
             uri=f"arn:aws:apigateway:{self.region}:lambda:path/2015-03-31/functions/{function_arn}/invocations",
         )
-        self.client.create_deployment(restApiId=self.api_id, stageName="proof")
+        retry_api_throttling(
+            self.client.create_deployment, restApiId=self.api_id, stageName="proof"
+        )
 
     def destroy(self):
         if self.api_id is None:
@@ -105,14 +113,14 @@ class PrivateApi:
         except self.client.exceptions.NotFoundException:
             return
         if (
-            current.get("name") != self.app
+            current.get("name") != self.name
             or current.get("tags", {}).get("stelvio:app") != self.app
             or current.get("tags", {}).get("stelvio:env") != "proof"
         ):
             raise RuntimeError(
                 f"Refuse to delete foreign API {self.api_id}; retain {self.evidence}"
             )
-        self.client.delete_rest_api(restApiId=self.api_id)
+        retry_api_throttling(self.client.delete_rest_api, restApiId=self.api_id)
         wait_until(self.absent, timeout=120, description=f"API {self.api_id} absence")
 
     def absent(self):
@@ -121,6 +129,29 @@ class PrivateApi:
         except self.client.exceptions.NotFoundException:
             return True
         return False
+
+
+def retry_api_throttling(operation, **parameters):
+    """Respect API Gateway's account quotas; never retry an uncertain mutation.
+
+    Private API creation is limited to one per 3s, deployment to one per 5s,
+    and API deletion to one per 30s. Retry only an explicit throttle response.
+    """
+    deadline = time.monotonic() + 90
+    delay = 1
+    for attempt in range(10):
+        try:
+            return operation(**parameters)
+        except ClientError as error:
+            if (
+                error.response["Error"]["Code"] != "TooManyRequestsException"
+                or attempt == 9
+                or time.monotonic() + delay > deadline
+            ):
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 10)
+    raise AssertionError("Unreachable API retry state")
 
 
 def wait_until(check, *, timeout: float, description: str, interval: float = 1):
@@ -166,9 +197,17 @@ class LambdaTunnelSession(StandaloneCliSession):
         # The base's plain-app setup avoids its optional pymongo prerequisite.
         super().__init__(project, no_vpc=True)
         self.no_vpc = False
-        self.api = PrivateApi(
-            self.aws, self.app, self.account, self.region, self.project / "private-api.json"
-        )
+        self.apis = {
+            number: PrivateApi(
+                self.aws,
+                self.app,
+                self.account,
+                self.region,
+                self.project / f"private-api-{number}.json",
+                name=f"{self.app}-api{number}",
+            )
+            for number in (1, 2)
+        }
         self.endpoint_ids = []
         self.timings = {}
 
@@ -196,16 +235,18 @@ class LambdaTunnelSession(StandaloneCliSession):
 
     def deploy(self):
         started = time.monotonic()
-        self.api.create()
+        for api in self.apis.values():
+            api.create()
         template = (Path(__file__).parent / "handlers" / "tunnel_lambda_app.py.txt").read_text()
         settings = {
             "app": self.app,
             "env": self.environment_name,
             "region": self.region,
             "account": self.account,
-            "api_id": self.api.api_id,
-            "api_url": self.api.url,
-            "hostname": self.api.hostname,
+            "targets": [
+                {"api_id": api.api_id, "api_url": api.url, "hostname": api.hostname}
+                for api in self.apis.values()
+            ],
         }
         (self.project / "stlv_app.py").write_text(
             template.replace("SETTINGS_LITERAL", repr(settings))
@@ -215,19 +256,26 @@ class LambdaTunnelSession(StandaloneCliSession):
         self._outputs = json.loads(self.command("outputs", self.environment_name, "--json"))[
             "user_defined"
         ]
-        self.endpoint_ids = [self._outputs["endpoint_id"]]
+        self.endpoint_ids = [self._outputs[f"endpoint{number}_id"] for number in self.apis]
         self._proof_lambda_function_names = validate_proof_lambda_function_names(
             app=self.app,
             env=self.environment_name,
-            function_names=(self._outputs["function1_name"], self._outputs["backend_name"]),
+            function_names=tuple(
+                self._outputs[f"{kind}{number}_name"]
+                for number in self.apis
+                for kind in ("function", "backend")
+            ),
         )
         state = self.state()
         self._state_hash = hashlib.sha256(state).hexdigest()
         self._manifest = read_network_manifest(json.loads(state))
-        assert len(self.manifest.enabled_vpcs) == 1
+        assert len(self.manifest.enabled_vpcs) == 2
         assert not self.manifest.resources
         self._initialize_proof_host_trust()
-        self.api.configure(self._outputs["endpoint_id"], self._outputs["backend_arn"])
+        for number, api in self.apis.items():
+            api.configure(
+                self._outputs[f"endpoint{number}_id"], self._outputs[f"backend{number}_arn"]
+            )
         self.timings["deploy_seconds"] = time.monotonic() - started
         self.write_evidence()
 
@@ -238,7 +286,8 @@ class LambdaTunnelSession(StandaloneCliSession):
                     "app": self.app,
                     "account": self.account,
                     "region": self.region,
-                    "api_id": self.api.api_id,
+                    "api_ids": {number: api.api_id for number, api in self.apis.items()},
+                    "volume_ids": getattr(self, "_bastion_volume_ids", ()),
                     "endpoint_ids": self.endpoint_ids,
                     "timings": self.timings,
                 },
@@ -246,16 +295,28 @@ class LambdaTunnelSession(StandaloneCliSession):
             )
         )
 
-    def check_private(self, nonce: str):
+    def network(self, number: int):
+        matches = [
+            vpc for vpc in self.manifest.enabled_vpcs if vpc.identity.endswith(f"::net{number}")
+        ]
+        assert len(matches) == 1, matches
+        return matches[0]
+
+    def backend_identity(self, number: int):
+        return f"{self.app}:net{number}"
+
+    def check_private(self, nonce: str, number: int = 1):
+        api = self.apis[number]
+        network = self.network(number)
         addresses = {
             ip_address(item[4][0])
-            for item in socket.getaddrinfo(
-                self.api.hostname, 443, socket.AF_INET, socket.SOCK_STREAM
-            )
+            for item in socket.getaddrinfo(api.hostname, 443, socket.AF_INET, socket.SOCK_STREAM)
         }
         ec2 = self.aws.client("ec2", config=FAULT_IO)
-        endpoint = ec2.describe_vpc_endpoints(VpcEndpointIds=self.endpoint_ids)["VpcEndpoints"][0]
-        assert endpoint["VpcId"] == self.manifest.enabled_vpcs[0].vpc_id
+        endpoint = ec2.describe_vpc_endpoints(
+            VpcEndpointIds=[self._outputs[f"endpoint{number}_id"]]
+        )["VpcEndpoints"][0]
+        assert endpoint["VpcId"] == network.vpc_id
         interfaces = ec2.describe_network_interfaces(
             NetworkInterfaceIds=endpoint["NetworkInterfaceIds"]
         )
@@ -264,64 +325,143 @@ class LambdaTunnelSession(StandaloneCliSession):
         }
         assert addresses, "The API did not resolve to IPv4 addresses"
         assert addresses <= endpoint_addresses, addresses
-        private = self.manifest.enabled_vpcs[0].private_subnets
+        private = network.private_subnets
         assert all(any(address in subnet.cidr for subnet in private) for address in addresses)
         expected_interface = self._route_to(private[0].cidr.network_address + 1)["interface"]
         assert expected_interface.startswith("utun")
         for address in addresses:
             assert self._route_to(address)["interface"] == expected_interface
         payload = "private-lambda-payload:" + "0123456789abcdef" * 1024
-        response = private_request(self.api.url, nonce, payload)
-        assert_echo(response, app=self.app, nonce=nonce, payload=payload)
+        response = private_request(api.url, nonce, payload)
+        assert_echo(response, app=self.backend_identity(number), nonce=nonce, payload=payload)
         return response
 
-    def assert_private_unavailable(self):
-        try:
-            response = private_request(self.api.url, "outside-tunnel", "blocked", timeout=5)
-        except (URLError, TimeoutError, OSError):
-            return
-        raise AssertionError(f"Private API succeeded without the tunnel: {response}")
+    def assert_private_unavailable(self, number: int | None = None):
+        for selected in self.apis if number is None else (number,):
+            try:
+                response = private_request(
+                    self.apis[selected].url, "outside-tunnel", "blocked", timeout=5
+                )
+            except (URLError, TimeoutError, OSError):
+                continue
+            raise AssertionError(
+                f"Private API {selected} succeeded without its tunnel: {response}"
+            )
 
     def resolver_ports(self):
         ports = {}
+        domains = {api.hostname for api in self.apis.values()}
         for path in Path("/etc/resolver").glob("stelvio.*"):
             entries = dict(
                 line.split(maxsplit=1)
                 for line in path.read_text().splitlines()
                 if len(line.split(maxsplit=1)) == 2
             )
-            if entries.get("domain") == self.api.hostname and "port" in entries:
-                ports[self.api.hostname] = int(entries["port"])
+            if entries.get("domain") in domains and "port" in entries:
+                ports[entries["domain"]] = int(entries["port"])
         return ports
 
     def assert_bastions_running(self):
-        identifier = self.manifest.enabled_vpcs[0].access.instance_id
+        identifiers = [self.network(number).access.instance_id for number in self.apis]
         reservations = self.aws.client("ec2", config=FAULT_IO).describe_instances(
-            InstanceIds=[identifier]
+            InstanceIds=identifiers
         )["Reservations"]
-        observed = [
-            (item["InstanceId"], item["State"]["Name"])
+        observed = {
+            item["InstanceId"]: item["State"]["Name"]
             for group in reservations
             for item in group["Instances"]
-        ]
-        assert observed == [(identifier, "running")]
+        }
+        assert observed == dict.fromkeys(identifiers, "running")
 
-    def check_dev(self, nonce: str):
-        status, response = self.invoke_function(1, marker=nonce)
+    def check_dev(self, nonce: str, number: int = 1):
+        status, response = self.invoke_function(number, marker=nonce)
         assert status == 200, response
         assert response["local"] is True
-        assert response["pid"] in {item["pid"] for item in self.invocations()}
-        assert_echo(response["echo"], app=self.app, nonce=nonce, payload="dev-private-payload")
-        self.check_private(nonce + "-host")
+        entries = [
+            item
+            for item in self.invocations()
+            if item.get("target") == str(number) and item.get("nonce") == nonce
+        ]
+        assert response["pid"] in {item["pid"] for item in entries}
+        assert_echo(
+            response["echo"],
+            app=self.backend_identity(number),
+            nonce=nonce,
+            payload="dev-private-payload",
+        )
+        self.check_private(nonce + "-host", number)
 
-    def wait_private(self, nonce: str):
+    def wait_private(self, nonce: str, number: int = 1):
         def probe():
             try:
-                return self.check_private(nonce)
+                return self.check_private(nonce, number)
             except (URLError, TimeoutError, OSError):
                 return None
 
-        return wait_until(probe, timeout=90, description="private HTTPS recovery")
+        return wait_until(probe, timeout=90, description=f"VPC {number} private HTTPS recovery")
+
+    def assert_dns_isolation(self):
+        ports = self.resolver_ports()
+        assert set(ports) == {api.hostname for api in self.apis.values()}
+        assert len(set(ports.values())) == len(self.apis)
+        for number, api in self.apis.items():
+            port = ports[api.hostname]
+            self.wait_dns_rcode(api.hostname, port, 0)
+            for other, peer in self.apis.items():
+                if other != number:
+                    assert self.dns_rcode(peer.hostname, port) == 5, (
+                        "Wrong VPC DNS view accepted query"
+                    )
+        return ports
+
+    def wait_admission_rejected(self, number: int):
+        def rejected():
+            # A fresh nonce distinguishes an early invocation racing the status
+            # update from an invocation made after admission has closed.
+            nonce = f"blocked-{os.urandom(8).hex()}"
+            before = [item for item in self.invocations() if item.get("target") == str(number)]
+            status, response = self.invoke_function(number, timeout=20, marker=nonce)
+            if not (
+                status == 500
+                and isinstance(response, dict)
+                and response.get("errorType") == "VpcUnavailableError"
+            ):
+                return False
+            assert self.network(number).identity in response.get("error", "")
+            after = [item for item in self.invocations() if item.get("target") == str(number)]
+            assert after == before, "Unavailable VPC handler ran despite closed admission"
+            return True
+
+        wait_until(rejected, timeout=120, description=f"VPC {number} invocation admission")
+
+    @contextmanager
+    def stopped_bastion(self, number: int):
+        network = self.network(number)
+        ec2 = self.aws.client("ec2", config=FAULT_IO)
+        identifier = network.access.instance_id
+        groups = ec2.describe_instances(InstanceIds=[identifier])["Reservations"]
+        instances = [item for group in groups for item in group["Instances"]]
+        assert len(instances) == 1
+        assert groups[0]["OwnerId"] == self.account
+        instance = instances[0]
+        tags = {tag["Key"]: tag["Value"] for tag in instance.get("Tags", ())}
+        assert instance["InstanceId"] == identifier
+        assert instance["VpcId"] == network.vpc_id
+        assert tags.get("stelvio:app") == self.app
+        assert tags.get("stelvio:env") == self.environment_name
+        assert instance["State"]["Name"] == "running"
+        try:
+            ec2.stop_instances(InstanceIds=[identifier])
+            ec2.get_waiter("instance_stopped").wait(
+                InstanceIds=[identifier], WaiterConfig={"Delay": 3, "MaxAttempts": 40}
+            )
+            yield
+        finally:
+            # Also restore after a timeout or a failed assertion inside the fault.
+            ec2.start_instances(InstanceIds=[identifier])
+            ec2.get_waiter("instance_running").wait(
+                InstanceIds=[identifier], WaiterConfig={"Delay": 3, "MaxAttempts": 40}
+            )
 
     def _capture_dev_lambda_log_groups(self):
         try:
@@ -356,15 +496,16 @@ class LambdaTunnelSession(StandaloneCliSession):
             ec2 = self.aws.client("ec2", config=FAULT_IO)
 
             def endpoints_absent():
-                try:
-                    values = ec2.describe_vpc_endpoints(VpcEndpointIds=self.endpoint_ids)[
-                        "VpcEndpoints"
-                    ]
-                except ClientError as error:
-                    if error.response["Error"]["Code"] == "InvalidVpcEndpointId.NotFound":
-                        return True
-                    raise
-                return not values
+                remaining = []
+                for identifier in self.endpoint_ids:
+                    try:
+                        remaining.extend(
+                            ec2.describe_vpc_endpoints(VpcEndpointIds=[identifier])["VpcEndpoints"]
+                        )
+                    except ClientError as error:
+                        if error.response["Error"]["Code"] != "InvalidVpcEndpointId.NotFound":
+                            raise
+                return not remaining
 
             wait_until(endpoints_absent, timeout=120, description="VPC endpoint absence")
 
@@ -373,7 +514,7 @@ class LambdaTunnelSession(StandaloneCliSession):
         errors = []
         # Remove the private API first. Even partial app deployments retain their
         # own cleanup and independent audit; one failure must not skip the other.
-        for cleanup in (self.api.destroy, super().destroy):
+        for cleanup in (*(api.destroy for api in self.apis.values()), super().destroy):
             try:
                 cleanup()
             except Exception as error:
