@@ -151,6 +151,7 @@ def partial_failure(session, failed, *, dev=False):
             if dev:
                 session.wait_admission_rejected(failed)
                 session.check_dev(uuid4().hex, healthy)
+                session.check_plain_clients()
             assert session.wait_unit(peer.identity, "active").generation == peer_unit.generation
             assert session.resolver_ports() == ports
         assert [
@@ -221,6 +222,7 @@ def test_lambda_dev_private_https_and_partial_failure(lambda_session):
     assert_two_vpc_access(session)
     for number in (1, 2):
         session.check_dev(uuid4().hex, number)
+    session.check_plain_clients()
     recover_transport(session)
     # Reverse the failed/healthy roles: both VPCs must be independently managed.
     partial_failure(session, 2, dev=True)
@@ -237,6 +239,7 @@ def test_lambda_host_key_rejection_and_peer_isolation(lambda_session):
     session.wait_ready()
     ports = assert_two_vpc_access(session)
     session.check_dev(uuid4().hex, 1)
+    session.check_plain_clients()
     network = session.network(1)
     pins = session.host_pins()
     with session.rotated_host_key(network.access.instance_id) as changed:
@@ -249,6 +252,7 @@ def test_lambda_host_key_rejection_and_peer_isolation(lambda_session):
         session.wait_dns_rcode(session.apis[1].hostname, ports[session.apis[1].hostname], 2)
         session.wait_admission_rejected(1)
         session.check_dev(uuid4().hex, 2)
+        session.check_plain_clients()
         assert session.host_pins() == pins
         # A new runtime must still reject the changed key; never reset the pin.
         session.terminate(signal.SIGINT)
@@ -259,6 +263,7 @@ def test_lambda_host_key_rejection_and_peer_isolation(lambda_session):
         session.wait_unit(session.network(2).identity, "active", timeout=STARTUP_TIMEOUT)
         session.wait_private(uuid4().hex, 2)
         session.check_dev(uuid4().hex, 2)
+        session.check_plain_clients()
         assert session.host_pins() == pins
     # Restoring the original key cannot revive a terminally failed worker.
     session.wait_worker_cause(network.identity, "ssh-host-key", timeout=30)
@@ -273,4 +278,67 @@ def test_lambda_host_key_rejection_and_peer_isolation(lambda_session):
     receipts = session.active_ssm_sessions()
     assert len(receipts) == 2
     session.terminate(signal.SIGINT)
+    assert_stopped(session, receipts)
+
+
+def test_lambda_dev_sigkill_and_restart(lambda_session):
+    session = lambda_session
+    session.start_dev()
+    session.wait_ready()
+    assert_two_vpc_access(session)
+    for number in (1, 2):
+        session.check_dev(uuid4().hex, number)
+    session.check_plain_clients()
+    pins = session.host_pins()
+    receipts = session.active_ssm_sessions()
+    assert len(receipts) == 2
+    assert session.terminate(signal.SIGKILL) == -signal.SIGKILL
+    assert_stopped(session, receipts)
+
+    session.start_dev()
+    session.wait_ready()
+    assert_two_vpc_access(session)
+    for number in (1, 2):
+        session.check_dev(uuid4().hex, number)
+    session.check_plain_clients()
+    assert session.host_pins() == pins
+    receipts = session.active_ssm_sessions()
+    assert len(receipts) == 2
+    assert session.terminate(signal.SIGINT) in (0, 1)
+    assert_stopped(session, receipts)
+
+
+def test_lambda_standalone_host_key_startup_refusal(lambda_session):
+    session = lambda_session
+    session.start()
+    session.wait_ready()
+    assert_two_vpc_access(session)
+    pins = session.host_pins()
+    receipts = session.active_ssm_sessions()
+    assert len(receipts) == 2
+    assert session.terminate(signal.SIGINT) == 0
+    assert_stopped(session, receipts)
+
+    instance = session.network(1).access.instance_id
+    with session.rotated_host_key(instance) as changed:
+        for _ in range(2):
+            session.start()
+            output = session.wait_host_key_refusal(instance)
+            assert fingerprint(changed) in output
+            assert any(fingerprint(key) in output for key in pins.values())
+            session.wait_for_helper_cleanup(timeout=120)
+            assert not session.active_ssm_sessions()
+            assert not session.resolver_ports()
+            assert session.host_pins() == pins
+            session.assert_private_unavailable()
+            session.assert_bastions_running()
+            session.assert_state_unchanged()
+
+    session.start()
+    session.wait_ready()
+    assert_two_vpc_access(session)
+    assert session.host_pins() == pins
+    receipts = session.active_ssm_sessions()
+    assert len(receipts) == 2
+    assert session.terminate(signal.SIGINT) == 0
     assert_stopped(session, receipts)

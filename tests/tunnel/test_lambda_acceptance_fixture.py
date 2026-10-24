@@ -332,3 +332,41 @@ def test_parallel_access_keeps_sdk_probes_on_owner_thread(monkeypatch):
     assert len({call.args[1] for call in client.call_args_list}) == 2
     assert len({call.args[2] for call in client.call_args_list}) == 2
     assert all(len(call.args[2]) >= 16384 for call in client.call_args_list)
+
+
+@pytest.mark.parametrize("bad_field", [None, "plain", "app", "nonce", "local", "pid"])
+def test_plain_clients_require_current_local_invocations(bad_field):
+    session = object.__new__(fixture.LambdaTunnelSession)
+    disabled = SimpleNamespace(identity="aws:net3", policy=fixture.BastionPolicy.DISABLED)
+    session._manifest = SimpleNamespace(used_vpcs=[disabled])
+    session.app = "proof-app"
+    session.log = Mock(return_value="VPC access disabled: aws:net3; local networking")
+    entries = []
+
+    def invoke(number, *, marker):
+        entries.append({"target": str(number), "nonce": marker, "pid": 123})
+        response = {"plain": True, "app": session.app, "nonce": marker, "local": True, "pid": 123}
+        if bad_field:
+            response[bad_field] = False
+        return 200, response
+
+    session.invoke_function = Mock(side_effect=invoke)
+    session.invocations = Mock(side_effect=lambda: entries)
+    if bad_field:
+        with pytest.raises(AssertionError):
+            session.check_plain_clients()
+    else:
+        session.check_plain_clients()
+        assert [call.args[0] for call in session.invoke_function.call_args_list] == [3, 4]
+
+
+def test_plain_clients_require_one_disabled_vpc_warning():
+    session = object.__new__(fixture.LambdaTunnelSession)
+    session._manifest = SimpleNamespace(
+        used_vpcs=[SimpleNamespace(identity="aws:net3", policy=fixture.BastionPolicy.DISABLED)]
+    )
+    session.log = Mock(return_value="VPC access disabled: aws:net3\n" * 2)
+    session.invoke_function = Mock()
+    with pytest.raises(AssertionError):
+        session.check_plain_clients()
+    session.invoke_function.assert_not_called()
