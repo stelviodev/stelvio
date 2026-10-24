@@ -352,3 +352,15 @@ def test_ambiguous_replacement_waits_for_explicit_selection(monkeypatch, tmp_pat
         assert client.poll()["snapshot"] is None
     chosen = replacements[1]["session"]["session_id"]
     assert client.poll(chosen)["snapshot"]["session"]["session_id"] == chosen
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS monitor command on a real terminal")
+def test_real_cli_terminal_survives_grpc_stderr_redirect(tmp_path):
+    from tests.integration.tunnel_monitor_fixture import MonitorProcess
+
+    with MonitorProcess(
+        str(uuid4()), log_path=tmp_path / "monitor.log", quiet_stderr=True
+    ) as monitor:
+        monitor.wait("Stelvio Tunnel")
+        monitor.wait("Waiting for a tunnel session")
+    assert monitor.process.returncode == 0
