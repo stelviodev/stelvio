@@ -109,8 +109,12 @@ and each discovered resource hostname resolved to an address inside the selected
 private or isolated subnets and accepted a TCP connection on its declared port
 through both SOCKS and ordinary host routing. Resolver queries use TCP through
 SOCKS to the owning VPC's primary resolver; that address need not be routed through
-the virtual interface. A separate system-resolver observation proves macOS scoped
-DNS delivery. Each VPC has a session-specific probe scope under `stelvio.test`;
+the virtual interface. Startup and periodic health checks also resolve every
+discovered resource hostname through the operating system. Each name must return
+IPv4 addresses inside that VPC's selected subnets. A failed or timed-out lookup
+keeps dependent invocations blocked while the worker retries. A separate
+system-resolver observation proves fresh macOS scoped DNS delivery independently
+of cached resource addresses. Each VPC has a session-specific probe scope under `stelvio.test`;
 readiness observes a fresh name in that scope. The scope remains stable across
 reconnects and is removed with the session. It counts toward the DNS name limit.
 Database and member hostnames keep exact-name ownership; their subdomains do not
