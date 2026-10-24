@@ -8,11 +8,27 @@ from urllib.request import ProxyHandler, Request, build_opener
 _invocations = os.environ.get("STLV_TEST_TUNNEL_INVOCATIONS")
 if _invocations:
     with Path(_invocations).open("a") as stream:
-        stream.write(json.dumps({"pid": os.getpid()}) + "\n")
+        stream.write(
+            json.dumps({"pid": os.getpid(), "target": os.environ["TUNNEL_VPC"], "kind": "import"})
+            + "\n"
+        )
 
 
 def handler(event, _context):
     nonce = (event.get("queryStringParameters") or {}).get("marker")
+    if _invocations:
+        with Path(_invocations).open("a") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "target": os.environ["TUNNEL_VPC"],
+                        "kind": "invoke",
+                        "nonce": nonce,
+                    }
+                )
+                + "\n"
+            )
     request = Request(
         os.environ["PRIVATE_API_URL"],
         json.dumps({"nonce": nonce, "payload": "dev-private-payload"}).encode(),
