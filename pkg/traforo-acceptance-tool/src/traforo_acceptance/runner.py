@@ -93,6 +93,9 @@ def authorize(root, data, env, execute, yes):
         raise RuntimeError("Orphaned helper state/service exists")
     account = None
     if any(s.startswith("aws-") for s in data["selected"]):
+        expected = data["configuration"].get("expected_account")
+        if yes and not expected:
+            raise RuntimeError("Unattended AWS execution requires --expected-account")
         sdk = boto3.Session(
             profile_name=data["configuration"]["profile"],
             region_name=data["configuration"]["region"],
@@ -103,8 +106,6 @@ def authorize(root, data, env, execute, yes):
             raise RuntimeError(f"AWS account mismatch: expected {expected}, got {account}")
         if yes and not expected:
             raise RuntimeError("Unattended live execution requires --expected-account")
-    elif yes and not data["configuration"].get("expected_account"):
-        raise RuntimeError("--yes requires --expected-account for live execution")
     click.echo(
         f"Live stages: {data['selected']}\nProfile: {data['configuration']['profile']}; "
         f"account: {account or 'not used'}; region: {data['configuration']['region']}\n"

@@ -199,7 +199,9 @@ def test_runner_stops_before_live_effects_after_local_failure(run_root, monkeypa
 def test_noninteractive_live_requires_confirmation(run_root, monkeypatch):
     store = Store(run_root)
     data = store.data
-    data.update(selected=["native"], artifacts={"binary": {"path": "/local", "sha256": "abc"}})
+    data.update(
+        selected=["aws-standalone"], artifacts={"binary": {"path": "/local", "sha256": "abc"}}
+    )
     monkeypatch.setattr(runner.candidate, "validate", lambda *a: None)
     monkeypatch.setattr(
         runner.host,

@@ -369,10 +369,21 @@ func (m *manager) apply(c command) error {
 }
 func (m *manager) dispatch() {
 	buffer := make([]byte, frameHeader+mtu+1)
+	control := make([]byte, 4096)
 	for {
-		n, _, flags, _, err := m.carrier.ReadMsgUnix(buffer, nil)
+		n, count, flags, _, err := m.carrier.ReadMsgUnix(buffer, control)
 		if err != nil {
 			return
+		}
+		if count != 0 {
+			messages, _ := unix.ParseSocketControlMessage(control[:count])
+			for _, message := range messages {
+				fds, _ := unix.ParseUnixRights(&message)
+				for _, fd := range fds {
+					_ = unix.Close(fd)
+				}
+			}
+			continue
 		}
 		if flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 {
 			continue

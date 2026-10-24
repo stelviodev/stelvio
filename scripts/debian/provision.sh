@@ -12,6 +12,8 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
 mkdir -p "$HOME/.local/bin" "$HOME/.local/share/traforo-tools" "$HOME/src/stelvio-linux"
 mkdir -p "$HOME/.config/stelvio/bin"
 chmod go-w "$HOME" "$HOME/src" "$HOME/.config" "$HOME/.config/stelvio" "$HOME/.config/stelvio/bin"
+mkdir -p "$HOME/.local/state/stelvio"
+chmod go-w "$HOME/.local" "$HOME/.local/bin" "$HOME/.local/share" "$HOME/.local/state" "$HOME/.local/state/stelvio"
 export PATH="$HOME/.local/bin:$PATH"
 python3 - <<'PY'
 import hashlib, io, json, os, pathlib, platform, shutil, tarfile, urllib.request
@@ -66,6 +68,9 @@ if ! grep -Fq '# Traforo development tools' "$HOME/.profile"; then
 umask 022
 export PATH="$HOME/.local/bin:$PATH"
 PROFILE
+fi
+if ! grep -q '^umask 022$' "$HOME/.profile"; then
+    printf '\numask 022\n' >> "$HOME/.profile"
 fi
 uv python install 3.12
 { uv --version; go version; goreleaser --version; golangci-lint --version; python3 --version; } | tee "$HOME/.local/share/traforo-tools/versions.txt"
