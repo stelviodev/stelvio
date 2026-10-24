@@ -1,5 +1,7 @@
 """Generation-fenced VPC reconnects and readiness with isolated adapters."""
 
+import json
+import sys
 from ipaddress import IPv4Network
 from types import SimpleNamespace
 
@@ -208,7 +210,11 @@ def _worker_world(  # noqa: C901 - models a cross-adapter VPC lifecycle in one f
     )
     monkeypatch.setattr(
         "stelvio.tunnel.supervisor.subprocess.run",
-        lambda *args, **kwargs: dns_state.update(observed=True) or SimpleNamespace(returncode=0),
+        lambda args, **kwargs: dns_state.update(observed=True)
+        or SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({name: ["10.254.16.19"] for name in args[5:]}).encode(),
+        ),
     )
     return SimpleNamespace(
         worker=worker,
@@ -596,3 +602,214 @@ def test_probe_scope_counts_toward_name_limit(monkeypatch, resource_count, allow
         with raises(TransportAuthorizationError, match="domain bound"):
             worker._view()
         assert not any(e[0] == "host-configure" for e in world.events)
+
+
+@mark.parametrize(
+    "failure", ["lookup", "timeout", "public", "other-vpc", "public-subnet", "empty"]
+)
+def test_synthetic_dns_success_cannot_mask_failed_resource_os_lookup(monkeypatch, failure):
+    import subprocess
+
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    worker._host_generation = worker._attempt = 1
+    world.forwarding.add(worker.unit, 1, 1, worker.network, 32123)
+    revision = worker._view()
+    worker._configure(revision)
+
+    def probe(args, **kwargs):
+        world.dns_state["observed"] = True
+        if "db.private.example.com" not in args:
+            return SimpleNamespace(returncode=0)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args, 5)
+        addresses = {
+            "public": ["8.8.8.8"],
+            "other-vpc": ["10.253.16.19"],
+            "public-subnet": ["10.254.0.19"],
+            "empty": [],
+        }.get(failure, [])
+        return SimpleNamespace(
+            returncode=1 if failure == "lookup" else 0,
+            stdout=json.dumps({"db.private.example.com": addresses}).encode(),
+        )
+
+    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", probe)
+    with raises(TransportRetryError, match="OS resource DNS"):
+        worker._probe(revision)
+
+
+@mark.parametrize(
+    "output",
+    [
+        b"not json",
+        b"{}",
+        b'{"wrong.private.example.com":["10.254.16.19"]}',
+        b'{"db.private.example.com":["::1"]}',
+        b'{"db.private.example.com":[169742355]}',
+        b"x" * 65537,
+    ],
+)
+def test_resource_os_lookup_rejects_invalid_output(monkeypatch, output):
+    world = _worker_world(monkeypatch)
+    monkeypatch.setattr(
+        "stelvio.tunnel.supervisor.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=output),
+    )
+    with raises(TransportRetryError, match="OS resource DNS"):
+        world.worker._probe_resource_dns()
+
+
+def test_resource_os_lookup_includes_discovered_members_and_recovers(monkeypatch):
+    from dataclasses import replace
+
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    requested = []
+    answers = {"db.private.example.com": ["10.254.16.19"]}
+
+    def probe(args, **kwargs):
+        assert args[:4] == [sys.executable, "-I", "-S", "-c"]
+        assert kwargs["timeout"] == 5
+        requested.append(tuple(args[5:]))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(answers).encode())
+
+    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", probe)
+    worker._probe_resource_dns()
+    old = worker.discovery.manifest.resources[0]
+    member = "member.private.example.com"
+    worker.discovery.manifest = NetworkManifest(
+        (), (replace(old, hostnames=(*old.hostnames, member)),), ()
+    )
+    with raises(TransportRetryError, match="OS resource DNS"):
+        worker._probe_resource_dns()
+    answers[member] = ["10.254.64.20"]
+    worker._probe_resource_dns()
+    assert requested == [old.hostnames, (*old.hostnames, member), (*old.hostnames, member)]
+
+
+def test_failed_resource_os_lookup_blocks_first_readiness_and_retries(monkeypatch):
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    published = []
+    publish = worker._publish
+    clock = [0]
+
+    def probe(args, **kwargs):
+        world.dns_state["observed"] = True
+        failed = "db.private.example.com" in args and worker._attempt == 1
+        if failed:
+            clock[0] = 31  # Exhaust the startup attempt's existing retry budget.
+        return SimpleNamespace(
+            returncode=int(failed),
+            stdout=json.dumps({name: ["10.254.16.19"] for name in args[5:]}).encode(),
+        )
+
+    def observe(state, cause=None, **kwargs):
+        publish(state, cause, **kwargs)
+        published.append((state, worker._attempt))
+        if state == "ready":
+            worker.stop.set()
+
+    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", probe)
+    monkeypatch.setattr(
+        "stelvio.tunnel.supervisor.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
+    monkeypatch.setattr(worker, "_publish", observe)
+    worker.start()
+    worker._thread.join(5)
+    assert not worker._thread.is_alive()
+    worker.close()
+    assert [(state, attempt) for state, attempt in published if state == "ready"] == [("ready", 2)]
+    assert ("retrying", 1) in published
+    assert any(event[0] == "host-remove" for event in world.events)
+
+
+def test_resource_os_lookup_health_failure_revokes_readiness(monkeypatch):
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    published = []
+    publish = worker._publish
+    calls = 0
+
+    def probe(args, **kwargs):
+        nonlocal calls
+        world.dns_state["observed"] = True
+        if "db.private.example.com" in args:
+            calls += 1
+        return SimpleNamespace(
+            returncode=int(calls == 2),
+            stdout=json.dumps({name: ["10.254.16.19"] for name in args[5:]}).encode(),
+        )
+
+    def observe(state, cause=None, **kwargs):
+        publish(state, cause, **kwargs)
+        published.append((state, worker._attempt))
+        if state == "ready" and worker._attempt == 2:
+            worker.stop.set()
+
+    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", probe)
+    monkeypatch.setattr(worker, "_publish", observe)
+    worker.start()
+    worker._thread.join(5)
+    assert not worker._thread.is_alive()
+    worker.close()
+    assert [(state, attempt) for state, attempt in published if state == "ready"] == [
+        ("ready", 1),
+        ("ready", 2),
+    ]
+    assert ("retrying", 1) in published
+    assert any(event[0] == "host-remove" for event in world.events)
+
+
+@mark.skipif(sys.platform == "win32", reason="POSIX child-reaping assertion")
+def test_stalled_resource_dns_process_is_killed_and_reaped(monkeypatch, tmp_path):
+    import os
+    import subprocess
+
+    run = subprocess.run
+    world = _worker_world(monkeypatch)
+    marker = tmp_path / "resolver-child"
+    script = (
+        "import os,time\n"
+        f"with open({str(marker)!r}, 'w') as output: output.write(str(os.getpid()))\n"
+        "time.sleep(60)\n"
+    )
+    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", run)
+    monkeypatch.setattr("stelvio.tunnel.supervisor.OS_DNS_SCRIPT", script)
+    monkeypatch.setattr("stelvio.tunnel.supervisor.OS_DNS_TIMEOUT", 0.5)
+    with raises(TransportRetryError, match="OS resource DNS"):
+        world.worker._probe_resource_dns()
+    pid = int(marker.read_text())
+    with raises(ChildProcessError):
+        os.waitpid(pid, os.WNOHANG)
+
+
+def test_resource_dns_subprocess_ignores_handler_pythonpath(monkeypatch, tmp_path):
+    import subprocess
+    from dataclasses import replace
+
+    run = subprocess.run
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    resource = worker.discovery.manifest.resources[0]
+    worker.discovery.manifest = NetworkManifest(
+        (), (replace(resource, hostnames=("localhost",)),), ()
+    )
+    worker._route_cidrs = (IPv4Network("127.0.0.0/8"),)
+    (tmp_path / "socket.py").write_text("raise RuntimeError('handler module imported')")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", run)
+    worker._probe_resource_dns()
+
+
+def test_no_resource_dns_process_without_linked_resources(monkeypatch):
+    world = _worker_world(monkeypatch)
+    world.worker.discovery.manifest = NetworkManifest((), (), ())
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("No resource lookup is required")
+
+    monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", unexpected)
+    world.worker._probe_resource_dns()
