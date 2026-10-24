@@ -12,6 +12,7 @@ from pathlib import Path
 import boto3
 
 from . import aws, host
+from .lambda_aws import capture_proof, identity, is_lambda, recover_apis
 from .ownership import process_record
 from .store import Store, digest, event, events, write_json
 
@@ -33,7 +34,9 @@ def proofs(root):
     for row in events(root):
         if row["kind"] == "proof_intent":
             result[row["app"]] = {
-                k: row[k] for k in ("app", "env", "project", "account", "profile", "region")
+                k: row[k]
+                for k in ("app", "env", "project", "account", "profile", "region", "suite")
+                if k in row
             }
     return result
 
@@ -81,10 +84,14 @@ def audit(root: Path, execute, env):
             findings["host"] = {"outcome": "unknown", "error": str(error)}
     for app, proof in proofs(root).items():
         try:
-            snapshot = aws.capture(sdk_for(proof), proof, prior_snapshots(root, app))
+            snapshot = capture_proof(root, sdk_for(proof), proof, prior_snapshots(root, app))
             event(root, "proof_inventory", **proof, snapshot=snapshot)
             findings[app] = {
-                "outcome": "remaining" if snapshot["remaining"] else "certified",
+                "outcome": "unknown"
+                if snapshot.get("unknown")
+                else "remaining"
+                if snapshot["remaining"]
+                else "certified",
                 **snapshot,
             }
         except Exception as error:
@@ -131,6 +138,74 @@ def audit(root: Path, execute, env):
     return data["audit"]
 
 
+def recover_lambda_application(root, sdk, proof, project, execute, env):
+    """API failure must not skip application destruction; no deploy means no destroy."""
+    actions = []
+    if not any(
+        r["kind"] == "application_deploy_intent" and r["app"] == proof["app"] for r in events(root)
+    ):
+        return [{"app": proof["app"], "application": "not-started", "outcome": "completed"}]
+    try:
+        snapshot = capture_proof(root, sdk, proof, prior_snapshots(root, proof["app"]))
+        event(root, "proof_inventory", **proof, snapshot=snapshot)
+    except Exception as error:
+        event(root, "inventory_error", **proof, error=str(error))
+        actions.append(
+            {
+                "app": proof["app"],
+                "operation": "pre-destroy inventory",
+                "outcome": "failed",
+                "error": str(error),
+            }
+        )
+    try:
+        execute(
+            "recover-destroy",
+            [str(root / "source/.venv/bin/stlv"), "destroy", proof["env"], "--yes"],
+            project,
+            env,
+            3600,
+        )
+        actions.append({"app": proof["app"], "operation": "destroy", "outcome": "completed"})
+    except Exception as error:
+        actions.append(
+            {"app": proof["app"], "operation": "destroy", "outcome": "failed", "error": str(error)}
+        )
+    try:
+        current = capture_proof(root, sdk, proof, prior_snapshots(root, proof["app"]))
+        event(root, "proof_inventory", **proof, snapshot=current)
+        if current["remaining"].get("functions"):
+            raise RuntimeError("Functions remain; refusing log deletion")
+        allowed = {
+            f"/aws/lambda/{name}"
+            for prior in prior_snapshots(root, proof["app"])
+            for name in prior.get("functions", [])
+        }
+        reader = aws.Reader(sdk)
+        for name in current["remaining"].get("log_groups", []):
+            if name not in allowed:
+                raise RuntimeError(f"Untracked log group retained: {name}")
+            event(
+                root,
+                "recovery_aws_call",
+                **proof,
+                service="logs",
+                operation="delete_log_group",
+                arguments={"logGroupName": name},
+            )
+            reader.call("logs", "delete_log_group", logGroupName=name)
+    except Exception as error:
+        actions.append(
+            {
+                "app": proof["app"],
+                "operation": "post-destroy inventory/logs",
+                "outcome": "failed",
+                "error": str(error),
+            }
+        )
+    return actions
+
+
 def recover(root: Path, execute, env):
     store = Store(root)
     data = store.data
@@ -169,6 +244,11 @@ def recover(root: Path, execute, env):
             if json.loads((project / ".acceptance-owner.json").read_text()) != proof:
                 raise RuntimeError("Proof ownership marker changed")
             sdk = sdk_for(proof)
+            if is_lambda(proof):
+                identity(aws.Reader(sdk), proof)
+                actions.extend(recover_apis(root, sdk, proof))
+                actions.extend(recover_lambda_application(root, sdk, proof, project, execute, env))
+                continue
             snapshot = aws.capture(sdk, proof, prior_snapshots(root, app))
             event(root, "proof_inventory", **proof, snapshot=snapshot)
             if snapshot["remaining"]:

@@ -16,8 +16,8 @@ import click
 from . import aws, candidate, host, process, recovery
 from .progress import heartbeat
 from .report import generate
-from .stages import AWS_TESTS, STAGES
-from .store import Store, digest, event, now, write_json
+from .stages import AWS_TESTS, DOCUMENTDB_STAGES, LAMBDA_TESTS, STAGES
+from .store import Store, digest, event, events, now, write_json
 
 
 def environment(root: Path, data):
@@ -67,7 +67,7 @@ def artifact(path):
 
 
 def authorize(root, data, env, execute, yes):
-    candidate.validate(root / "source")
+    candidate.validate(root / "source", data["selected"])
     before = host.snapshot()
     if int(before["os"].split(".")[0]) < 15:
         raise RuntimeError("Live acceptance requires macOS 15+")
@@ -238,6 +238,20 @@ def stage_commands(name, root, env):
                 source,
             )
         ]
+    if name == "aws-lambda-vpc":
+        return [
+            (
+                pytest
+                + [
+                    "tests/integration/test_tunnel_lambda.py",
+                    "--integration-macos-privileged",
+                    "--integration-tunnel",
+                    "-x",
+                    "-vv",
+                ],
+                source,
+            )
+        ]
     if name in AWS_TESTS:
         return [
             (
@@ -253,6 +267,22 @@ def stage_commands(name, root, env):
             )
         ]
     raise RuntimeError(f"Unknown stage {name}")
+
+
+def validate_lambda_results(root):
+    calls = [
+        r
+        for r in events(root)
+        if r["kind"] == "test_result"
+        and r.get("stage") == "aws-lambda-vpc"
+        and r["phase"] == "call"
+    ]
+    if (
+        len(calls) != 5
+        or {r["nodeid"].rsplit("::", 1)[-1] for r in calls} != LAMBDA_TESTS
+        or any(r["outcome"] != "passed" for r in calls)
+    ):
+        raise RuntimeError("aws-lambda-vpc requires all five Lambda cases to pass")
 
 
 def safe_ssh_path(path):
@@ -278,7 +308,7 @@ def execute_stages(root: Path, yes=False):
                 continue
             if any(r.get("outcome") != "passed" for r in data["results"].values()):
                 raise RuntimeError("A previous stage failed or was interrupted; start a new run")
-            candidate.validate(root / "source")
+            candidate.validate(root / "source", data["selected"])
             stage = STAGES[name]
             started = time.monotonic()
             data["results"][name] = {"outcome": "running", "started": now()}
@@ -294,7 +324,7 @@ def execute_stages(root: Path, yes=False):
                 # not hold that lock while pytest acquires it.
                 if not data.get("live_authorized"):
                     authorize(root, data, env, partial(process.run, root), yes)
-                if stage.group == "aws":
+                if name in DOCUMENTDB_STAGES:
                     process.run(
                         root,
                         "pymongo",
@@ -319,6 +349,8 @@ def execute_stages(root: Path, yes=False):
                 if remaining <= 0:
                     raise TimeoutError(f"{name} exhausted its stage deadline")
                 outputs.append(process.run(root, name, argv, cwd, env, remaining))
+            if name == "aws-lambda-vpc":
+                validate_lambda_results(root)
             if name == "prepare":
                 if f"go{data['configuration']['go']} " not in outputs[1]:
                     raise RuntimeError("Unexpected Go toolchain")

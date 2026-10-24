@@ -53,6 +53,11 @@ The current adapter supports the `feat/traforo-14` acceptance interfaces. It che
 those interfaces before tests and host changes. A changed interface must have a
 reviewed adapter update, not a guessed fallback.
 
+Full acceptance now includes `aws-lambda-vpc`. The candidate must contain PR #411
+at `e196a31d46bc90e9857f3c72b89ed58c9a64cc3a` or its equivalent reviewed interfaces.
+Preparation fails before installation or deployment when those inputs are missing.
+The runner never fetches or applies those changes automatically.
+
 For local builds, install the macOS SDK, Go, GoReleaser **2.18.3**,
 `golangci-lint`, `make`, and Rosetta on Apple Silicon. The existing GoReleaser
 builder validates both Darwin images, libraries, size, version, and provenance.
@@ -108,6 +113,7 @@ native suite or all unit tests. A partial pass is not full acceptance.
 | distribution | Wheel and sdist | 60 min |
 | interop | Archive, isolated wheel, DNS/runtime and local SSH interoperability | 60 min |
 | native | Installer, routing/DNS, lifecycle and administration suite | 60 min |
+| aws-lambda-vpc | Five shared-app, two-VPC private API/Lambda cases | 2 hours |
 | aws-standalone | Database access, reconnect, SIGINT and owner death | 4 hours |
 | aws-dev | Function URL to local handler to DocumentDB | 4 hours |
 | aws-host-key | Key change rejection and new-session recovery | 4 hours |
@@ -127,6 +133,70 @@ Keep the default private user-temporary directory. If you set `--run-dir`, it
 must be a new private directory with secure ancestors. OpenSSH StrictModes
 rejects paths under writable ancestors such as `/private/tmp`; the tool checks
 this before the SSH interoperability stage. Evidence is retained, not deleted.
+
+## Multi-VPC Lambda networking stage
+
+`aws-lambda-vpc` runs all five tests in one pytest process. They share one
+application with two VPCs, two deployment-owned bastions, two private REST APIs,
+two interface endpoints, and separate client/backend Functions. No DocumentDB
+cluster or `pymongo` installation is needed for this stage. The independent
+Lambda inventory does not require DocumentDB read permissions.
+
+```sh
+traforo-acceptance run COMMIT --only aws-lambda-vpc
+
+# Networking acceptance, including the separate non-VPC case:
+traforo-acceptance run COMMIT --only aws-lambda-vpc --only aws-non-vpc
+
+# Apply both incremental commits to the original stack candidate:
+traforo-acceptance run f87bd5bcb6c155c875b1ac8685da1fda74b821c9 \
+  --patch ea1d914483baf87ae43ec569e041d082bb8f799d \
+  --patch e196a31d46bc90e9857f3c72b89ed58c9a64cc3a \
+  --only aws-lambda-vpc
+
+# Explicit omission makes the report a partial round:
+traforo-acceptance run COMMIT --skip aws-lambda-vpc
+```
+
+Alternatively, select `e196a31d` itself as the candidate. Applying only its delta
+to the original stack is insufficient; it builds on `ea1d9144`.
+
+The suite checks simultaneous private HTTPS access, distinct DNS views and
+interfaces, SIGINT/SIGKILL, transport recovery, and a stopped bastion with a
+healthy peer. Dev invocations must be rejected before handler entry for the
+failed VPC. The host-key case checks persistent rejection across runtime restarts
+without accepting a changed key. Normal tunnel exit leaves both bastions intact.
+
+The stage runs before the other AWS stages in a full round. It supplements the
+DocumentDB stages, which still check TLS/member discovery, authentication, and
+read/write behavior. The two-hour deadline includes fixture teardown; the
+10–40-minute estimate is provisional, not a live validation result for this tool.
+
+Permissions include the normal tunnel deployment permissions, private API
+Gateway administration, interface endpoints, Lambda/IAM/log administration,
+EC2 stop/start for proof bastions, and SSM Run Command for the host-key fault.
+Costs include two bastions and two interface endpoints until application teardown.
+The same account confirmation, private plugin checks, local Traforo override,
+and exclusive host requirements apply.
+
+The observer records each API before creation and the application before deploy.
+API names are `<app>-api1` and `<app>-api2`; their environment tag is `proof`,
+which is separate from the application's environment. Each API has its own ID
+and receipt. A lost creation reply is discovered through a validated intent,
+exact namespace, and ownership tags. An empty listing alone cannot certify an
+unconfirmed creation. No creation is repeated automatically.
+
+Recovery attempts both APIs and the application independently. An API failure
+must not skip its peer or application destruction. Only explicit API Gateway
+throttle errors receive bounded retries: at most ten attempts within 90 seconds.
+Uncertain deletions receive a state read, not a repeated mutation.
+
+The independent audit checks both APIs, endpoint IDs, captured interface IDs,
+volumes, Functions, logs, IAM, sessions, and host restoration. A missing first
+endpoint cannot hide its peer. Reports include separate VPC views and fault
+entry/exit records. No private key material is recorded. If a fault is interrupted,
+recovery removes the owned application without restarting bastions or resetting
+SSH trust. It retains unresolved ownership and cleanup errors.
 
 ## Evidence and failures
 

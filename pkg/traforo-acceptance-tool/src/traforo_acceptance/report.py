@@ -55,7 +55,8 @@ def generate(root: Path):
         "audit": data.get("audit", {}),
         "audit_history": data.get("audit_history", []),
         "outcome": status,
-        "exclusions": ["Traforo release downloads", "downloaded-release upgrade"],
+        "exclusions": ["Traforo release downloads", "downloaded-release upgrade"]
+        + [f"stage: {name}" for name in STAGES if name not in data["selected"]],
         "limitations": [
             "No automatic fixes or test retries",
             "Intel networking not inferred",
@@ -129,7 +130,7 @@ def generate(root: Path):
             json.dumps(report["audit"], indent=2, sort_keys=True),
             "```",
             "",
-            "Excluded: release downloads and downloaded-release upgrades.",
+            "Excluded: " + ", ".join(report["exclusions"]) + ".",
             "A partial run is not full acceptance. Cleanup success does not erase failures.",
             "See events.jsonl, per-command output.log, JUnit XML, and case traces for evidence.",
         ]

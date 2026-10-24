@@ -27,6 +27,7 @@ STAGES = {
         Stage("distribution", "distribution"),
         Stage("interop", "distribution", ("build", "distribution")),
         Stage("native", "native", ("build", "distribution"), 3600, "5–60 min"),
+        Stage("aws-lambda-vpc", "aws", ("build", "distribution"), 7200, "10–40 min"),
         Stage("aws-standalone", "aws", ("build", "distribution"), 14400, "20–90 min"),
         Stage("aws-dev", "aws", ("build", "distribution"), 14400, "20–90 min"),
         Stage("aws-host-key", "aws", ("build", "distribution"), 14400, "20–90 min"),
@@ -69,3 +70,12 @@ AWS_TESTS = {
     "aws-host-key": "test_dev_host_key_rotation_is_terminal_until_a_new_session",
     "aws-non-vpc": "test_non_vpc_actual_dev_runs_without_installed_helper",
 }
+
+LAMBDA_TESTS = {
+    "test_lambda_standalone_https_and_sigint",
+    "test_lambda_transport_recovery_and_sigkill",
+    "test_lambda_standalone_partial_failure_and_recovery",
+    "test_lambda_dev_private_https_and_partial_failure",
+    "test_lambda_host_key_rejection_and_peer_isolation",
+}
+DOCUMENTDB_STAGES = {"aws-standalone", "aws-dev", "aws-host-key"}

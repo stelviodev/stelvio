@@ -34,7 +34,11 @@ class Reader:
             response = self.call(service, operation, **kwargs)
             yield from response.get(key, [])
             token_key = next(
-                (k for k in ("NextToken", "nextToken", "Marker", "NextMarker") if response.get(k)),
+                (
+                    k
+                    for k in ("NextToken", "nextToken", "Marker", "NextMarker", "position")
+                    if response.get(k)
+                ),
                 None,
             )
             if not token_key:
@@ -71,6 +75,7 @@ def capture(sdk, proof, previous=()):
         {"Name": "tag:stelvio:env", "Values": [env]},
     ]
     remaining = {}
+    endpoint_records = {}
     instances, volumes, secrets, functions = set(), set(), set(), set()
     for reservation in reader.pages("ec2", "describe_instances", "Reservations", Filters=filters):
         for instance in reservation["Instances"]:
@@ -94,13 +99,24 @@ def capture(sdk, proof, previous=()):
     ):
         parameters = {"Filter" if operation == "describe_nat_gateways" else "Filters": filters}
         rows = list(reader.pages("ec2", operation, key, **parameters))
+        if operation == "describe_vpc_endpoints" and proof.get("suite") == "lambda-vpc":
+            for row in rows:
+                endpoint_records[row["VpcEndpointId"]] = {
+                    "id": row["VpcEndpointId"],
+                    "vpc": row["VpcId"],
+                    "interfaces": row.get("NetworkInterfaceIds", []),
+                }
         ids = [row[identifier] for row in rows if row.get("State") != "deleted"]
         if ids:
             remaining[key] = ids
     for operation, key, field in (
-        ("describe_db_clusters", "DBClusters", "DBClusterIdentifier"),
-        ("describe_db_instances", "DBInstances", "DBInstanceIdentifier"),
-        ("describe_db_subnet_groups", "DBSubnetGroups", "DBSubnetGroupName"),
+        ()
+        if proof.get("suite") == "lambda-vpc"
+        else (
+            ("describe_db_clusters", "DBClusters", "DBClusterIdentifier"),
+            ("describe_db_instances", "DBInstances", "DBInstanceIdentifier"),
+            ("describe_db_subnet_groups", "DBSubnetGroups", "DBSubnetGroupName"),
+        )
     ):
         for row in reader.pages("docdb", operation, key):
             if row[field].startswith(prefix):
@@ -155,6 +171,49 @@ def capture(sdk, proof, previous=()):
         else:
             if not value.get("DeletedDate"):
                 remaining.setdefault("secrets", []).append(secret)
+    if proof.get("suite") == "lambda-vpc":
+        for prior in previous:
+            for row in prior.get("endpoint_records", []):
+                known = endpoint_records.setdefault(row["id"], dict(row))
+                if known.get("vpc") != row.get("vpc"):
+                    raise RuntimeError("Endpoint VPC identity changed")
+                known["interfaces"] = sorted(
+                    set(known["interfaces"]) | set(row.get("interfaces", []))
+                )
+        for identifier, endpoint in sorted(endpoint_records.items()):
+            try:
+                rows = reader.call(
+                    "ec2", "describe_vpc_endpoints", VpcEndpointIds=[identifier]
+                ).get("VpcEndpoints", [])
+            except ClientError as error:
+                if error.response["Error"]["Code"] != "InvalidVpcEndpointId.NotFound":
+                    raise
+                rows = []
+            endpoint["outcome"] = "absent"
+            for row in rows:
+                if row["VpcEndpointId"] != identifier or row["VpcId"] != endpoint["vpc"]:
+                    raise RuntimeError("Captured endpoint identity changed")
+                endpoint["interfaces"] = sorted(
+                    set(endpoint["interfaces"]) | set(row.get("NetworkInterfaceIds", []))
+                )
+                if row.get("State") != "deleted":
+                    endpoint["outcome"] = "remaining"
+                    remaining.setdefault("captured_endpoints", []).append(identifier)
+            endpoint["remaining_interfaces"] = []
+            for interface in endpoint["interfaces"]:
+                try:
+                    rows = reader.call(
+                        "ec2", "describe_network_interfaces", NetworkInterfaceIds=[interface]
+                    ).get("NetworkInterfaces", [])
+                except ClientError as error:
+                    if error.response["Error"]["Code"] != "InvalidNetworkInterfaceID.NotFound":
+                        raise
+                    rows = []
+                for row in rows:
+                    if row["NetworkInterfaceId"] != interface or row["VpcId"] != endpoint["vpc"]:
+                        raise RuntimeError("Captured interface identity changed")
+                    endpoint["remaining_interfaces"].append(interface)
+                    remaining.setdefault("captured_interfaces", []).append(interface)
     history = []
     for instance in sorted(instances):
         for state in ("Active", "History"):
@@ -177,6 +236,11 @@ def capture(sdk, proof, previous=()):
         "secrets": sorted(secrets),
         "functions": sorted(functions),
         "ssm_history": history,
+        **(
+            {"endpoint_records": list(endpoint_records.values())}
+            if proof.get("suite") == "lambda-vpc"
+            else {}
+        ),
     }
 
 

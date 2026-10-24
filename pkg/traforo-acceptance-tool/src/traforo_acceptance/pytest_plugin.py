@@ -89,6 +89,7 @@ def pytest_configure(config):
 
     def registration(session):
         return {
+            **({"suite": "lambda-vpc"} if getattr(session, "_acceptance_lambda", False) else {}),
             "app": session.app,
             "env": session.environment_name,
             "project": str(session.project.resolve()),
@@ -99,6 +100,8 @@ def pytest_configure(config):
 
     @functools.wraps(original_deploy)
     def deploy(session):
+        if getattr(session, "_acceptance_lambda", False):
+            return original_deploy(session)
         owned = registration(session)
         write_json(session.project / ".acceptance-owner.json", owned)
         event(ROOT, "proof_intent", **owned)
@@ -116,6 +119,8 @@ def pytest_configure(config):
 
     @functools.wraps(original_destroy)
     def destroy(session):
+        if getattr(session, "_acceptance_lambda", False):
+            return original_destroy(session)
         from .aws import capture
 
         # Capture untagged root volume and managed-secret identities before destruction.
@@ -146,3 +151,10 @@ def pytest_configure(config):
     StandaloneCliSession._start = start
     StandaloneCliSession.deploy = deploy
     StandaloneCliSession.destroy = destroy
+
+    if os.environ.get("TRA_ACCEPTANCE_STAGE") == "aws-lambda-vpc":
+        from tests.integration.lambda_tunnel_session import LambdaTunnelSession, PrivateApi
+
+        from .lambda_observer import install
+
+        install(ROOT, LambdaTunnelSession, PrivateApi, StandaloneCliSession, registration)

@@ -91,16 +91,32 @@ def checkout(repo: Path, target: str, patches: tuple[str, ...], destination: Pat
     }
 
 
-def validate(source: Path) -> None:
+def validate(source: Path, selected=()) -> None:
     required = {
         "tests/integration/cli_session.py": {"StandaloneCliSession", "deploy", "destroy"},
         "tests/integration/macos_host.py": {"MacOSHost", "prepare", "save", "restore"},
         "pkg/traforo-client-go/scripts/build.py": {"build", "goreleaser_version"},
     }
+    if "aws-lambda-vpc" in selected:
+        required["tests/integration/lambda_tunnel_session.py"] = {
+            "LambdaTunnelSession",
+            "PrivateApi",
+            "create",
+            "destroy",
+            "deploy",
+            "retry_api_throttling",
+            "stopped_bastion",
+            "write_evidence",
+        }
+        required["tests/integration/test_tunnel_lambda.py"] = set()
     for relative, names in required.items():
         path = source / relative
         if not path.is_file():
-            raise RuntimeError(f"Adapter {ADAPTER}: missing {relative}")
+            raise RuntimeError(
+                f"Adapter {ADAPTER}: missing {relative}. For aws-lambda-vpc, select a candidate "
+                "containing PR #411 at e196a31d, or explicitly apply both ea1d9144 and e196a31d "
+                "with --patch. No patches are fetched or applied automatically."
+            )
         symbols = {
             node.name
             for node in ast.walk(ast.parse(path.read_text()))
@@ -113,6 +129,33 @@ def validate(source: Path) -> None:
     for name in ("test_tunnel_host.py", "test_tunnel_dns.py", "test_tunnel.py"):
         if not (source / "tests/integration" / name).is_file():
             raise RuntimeError(f"Missing acceptance suite {name}")
+    if "aws-lambda-vpc" in selected:
+        from .stages import LAMBDA_TESTS
+
+        suite = ast.parse((source / "tests/integration/test_tunnel_lambda.py").read_text())
+        actual = {
+            n.name
+            for n in suite.body
+            if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")
+        }
+        if actual != LAMBDA_TESTS:
+            raise RuntimeError(f"Unsupported Lambda acceptance cases: {sorted(actual)}")
+        fixture = ast.parse((source / "tests/integration/lambda_tunnel_session.py").read_text())
+        classes = {n.name: n for n in fixture.body if isinstance(n, ast.ClassDef)}
+        for name, methods in {
+            "LambdaTunnelSession": {"deploy", "destroy", "stopped_bastion"},
+            "PrivateApi": {"create", "destroy"},
+        }.items():
+            if name not in classes or not methods <= {
+                n.name for n in classes[name].body if isinstance(n, ast.FunctionDef)
+            }:
+                raise RuntimeError(f"Unsupported Lambda adapter class: {name}")
+        for relative in (
+            "tests/integration/handlers/tunnel_lambda_app.py.txt",
+            "tests/integration/handlers/tunnel_lambda_probe.py",
+        ):
+            if not (source / relative).is_file():
+                raise RuntimeError(f"Missing Lambda fixture input: {relative}")
     workflow = (source / "pkg/traforo-client-go/.github/workflows/release.yml").read_text()
     if not re.search(r"version:\s*[\"']?v?2\.18\.3", workflow):
         raise RuntimeError("Adapter requires review for this GoReleaser workflow")

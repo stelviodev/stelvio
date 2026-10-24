@@ -79,7 +79,64 @@ rewritten as passes.
 
 ## Next live run
 
-Run the native suite with explicit host authorization, then the four AWS stages
-with the expected account. Check the independent audit and retain the complete
+Run the native suite with explicit host authorization, then the Lambda stage and
+the four existing AWS stages with the expected account. Check the independent audit and retain the complete
 report. Native Intel and macOS 26 acceptance remain pending. A local/mock pass is
 not a substitute for these runs.
+
+
+## Multi-VPC Lambda stage — 2026-10-24
+
+This section records nonprivileged checks for `aws-lambda-vpc`. Live execution of
+this stage remains **pending**. The earlier local-build results above do not prove
+that this new stage, recovery, or independent live audit passes on AWS.
+
+Candidate:
+
+- Base: `f87bd5bcb6c155c875b1ac8685da1fda74b821c9`.
+- Ordered patches: `ea1d914483baf87ae43ec569e041d082bb8f799d`, then
+  `e196a31d46bc90e9857f3c72b89ed58c9a64cc3a`.
+- Resulting diff SHA-256: `b1180c1722b68f11ad071fa1cb7244cae4c9296bf68a55c4e39dbe76531dac3f`.
+- Source fingerprint: `bdd164cd39953f722013eab8667b8d7e16164456d85fee64746bd7215c57909b`.
+- Evidence directory: `traforo-lambda-stage-validation-3cp5k0jf` in the host's
+  private user-temporary directory. It contains candidate identity, timestamped
+  command logs, and collection output. The candidate remained unchanged.
+
+| Check | Result |
+|---|---|
+| Tool unit tests | 72 passed |
+| Tool lint and format check | Passed |
+| Tool wheel and sdist | Built; both new observer/audit modules included |
+| Candidate adapter validation | Passed with both explicit patches |
+| PR #411 fixture unit tests | 26 passed; no integration fixtures executed |
+| Lambda suite collection with external observer | Exactly five tests |
+| Lambda plus separate non-VPC collection | Exactly six tests |
+| Native helper installation and host networking | Not run; pending |
+| Lambda AWS deployment, fault scenarios, recovery and absence audit | Not run; pending |
+
+The unit tests cover default/partial stage selection, one-process five-case
+execution, subclass hooks without duplicate registration, independent API intents
+and receipts, partial setup, lost responses, bounded explicit-throttle retries,
+foreign-resource refusal, independent peer/application recovery, endpoint and
+interface inventory, per-VPC fault evidence, SDK request models, and unchanged
+DocumentDB behavior. Empty lists do not certify uncertain API creation.
+
+No Go source, release pins, helper installation, host networking, AWS deployment,
+or PR #411 files were changed. The new stage uses the existing build and
+distribution prerequisites; no new Go compilation was needed for these checks.
+
+Reproduce collection without running integration fixtures, after preparing the
+candidate and installing its locked dependencies:
+
+```sh
+uv run pytest tests/tunnel/test_lambda_acceptance_fixture.py -n 0
+uv run pytest tests/integration/test_tunnel_lambda.py \
+  --integration-macos-privileged --integration-tunnel -n 0 --collect-only -q
+uv run pytest tests/integration/test_tunnel_lambda.py \
+  tests/integration/test_tunnel.py::test_non_vpc_actual_dev_runs_without_installed_helper \
+  --integration-macos-privileged --integration-tunnel -n 0 --collect-only -q
+```
+
+The retained collection commands also load the tool's external pytest observer.
+Use the README command to run the actual stage only after reviewing its AWS costs,
+permissions, ownership checks, and authorization requirements.
