@@ -729,3 +729,32 @@ The fixture's non-AWS checks run with:
 ```bash
 uv run pytest tests/tunnel/test_lambda_acceptance_fixture.py -q
 ```
+
+## Monitor acceptance
+
+Monitor unit tests cover rate baselines, matching source identities, stale or
+missing samples, session selection/replacement, literal rendering, keyboard
+navigation, resize, and quit. Local TLS fixtures cover certificate and hostname
+verification, expired/untrusted certificates, timeouts, missing/invalid CA data,
+partial member results, shared rounds, and obsolete generation rejection.
+
+`test_tunnel_diagnostics.py` starts real monitors on private pseudo-terminals
+alongside a two-unit native tunnel. It checks traffic, normal monitor exit, and
+monitor SIGKILL without loss of network ownership. The Lambda partial-failure
+case keeps a monitor open through outage/recovery, checks both VPC projections,
+and proves access after normal monitor exit and SIGKILL. These use the existing
+serial privileged fixture and restoration/audit paths.
+
+Run the acceptance tool against a frozen candidate without DocumentDB:
+
+```sh
+uv run --project pkg/traforo-acceptance-tool traforo-acceptance run FULL_COMMIT \
+  --only local --only build --only distribution --only interop \
+  --only native --only aws-lambda-vpc --only aws-non-vpc
+```
+
+Retain its run directory and record the commit, host, tool versions, image
+digests, case results, host restoration, and independent AWS cleanup audit in the
+PR. The local TLS fixtures do not constitute live DocumentDB TLS acceptance.
+No Traforo release download, pin change, or DocumentDB deployment is part of this
+round. Go checks still run as separate stages, never from pytest.

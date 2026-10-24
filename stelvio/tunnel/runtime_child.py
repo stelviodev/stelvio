@@ -18,6 +18,7 @@ from botocore.exceptions import ClientError, HTTPClientError
 from stelvio.tunnel.aws_inventory import resolve_vpc_network
 from stelvio.tunnel.credentials import AWS_IO, AwsExecutionContext
 from stelvio.tunnel.diagnostics.protocol import timestamp
+from stelvio.tunnel.diagnostics.resource_checks import MAX_CA_BYTES, ResourceChecks
 from stelvio.tunnel.diagnostics.runtime import Events, RuntimeDiagnostics
 from stelvio.tunnel.discovery import ResourceDiscovery
 from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
@@ -104,10 +105,13 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
     inputs = receive(control)
     if (
         not isinstance(inputs, dict)
-        or inputs.keys() != {"session", "contexts"}
+        or inputs.keys() - {"diagnostic_ca_pem"} != {"session", "contexts"}
         or not isinstance(inputs["contexts"], list)
     ):
         raise ValueError("Malformed network runtime startup request")
+    ca_pem = inputs.get("diagnostic_ca_pem")
+    if ca_pem is not None and (not isinstance(ca_pem, str) or len(ca_pem) > MAX_CA_BYTES):
+        raise ValueError("Invalid diagnostic CA bundle")
     if len(inputs["contexts"]) > MAX_RUNTIME_NETWORKS:
         raise ValueError("Network runtime provider context limit exceeded")
     description = session_from_wire(inputs["session"])
@@ -381,11 +385,14 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             )
             return value
 
+        resource_checks = ResourceChecks(ca_pem)
+        scope.callback(resource_checks.close)
         diagnostic_service = RuntimeDiagnostics(
             description.session_id,
             diagnostic_state,
             {"helper": NativeHelper(timeout=0.5).diagnostics, "forwarder": forwarding.diagnostics},
             diagnostics_events,
+            resource_checks=resource_checks,
         )
         try:
             diagnostic_service.start()
@@ -417,6 +424,7 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             pass
         finally:
             diagnostic_service.close()
+            resource_checks.close()
             stop.set()
             with lock:
                 owned = tuple(workers)

@@ -115,3 +115,38 @@ create the binary cache. The report never performs DNS/resource probes or AWS
 queries. Treat findings as observed discrepancies, not proven root causes.
 
 Uploads and persistent diagnostic storage are outside this implementation.
+
+## Live monitor
+
+`stlv tunnel monitor` consumes this API without collecting OS inventory or
+acquiring networking ownership. It uses the same sampler as `diagnose`. Monitor
+history is local and bounded to 60 seconds; events remain runtime-owned.
+
+Runtime snapshots can advertise `capabilities: ["resource_checks"]`. Only after
+this advertisement may a client send the optional boolean `resource_checks`
+field in a snapshot request. Omitting it preserves passive snapshot behavior.
+The Go protocols and runtime snapshot version remain unchanged. Older runtimes
+continue to work with TLS results unavailable.
+
+The optional top-level `resource_checks` record includes result, error code,
+endpoint results, checked/total counts, observation time, age, duration, running,
+and stale flags. Results are fenced by unit, generation, transport attempt, DNS
+revision, and the complete current endpoint set. Each ready VPC also provides
+`connected_seconds`, measured from its latest uninterrupted ready transition.
+
+TLS rounds run only on explicit monitor demand. Concurrent readers share one
+round, at most once per 30 seconds. An isolated Python subprocess bounds DNS and
+TLS work to 15 seconds per round and four concurrent endpoints, with a two-second
+endpoint budget. Changing the target set cancels obsolete work when observed.
+Shutdown kills and reaps the worker before network cleanup. An in-flight round
+can finish after its requesting monitor exits; no further rounds start without
+demand. Results become stale after 60 seconds.
+
+The owning process reads at most 128 KiB from the project's existing
+`.stelvio/aws/documentdb/global-bundle.pem` and passes the public CA data privately
+to the runtime. No CA download is performed. Missing or invalid data makes checks
+unavailable. Probes use system DNS, require numeric answers within the VPC's
+routed ranges, and verify the certificate against the real hostname for cluster,
+reader, and AWS-discovered member endpoints. They use no database authentication
+or data operations and do not prove driver replica discovery. Limits and failed
+checks never change readiness or handler admission. Probes generate real traffic.

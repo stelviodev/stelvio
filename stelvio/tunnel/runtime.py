@@ -22,6 +22,22 @@ LEASE_EXIT_TIMEOUT = 20
 MAX_RUNTIME_NETWORKS = 8
 
 
+def _diagnostic_ca() -> str | None:
+    from stelvio.exceptions import StelvioProjectError  # noqa: PLC0415
+    from stelvio.project import get_dot_stelvio_dir  # noqa: PLC0415
+    from stelvio.tunnel.diagnostics.resource_checks import MAX_CA_BYTES  # noqa: PLC0415
+
+    try:
+        path = get_dot_stelvio_dir() / "aws/documentdb/global-bundle.pem"
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_CA_BYTES:
+            return None
+        with path.open("rb") as source:
+            data = source.read(MAX_CA_BYTES + 1)
+        return data.decode("ascii") if len(data) <= MAX_CA_BYTES else None
+    except (OSError, UnicodeError, StelvioProjectError):
+        return None
+
+
 class NetworkRuntime:
     def __init__(
         self,
@@ -80,6 +96,7 @@ class NetworkRuntime:
                 self._control,
                 {
                     "session": session_to_wire(description),
+                    "diagnostic_ca_pem": _diagnostic_ca(),
                     "contexts": [
                         {
                             "provider": context.provider,
