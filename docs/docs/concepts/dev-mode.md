@@ -254,3 +254,33 @@ access, query AWS, or change networking. Local reports include resource identiti
 and network addresses. Review a report before sharing it. Credentials, private
 keys, tokens, helper capabilities, raw logs, process arguments, and environment
 values are excluded. Uploads are not provided by this command.
+
+### Monitor tunnel traffic
+
+Run `stlv tunnel monitor` in a separate terminal while `stlv dev` or
+`stlv tunnel start [ENV]` owns the tunnel. The interactive macOS dashboard shows
+per-VPC readiness, TCP streams, DNS state, traffic rates, selected routes and
+resources, and recent events. It requires an ordinary user and stays open while
+waiting for a session. Closing it leaves the tunnel running.
+
+Use arrow keys to select a VPC, Tab to change focus, `s` to select a session,
+`r` to refresh, and `q` or Ctrl+C to exit. Use `--session UUID` to stay attached
+to one session. Otherwise, a replacement session is selected only when its app,
+environment, and deployed VPC identities match uniquely. At 80 columns the
+content stacks vertically; scroll to see details and events.
+
+Rates measure delivered inner IPv4 bytes. They exclude SSH/SSM overhead and the
+DNS relay's direct SOCKS traffic. Packet drops and forwarder queue drops are
+separate counts. `—` means unavailable, including the first rate sample; partial
+observations do not become zero. Chart gaps remain visible. History covers the
+last 60 seconds and is lost when the monitor exits.
+
+For DocumentDB, active diagnostic probes verify TLS and each AWS-discovered
+endpoint against the cached AWS CA bundle. These probes generate tunnel traffic.
+They do not authenticate to the database, check replica topology through a driver,
+or change readiness. The monitor reports missing CA data and unsupported runtime
+versions as unavailable. TLS results expire after 60 seconds; normal statistics
+expire after five seconds. A ready interface alone does not prove resource access.
+
+For scripts or a noninteractive terminal, use `stlv tunnel diagnose --json`.
+That command remains passive and does not schedule TLS probes.

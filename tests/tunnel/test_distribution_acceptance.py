@@ -130,7 +130,19 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         "trust",
         "uninstall",
         "diagnose",
+        "monitor",
     }
+    run(
+        python,
+        "-I",
+        "-c",
+        "from stelvio.tunnel.monitor.app import TunnelMonitor; "
+        "from stelvio.tunnel.diagnostics.resource_checks import ResourceChecks",
+    )
+    monitor_help = run(
+        python, "-I", "-c", "from stelvio.cli import main; main()", "tunnel", "monitor", "--help"
+    )
+    assert "--session" in monitor_help.stdout
     status_help = run(
         python,
         "-I",
@@ -193,6 +205,7 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         "from stelvio.cli import main; main()",
         "tunnel",
         "diagnose",
+        "monitor",
         "--json",
     )
     diagnostic_report = json.loads(diagnostic_result.stdout)
@@ -206,6 +219,7 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         "from stelvio.cli import main; main()",
         "tunnel",
         "diagnose",
+        "monitor",
     )
     assert "Stelvio tunnel diagnostics" in table_result.stdout
     assert "'data':" not in table_result.stdout

@@ -170,3 +170,23 @@ def diagnose(as_json: bool) -> None:
             render(report, Console())
     except (OSError, RuntimeError, ValueError, TypeError) as error:
         raise click.ClickException("Cannot create the tunnel diagnostic report") from error
+
+
+@tunnel.command("monitor")
+@click.option("--session", "session_id", type=click.UUID, help="Monitor one session UUID.")
+def monitor(session_id: object) -> None:
+    """Show live, read-only tunnel traffic and readiness in an interactive terminal."""
+    import os  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    if sys.platform != "darwin":
+        raise click.ClickException("Tunnel monitoring requires macOS")
+    if not os.geteuid() or os.getuid() != os.geteuid():
+        raise click.ClickException("Run tunnel monitor as your ordinary user")
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise click.ClickException(
+            "Tunnel monitor requires an interactive terminal; use stlv tunnel diagnose --json"
+        )
+    from stelvio.tunnel.monitor.app import TunnelMonitor  # noqa: PLC0415
+
+    TunnelMonitor(str(session_id) if session_id else None).run()

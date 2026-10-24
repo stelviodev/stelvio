@@ -97,15 +97,20 @@ def send(connection: socket.socket, value: dict, limit: int = MAX_MESSAGE) -> No
     connection.sendall(struct.pack("!I", len(data)) + data)
 
 
-def request(after_sequence: int = 0) -> dict:
+def request(after_sequence: int = 0, *, resource_checks: bool = False) -> dict:
     if type(after_sequence) is not int or after_sequence < 0:
         raise ValueError("Invalid event sequence")
-    return {"version": VERSION, "operation": "snapshot", "after_sequence": after_sequence}
+    value = {"version": VERSION, "operation": "snapshot", "after_sequence": after_sequence}
+    if resource_checks:
+        value["resource_checks"] = True
+    return value
 
 
 def validate_request(value: dict) -> int:
-    if set(value) != {"version", "operation", "after_sequence"}:
+    if set(value) - {"resource_checks"} != {"version", "operation", "after_sequence"}:
         raise ValueError("Invalid diagnostics request fields")
+    if "resource_checks" in value and type(value["resource_checks"]) is not bool:
+        raise ValueError("Invalid resource checks flag")
     if type(value["version"]) is not int or value["version"] != VERSION:
         raise ValueError("Unsupported diagnostics version")
     if value["operation"] != "snapshot":

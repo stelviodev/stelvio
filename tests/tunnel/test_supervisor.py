@@ -813,3 +813,19 @@ def test_no_resource_dns_process_without_linked_resources(monkeypatch):
 
     monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", unexpected)
     world.worker._probe_resource_dns()
+
+
+def test_monitor_connected_time_tracks_uninterrupted_readiness(monkeypatch):
+    world = _worker_world(monkeypatch)
+    worker = world.worker
+    clock = [100.0]
+    monkeypatch.setattr("stelvio.tunnel.supervisor.time.monotonic", lambda: clock[0])
+    worker._publish("ready")
+    assert worker._ready_since == 100.0
+    clock[0] = 110.0
+    worker._publish("ready")
+    assert worker._ready_since == 100.0
+    worker._publish("retrying", "transport")
+    assert worker._ready_since is None
+    worker._publish("ready")
+    assert worker._ready_since == 110.0
