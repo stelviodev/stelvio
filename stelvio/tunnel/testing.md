@@ -607,3 +607,81 @@ The pinned v0.0.7 image does not support statistics. A compatible image reports 
 capability in the existing ready handshake. Old images continue forwarding; the
 report marks missing diagnostics unavailable and uses legacy helper status where
 possible. Publishing and pinning a new release is a separate step.
+
+## Faster AWS acceptance with a private Lambda API
+
+Run the additive Lambda suite when you need to test the AWS tunnel path without
+waiting for DocumentDB clusters. It supplements the DocumentDB suite; it does not
+replace database TLS/member discovery, authentication, or read/write checks.
+
+```bash
+# Build locally; this command does not install the helper.
+GOTOOLCHAIN=go1.27.3 uv run python pkg/traforo-client-go/scripts/build.py --build-only
+# Use the exact export printed by the builder in this shell.
+export STLV_TRAFORO_DEV_BINARY=/absolute/path/printed/by/the/builder
+
+export STLV_TEST_AWS_PROFILE=default
+export STLV_TEST_AWS_REGION=us-east-1
+export STLV_TEST_TUNNEL_AWS_ACCOUNT=<verified-account-id>
+uv run pytest tests/integration/test_tunnel_lambda.py \
+  --integration-macos-privileged --integration-tunnel -n 0 -vv
+```
+
+Use an ordinary-user macOS 15+ host with no live tunnel or uncertain helper state.
+Authorize helper administration when macOS requests it. The exclusive-host fixture
+preserves the original installation, installs the selected image, and restores the
+helper and independently checked network baseline afterward. The private Session
+Manager plugin must pass the normal version checks. No Traforo release download
+is needed with the developer override. `run_all.sh` never runs this suite.
+
+The suite shares one disposable application across three tests. A VPC-attached
+client Function makes the VPC eligible for ordinary CLI selection. A private
+API Gateway REST API reaches a separate Lambda backend that has no VPC attachment
+or public URL. An IPv4 interface endpoint sits in the VPC's private subnet and
+admits HTTPS from the bastion security group. The API policy restricts requests to
+that endpoint. Its API-ID hostname is a configured DNS domain for this VPC.
+
+Standalone requests follow host DNS and utun through Traforo, SSH and Session
+Manager to the private endpoint. The dev test invokes the client's public Function
+URL, then proves that its local handler called the private API. The public URL
+alone is not evidence of a tunnel. Requests use normal HTTPS hostname/certificate
+checks, fresh connections, and no environment HTTP proxy. Assertions check exact
+endpoint private addresses, subnet routes, backend identity, nonces, and payload
+digests. Requests must fail before startup and after shutdown.
+
+The tests cover SIGINT, SIGKILL, transport reconnection, stable resolver ports,
+new helper generations, local handler execution, terminated owned SSM sessions,
+unchanged standalone deployment state, and retained deployment-owned bastions.
+They do not add general Lambda resource discovery to Stelvio. The API is a
+custom-domain target, so the tests explicitly probe it after CLI readiness.
+Initial target connection failures have a 90-second readiness budget; a wrong
+backend identity or payload fails immediately. Dev Ctrl+C can return Click's
+abort status (1), while standalone Ctrl+C must return 0. Both paths must finish
+within the shutdown limit and certify the same host and transport cleanup.
+
+The AWS identity needs the usual tunnel deployment permissions, plus API Gateway
+REST API administration, VPC interface endpoints, Lambda integration permissions,
+and log/IAM administration for the backend. The fixture checks the account before
+creating resources. It saves the exact API ID before application deployment, tags
+it with the proof identity, verifies ownership before deletion, and audits absence.
+It destroys the API and application even after partial setup failures.
+
+Costs include the running bastion, one interface endpoint, API calls, Lambda, and
+logs until teardown finishes. The suite removes DocumentDB provisioning delays;
+it still creates a VPC-attached client Function, so Lambda interface cleanup can
+remain slow. It uses one VPC; retain the existing suite for independent multi-VPC
+and database-specific acceptance.
+
+Keep the pytest temporary directory after failures. It contains `private-api.json`,
+`lambda-acceptance.json` (deployment, exercise, and teardown durations), command
+logs, and host baseline/restoration evidence. A cleanup or absence-audit failure
+fails acceptance. Record each run's commit, platform, binary digest, plugin version,
+results, durations, skips, and certified cleanup. Do not infer a pass from test
+collection or a prior candidate's result. Generated state can contain secrets;
+keep complete evidence private.
+
+The fixture's non-AWS checks run with:
+
+```bash
+uv run pytest tests/tunnel/test_lambda_acceptance_fixture.py -q
+```
