@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
+from ipaddress import IPv4Address
 from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -38,6 +40,7 @@ from stelvio.tunnel.wire import MAX_STATUS_DETAIL_LENGTH, STATUS_DETAIL_CAUSES
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from ipaddress import IPv4Network
 
     import boto3
 
@@ -50,6 +53,44 @@ DISCOVERY_SECONDS = 30
 MAX_BACKOFF = 30
 STARTUP_SECONDS = 600
 MAX_GENERATION = (1 << 64) - 1
+OS_DNS_TIMEOUT = 5
+OS_DNS_MAX_OUTPUT = 65536
+OS_DNS_MAX_ADDRESSES = 256
+OS_DNS_SCRIPT = """
+import json, socket, sys
+try:
+    answers = {}
+    for name in sys.argv[1:]:
+        records = socket.getaddrinfo(name, None, type=socket.SOCK_STREAM)
+        addresses = sorted({record[4][0] for record in records if record[0] == socket.AF_INET})
+        if not addresses or len(addresses) > 256:
+            sys.exit(1)
+        answers[name] = addresses
+    output = json.dumps(answers, separators=(',', ':')).encode()
+    if len(output) > 65536:
+        sys.exit(1)
+    sys.stdout.buffer.write(output)
+except (OSError, ValueError):
+    sys.exit(1)
+"""
+
+
+def _validate_resource_dns(
+    output: bytes | None, names: tuple[str, ...], cidrs: tuple[IPv4Network, ...]
+) -> None:
+    if not isinstance(output, bytes) or len(output) > OS_DNS_MAX_OUTPUT:
+        raise ValueError("resource resolver output")
+    answers = json.loads(output)
+    if not isinstance(answers, dict) or set(answers) != set(names):
+        raise ValueError("resource resolver names")
+    for addresses in answers.values():
+        if not isinstance(addresses, list) or not 1 <= len(addresses) <= OS_DNS_MAX_ADDRESSES:
+            raise ValueError("resource resolver addresses")
+        for address in addresses:
+            if not isinstance(address, str) or not any(
+                IPv4Address(address) in cidr for cidr in cidrs
+            ):
+                raise ValueError("resource address outside routed subnets")
 
 
 @dataclass(frozen=True)
@@ -361,8 +402,34 @@ class VpcWorker:
                     raise TransportRetryError("OS private DNS did not reach this VPC generation")
             finally:
                 self._dns("release", name=name)
+        self._probe_resource_dns()
         if not self.transport.healthy() or not self.forwarding.healthy():
             raise TransportRetryError("VPC transport exited during readiness")
+
+    def _probe_resource_dns(self) -> None:
+        names = tuple(
+            dict.fromkeys(name for resource in self._resources() for name in resource.hostnames)
+        )
+        if not names:
+            return
+        if len(names) > MAX_DOMAINS:
+            raise TransportRetryError("OS resource DNS exceeds the name limit")
+
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed isolated system-resolver probe
+                [sys.executable, "-I", "-S", "-c", OS_DNS_SCRIPT, *names],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=OS_DNS_TIMEOUT,
+                check=False,
+            )
+            _validate_resource_dns(
+                result.stdout if not result.returncode else None, names, self._route_cidrs
+            )
+        except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
+            raise TransportRetryError(
+                "OS resource DNS did not resolve within this VPC's routed subnets"
+            ) from None
 
     def _reject(self) -> None:
         self._transport_fenced = False
