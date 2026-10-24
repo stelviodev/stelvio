@@ -205,7 +205,6 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         "from stelvio.cli import main; main()",
         "tunnel",
         "diagnose",
-        "monitor",
         "--json",
     )
     diagnostic_report = json.loads(diagnostic_result.stdout)
@@ -219,7 +218,6 @@ assert assets.TARGETS == json.loads(sys.argv[2])
         "from stelvio.cli import main; main()",
         "tunnel",
         "diagnose",
-        "monitor",
     )
     assert "Stelvio tunnel diagnostics" in table_result.stdout
     assert "'data':" not in table_result.stdout
