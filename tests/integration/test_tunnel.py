@@ -83,6 +83,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     healthy = session.check_database(second_cluster)
     assert healthy["read_write"]
 
+    readiness_offset = len(session.log())
     ec2.start_instances(InstanceIds=[bastion_id])
     ec2.get_waiter("instance_running").wait(
         InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
@@ -90,10 +91,12 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     recovered = session.wait_database(first_cluster)
     assert recovered["tls"]
     assert recovered["read_write"]
-    active = session.wait_unit(
-        first_vpc.identity, "active", after=retained.generation, timeout=STARTUP_TIMEOUT
+    session.wait_recovered_unit(
+        first_vpc.identity,
+        retained,
+        after_log=readiness_offset,
+        timeout=STARTUP_TIMEOUT,
     )
-    assert active.generation == retained.generation + 1
     session.assert_selected_routes()
     ports_after_reconnect = session.resolver_ports()
     assert all(ports_after_reconnect.get(domain) == port for domain, port in ports_before.items())
@@ -249,14 +252,12 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     ec2.get_waiter("instance_running").wait(
         InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
     )
-    active = session.wait_unit(
+    session.wait_recovered_unit(
         first_vpc.identity,
-        "active",
-        after=retained.generation,
+        retained,
+        after_log=readiness_offset,
         timeout=STARTUP_TIMEOUT,
     )
-    assert active.generation == retained.generation + 1
-    session.wait_network_ready(after=readiness_offset, timeout=STARTUP_TIMEOUT)
     session.assert_selected_routes()
     recovered = session.wait_function_marker(1, marker1)
     assert recovered["tls"]

@@ -60,6 +60,40 @@ FAULT_IO = Config(connect_timeout=5, read_timeout=10, retries={"total_max_attemp
 _SSM_REASON = re.compile(r"stelvio/[0-9a-f]{16}/[0-9a-f]{32}\Z")
 
 
+def _observed_unit(output: str, unit_id: str) -> HelperUnitState | None:
+    # Starting a command truncates its log. Keep only its latest owner report.
+    last = None
+    highest_generation = 0
+    pattern = re.compile(
+        rf"^  Host unit ({unit_id}) "
+        r"generation=([0-9]+) status=(active|retained|inactive|failed|mutating|absent)$"
+    )
+    for line in output.splitlines():
+        if line == "Network DEGRADED: runtime status unavailable.":
+            last = None
+        match = pattern.fullmatch(line)
+        if match:
+            last = (
+                HelperUnitState(match[1], int(match[2]), HelperUnitStatus[match[3].upper()])
+                if match[3] != "absent" and 0 < int(match[2]) < 2**64
+                else None
+            )
+            if last is not None:
+                assert last.generation >= highest_generation, (
+                    f"Host unit {unit_id} generation regressed"
+                )
+                highest_generation = last.generation
+    return last
+
+
+def _network_is_ready(output: str) -> bool:
+    latest = next(
+        (line for line in reversed(output.splitlines()) if line.startswith("Network ")),
+        None,
+    )
+    return latest == "Network READY"
+
+
 class StandaloneCliSession:
     """Own a regular Stelvio deployment and tunnel/dev CLI process for one test."""
 
@@ -670,25 +704,7 @@ finally:
         while time.monotonic() < deadline:
             if self.process is None or self.process.poll() is not None:
                 raise RuntimeError(f"Tunnel command exited while observing {identity}")
-            # Starting a command truncates its log. Keep only
-            # the newest owner observation, including absence/unavailability.
-            last = None
-            pattern = re.compile(
-                rf"^  Host unit ({unit_id}) "
-                r"generation=([0-9]+) status=(active|retained|inactive|failed|mutating|absent)$"
-            )
-            for line in self.log().splitlines():
-                if line == "Network DEGRADED: runtime status unavailable.":
-                    last = None
-                match = pattern.fullmatch(line)
-                if match:
-                    last = (
-                        HelperUnitState(
-                            match[1], int(match[2]), HelperUnitStatus[match[3].upper()]
-                        )
-                        if match[3] != "absent" and 0 < int(match[2]) < 2**64
-                        else None
-                    )
+            last = _observed_unit(self.log(), unit_id)
             if (
                 last is not None
                 and last.status.name.lower() == status_name
@@ -701,11 +717,45 @@ finally:
             f"last owner observation: {last}"
         )
 
+    def wait_recovered_unit(
+        self,
+        identity: str,
+        retained: HelperUnitState,
+        *,
+        after_log: int,
+        timeout: float = STARTUP_TIMEOUT,
+    ) -> HelperUnitState:
+        assert retained.unit == hashlib.sha256(identity.encode()).hexdigest()[:8]
+        assert retained.status == HelperUnitStatus.RETAINED
+        deadline = time.monotonic() + timeout
+        last = None
+        while time.monotonic() < deadline:
+            if self.process is None or self.process.poll() is not None:
+                raise RuntimeError(f"Tunnel command exited while observing {identity}")
+            output = self.log()
+            last = _observed_unit(output, retained.unit)
+            if (
+                _network_is_ready(output[after_log:])
+                and last is not None
+                and last.status == HelperUnitStatus.ACTIVE
+                and last.generation > retained.generation
+            ):
+                # The first activation advances once. Each additional configured
+                # attempt retires and activates again, advancing two more generations.
+                advance = last.generation - retained.generation
+                assert advance % 2 == 1, "Invalid reconnect generation cycle"
+                return last
+            time.sleep(0.1)
+        raise TimeoutError(
+            f"VPC unit {identity} did not report fresh Network READY and a recovered "
+            f"active generation; last owner observation: {last}"
+        )
+
     def wait_network_ready(self, *, after: int = 0, timeout: float = STARTUP_TIMEOUT) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             output = self.log()
-            if "Network READY" in output[after:]:
+            if _network_is_ready(output[after:]):
                 return
             if self.process is None or self.process.poll() is not None:
                 raise RuntimeError(f"Dev CLI exited before network readiness: {output[-5000:]}")
