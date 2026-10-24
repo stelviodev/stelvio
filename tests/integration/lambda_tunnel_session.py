@@ -17,6 +17,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from botocore.exceptions import ClientError
 
 from stelvio.stack_outputs import read_network_manifest
+from stelvio.tunnel.manifest import BastionPolicy
 
 from .assert_tunnel import (
     capture_proof_lambda_log_groups,
@@ -262,8 +263,8 @@ class LambdaTunnelSession(StandaloneCliSession):
             env=self.environment_name,
             function_names=tuple(
                 self._outputs[f"{kind}{number}_name"]
-                for number in self.apis
-                for kind in ("function", "backend")
+                for kind, numbers in (("function", (1, 2, 3, 4)), ("backend", (1, 2)))
+                for number in numbers
             ),
         )
         state = self.state()
@@ -390,6 +391,27 @@ class LambdaTunnelSession(StandaloneCliSession):
             payload="dev-private-payload",
         )
         self.check_private(nonce + "-host", number)
+
+    def check_plain_clients(self):
+        disabled = next(vpc for vpc in self.manifest.used_vpcs if vpc.identity.endswith("net3"))
+        assert disabled.policy == BastionPolicy.DISABLED
+        output = self.log()
+        warnings = [line for line in output.splitlines() if "VPC access disabled:" in line]
+        assert sum(disabled.identity in line for line in warnings) == 1, warnings
+        for number in (3, 4):
+            nonce = os.urandom(16).hex()
+            status, response = self.invoke_function(number, marker=nonce)
+            assert status == 200, response
+            assert response["plain"] is True
+            assert response["app"] == self.app
+            assert response["nonce"] == nonce
+            assert response["local"] is True
+            entries = [
+                item
+                for item in self.invocations()
+                if item.get("target") == str(number) and item.get("nonce") == nonce
+            ]
+            assert response["pid"] in {item["pid"] for item in entries}
 
     def wait_private(self, nonce: str, number: int = 1):
         def probe():
