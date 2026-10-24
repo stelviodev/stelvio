@@ -429,7 +429,7 @@ def main(argv: list[str] | None = None) -> None:
     if not options.build_only:
         print(
             f"Installing local Traforo {selected.digest[:12]} "
-            "(macOS authorization may be required).",
+            "(administrator authorization may be required).",
             flush=True,
         )
         install_helper(environment=environment)

@@ -41,6 +41,18 @@ SYSTEM_CHANGES = (
 )
 
 
+def system_changes() -> str:
+    if platform.system() == "Linux":
+        return (
+            "Install the native helper in /usr/local/libexec/stelvio-traforo; "
+            "register stelvio-traforo.service with systemd; create private state in "
+            "/var/lib/stelvio/tunnel and its control socket in /run/stelvio/tunnel. "
+            "During a networking session it owns temporary VPC routes, interfaces, "
+            "and scoped DNS configuration."
+        )
+    return SYSTEM_CHANGES
+
+
 def _supported(*, activation: bool = True) -> None:
     if platform.system() == "Linux":
         from stelvio.tunnel.linux_platform import supported  # noqa: PLC0415

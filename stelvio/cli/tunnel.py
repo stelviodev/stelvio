@@ -7,13 +7,13 @@ import click
 from stelvio.tunnel.assets import NativeAssetError
 from stelvio.tunnel.helper_client import HelperError, NativeHelper
 from stelvio.tunnel.host_trust import HostIdentity, HostTrustError, fingerprint, locked_host_trust
-from stelvio.tunnel.installation import SYSTEM_CHANGES, install_helper, uninstall_helper
+from stelvio.tunnel.installation import install_helper, system_changes, uninstall_helper
 from stelvio.tunnel.plugin import PluginAssetError
 
 
 @click.group()
 def tunnel() -> None:
-    """Manage the native macOS VPC dev helper."""
+    """Manage the native macOS or Debian VPC dev helper."""
 
 
 def _run(action: Callable[[], None]) -> None:
@@ -25,8 +25,8 @@ def _run(action: Callable[[], None]) -> None:
 
 @tunnel.command("install")
 def install() -> None:
-    """Install the trusted helper using macOS administrator authorization."""
-    click.echo(SYSTEM_CHANGES)
+    """Install the trusted helper with administrator authorization."""
+    click.echo(system_changes())
 
     def perform() -> None:
         selected = install_helper()
