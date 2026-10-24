@@ -97,6 +97,27 @@ uv run pytest \
   tests/tunnel/test_dev_session.py -q
 ```
 
+`test_standalone.py` checks the standalone command lifecycle. Its trust scenarios
+use the real CLI, shared session, and SSH transport with deterministic AWS/SSH
+boundaries. Each run creates a new session and transport. The tests verify pin
+reuse, repeated changed-key refusal, actionable diagnostics, original-key
+restoration, and explicit reset with confirmation. Shared fixtures live in
+`tests/tunnel/conftest.py`; the separate OpenSSH test checks the real SSH behavior.
+
+The opt-in AWS standalone scenario also compares pins across normal exit,
+restart, and SIGKILL. It rotates a proof-owned bastion key, requires two fresh
+commands to reject it, restores the original key, and checks database access.
+Fault commands require test-only Run Command access to `AWS-RunShellScript`.
+Production tunneling does not need this permission. The fault helper checks
+instance ownership before each command and retains uncertainty if execution
+cannot be certified; it does not race a restoration command against unknown work.
+
+The fixture refuses pre-existing pins for proof instances. After independent AWS
+absence is certified, it removes only pins claimed for the proof deployment.
+Per-identity lock files remain in place. Unit tests cover pin ownership, foreign
+instance refusal, command uncertainty, and cleanup ordering. Live AWS acceptance
+is pending until this explicitly enabled lane is run.
+
 ## Unit tests
 
 Run the Python tunnel suite with the normal repository checks:
@@ -160,6 +181,23 @@ uv run pytest tests/integration/test_tunnel_host.py \
   --integration-macos-privileged -n 0 -q
 ```
 
+Standalone AWS acceptance is a separate exclusive lane. It deploys a disposable
+proof app with ordinary `stlv deploy`, then exercises only `stlv tunnel start`:
+
+```bash
+STLV_TEST_AWS_PROFILE=<authorized-profile> \
+STLV_TEST_TUNNEL_AWS_ACCOUNT=<expected-account-id> \
+uv run pytest tests/integration/test_tunnel.py \
+  --integration-macos-privileged --integration-tunnel -n 0 -q
+```
+
+The fixture checks the caller account before deployment and destroys only its proof
+app during teardown. Acceptance covers DocumentDB TLS, member discovery and
+read/write; transport recovery while another VPC remains available; and graceful
+and abrupt standalone shutdown with helper, SSM, deployment, bastion, and host
+baseline checks. This lane is not part of `tests/integration/run_all.sh`. Do not run
+it without explicit authorization for the AWS resources and privileged host changes.
+
 The session fixture records the current helper and host baseline, refuses active or
 uncertain state, and restores the original helper during teardown. It compares
 resolver files, DNS state, routes, interfaces, and networking processes. Stop if
@@ -206,8 +244,10 @@ The suite checks archive contents and installs the wheel into a clean virtual
 environment outside the checkout. It verifies the installed CLI command set,
 checks `tunnel status --help`, and rejects the unsupported `tunnel inspect`
 command. It also checks `tunnel trust --help` and the identity selectors in
-`tunnel trust reset --help`. These CLI checks do not reset trust, contact the
-helper, or access AWS. Pytest does not build Go or Python artifacts.
+`tunnel trust reset --help`. Standalone help must show the optional environment
+argument in `tunnel start --help`. These CLI checks do not start a session,
+reset trust, contact the helper, or access AWS. Pytest does not build Go or Python
+artifacts.
 Distinct-candidate upgrade acceptance remains pending until its candidate and the
 required native authorization are available.
 
@@ -274,3 +314,51 @@ diagnostics. The tests require a generic failure report and blocked VPC admissio
 These tests use isolated adapters, not actual LAN or VPN mutations. Native route
 conflict and host-baseline acceptance require the privileged tier in the final
 stack; unit success does not certify that acceptance.
+
+
+## Standalone subnet routing and diagnostics
+
+```bash
+uv run pytest tests/tunnel/test_standalone.py \
+  tests/integration/test_tunnel_audit.py -q
+```
+
+These nonprivileged tests drive the real CLI capture and shared-session status
+path with a controlled runtime boundary. They check two-VPC private/isolated
+selection, complete ownership CIDRs, exclusion of unused components, state-context
+release before startup, bounded conflict diagnostics, nonzero exit, and cleanup.
+They do not substitute for the worker's host-routing tests or native acceptance.
+
+The opt-in standalone AWS test also calls `assert_selected_routes()` after initial
+readiness, transport recovery, and a fresh command start. It reads actual macOS
+route lookups and requires exact private/isolated prefixes on separate per-VPC
+utun interfaces. Public subnets, the primary resolver, and unused VPC space must
+not use those interfaces. Each lookup is retained in
+`standalone-routes.jsonl` inside the temporary proof project. Deterministic tests
+reject whole-VPC routes, missing interfaces, cross-VPC interface reuse, and leaks
+into each excluded address category. Live execution requires both privileged
+and AWS opt-ins above; collection alone is not acceptance.
+
+
+## Proof application setup and partial deployments
+
+The standalone acceptance app uses one replica beyond the primary in its first
+DocumentDB cluster and no replicas in its second cluster. Nonprivileged tests
+execute the generated definition with real component constructors and controlled
+resource boundaries, so configuration API changes fail before AWS acceptance.
+
+Before destruction, acceptance discovers EC2 instances using the exact proof app
+and environment tags, validates ownership, and records attached volume IDs even
+when deployment outputs are incomplete. Successful empty discovery means no
+volumes need capture. Failed discovery or capture remains an acceptance failure;
+destruction and the absence audit still run. Proof host pins remain until all
+required cleanup checks pass. Deployment interruptions also run cleanup; simultaneous
+setup and cleanup failures are reported together.
+The absence audit checks DocumentDB cluster and instance application/environment
+ownership tags as well as readable name prefixes. This detects resources with
+compacted names even after a partial deployment. Tag inspection uses resource
+ARNs; missing ARNs or failed AWS requests fail the audit rather than certifying
+cleanup. Both ownership tags must match before an otherwise unrelated name is
+reported as belonging to the proof application.
+
+These checks do not certify a live acceptance run.

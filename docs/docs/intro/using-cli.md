@@ -327,6 +327,55 @@ it confirms that no active session owns host state. It uses the installed image 
 does not need a plugin download. If ownership is uncertain, the helper retains its
 ownership evidence for status checks; do not remove resolver files or helper state by hand.
 
+### Standalone access to deployed VPC resources
+
+After deploying an app with enabled VPC dependencies and installing the helper, start
+a foreground networking session without entering dev mode:
+
+```bash
+stlv tunnel start          # personal environment
+stlv tunnel start staging  # named environment
+```
+
+The command reads the existing deployment, then releases its state context before it
+waits for networking readiness. It does not deploy the app, start the AppSync bridge,
+or create a bastion. It uses the same per-VPC discovery, DNS, readiness, and cleanup
+rules as `stlv dev`. Press `Ctrl+C` to close the session; the deployment and its
+bastion remain in place. If the app has no enabled VPC dependencies, the command
+reports that networking is unnecessary and exits successfully.
+
+Only VPCs linked by deployed handler dependencies are selected. Each selected VPC
+routes its deployed private and isolated subnet CIDRs. Public subnets and unused
+parts of the VPC block stay on the existing local network path. The VPC resolver
+uses a separate SOCKS path; its address need not be inside a routed subnet.
+Standalone access keeps the same production hostnames, ports, and TLS checks.
+
+A route conflict is a terminal startup error. The command prints the configure
+stage, requested and conflicting ranges, and interface index when supplied by the
+helper, then closes the session and exits with an error. If cleanup is uncertain,
+the route diagnostic and ownership evidence remain available. Resolve the LAN or
+VPN overlap, check `stlv tunnel status`, and retry owned cleanup with
+`stlv tunnel cleanup` before restarting. No whole-VPC fallback is attempted.
+
+SSH host trust is shared with `stlv dev` and persists after `Ctrl+C`, command
+restart, and helper uninstall. Restarting `tunnel start` does not accept a changed
+host key. A mismatch exits with an error that names the instance and shows the
+expected and presented fingerprints.
+
+First investigate the change. Restore the original key when the change was not
+intentional. For an authorized rotation, stop all tunnels for that instance and
+reset only its trust entry:
+
+```bash
+stlv tunnel trust reset --partition aws --account 123456789012 \
+  --region us-east-1 --instance-id i-0123456789abcdef0
+stlv tunnel start staging
+```
+
+Reset shows the stored fingerprint and asks for confirmation. It does not change
+AWS resources or install the helper. The next successful SSH connection establishes
+a new pin. A replacement instance has a new ID and establishes its own pin.
+
 ### Route conflicts
 
 A helper configuration can contain 1–32 selected IPv4 destination ranges. The
