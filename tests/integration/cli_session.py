@@ -957,7 +957,7 @@ finally:
         return groups, []
 
     def _remove_dev_lambda_log_groups(self, names: tuple[str, ...]) -> list[Exception]:
-        if getattr(self, "_mode", "standalone") != "dev" or not names:
+        if getattr(self, "_mode", "standalone") != "dev":
             return []
         try:
             delete_proof_lambda_log_groups(
