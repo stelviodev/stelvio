@@ -615,7 +615,8 @@ clusters. It covers two independent VPCs, private HTTPS and DNS, partial failure
 reconnection, invocation admission, and host-key rejection. Add the existing
 non-VPC test to complete the AWS networking command below. Keep Go unit/race and
 native host/installation tests as separate gates. Run DocumentDB acceptance when
-checking database discovery, replica members, authentication, and read/write
+checking the production resource-discovery/readiness path, exact endpoint/member
+DNS ownership, database TLS, replica members, authentication, and read/write
 behavior; the Lambda suite does not replace these service-specific checks.
 
 ```bash
@@ -639,10 +640,13 @@ helper and independently checked network baseline afterward. The private Session
 Manager plugin must pass the normal version checks. No Traforo release download
 is needed with the developer override. `run_all.sh` never runs this suite.
 
-Five Lambda tests share one disposable application with two VPCs. Each has its own
-bastion, private API Gateway REST API, IPv4 interface endpoint, Lambda backend,
-and VPC-attached client Function. The backends have no VPC attachment or public
-URL. Each endpoint admits HTTPS from only its owning bastion security group, and
+Seven Lambda tests share one disposable application. Two managed VPCs each have
+their own bastion, private API Gateway REST API, IPv4 interface endpoint, Lambda backend,
+and VPC-attached client Function. A third VPC has `bastion=False` and a plain
+client Function; a fourth client Function has no VPC attachment. The plain clients
+perform no private API request. All four clients use local invocation evidence to
+prove that the bridge ran the handler on the laptop. The backends have no VPC
+attachment or public URL. Each endpoint admits HTTPS from only its owning bastion security group, and
 each API policy restricts requests to its own endpoint. The API-ID hostname is a
 configured DNS domain for that VPC. Backend identity includes the VPC number.
 
@@ -668,17 +672,31 @@ stops the second, reversing the healthy and failed roles. Both require:
 - The healthy unit's generation and SSM session stay unchanged.
 - The dev bridge rejects failed-VPC invocations with `VpcUnavailableError` before
   handler import or entry, while healthy-VPC invocations keep working.
+- The disabled-bastion and non-VPC clients keep returning fresh nonces from local
+  handlers in the same dev process. The disabled VPC emits exactly one startup
+  warning and never acquires a managed network unit.
 - Restart restores access with a fresh failed-unit generation, the same DNS ports,
   unchanged SSH pins, and no replacement application infrastructure.
 
 Fault cleanup restarts only the verified proof bastion, including after an assertion
 fails. A separate test changes a proof bastion's host key, checks rejection and
 peer availability, confirms a new runtime cannot replace the pin, restores the
-original key, and requires a fresh session for recovery. It uses the existing
-bounded SSM fault fixture and never resets trust to accept the changed key.
+original key, and requires a fresh session for recovery. Both unrelated plain
+clients must keep working during the host-key failure, including in a new dev
+runtime. A separate standalone test makes two startup attempts with the changed
+key. Each must exit with status 1, name the instance and trust-reset command, and
+never print `Network READY`. It checks unchanged pins and deployment state,
+empty helper state, no resolver files, and no active owned SSM sessions. After
+restoring the key, a fresh command must connect successfully. These tests use the
+existing bounded SSM fault fixture and never reset trust to accept the changed key.
 
-The suite also checks ordinary transport termination, SIGINT, SIGKILL, terminated
-owned SSM sessions, unchanged standalone deployment state, and retained deployment-
+A separate dev lifecycle test invokes both private APIs and both plain clients,
+kills the actual `stlv dev` command with SIGKILL, and certifies host and transport
+cleanup. It starts dev again, invokes all four clients, verifies unchanged SSH
+pins, and checks graceful shutdown. The standalone SIGKILL test remains separate.
+
+The suite also checks ordinary transport termination, SIGINT, terminated owned
+SSM sessions, unchanged standalone deployment state, and retained deployment-
 owned bastions. Dev Ctrl+C can return Click's abort status (1), while standalone
 Ctrl+C must return 0. Both must meet the shutdown limit and certify cleanup.
 

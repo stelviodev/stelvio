@@ -29,6 +29,19 @@ def handler(event, _context):
                 )
                 + "\n"
             )
+    if "PRIVATE_API_URL" not in os.environ:
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {
+                    "plain": True,
+                    "app": os.environ["PROOF_APP"],
+                    "nonce": nonce,
+                    "pid": os.getpid(),
+                    "local": bool(_invocations),
+                }
+            ),
+        }
     request = Request(
         os.environ["PRIVATE_API_URL"],
         json.dumps({"nonce": nonce, "payload": "dev-private-payload"}).encode(),
