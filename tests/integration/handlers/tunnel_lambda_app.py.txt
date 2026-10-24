@@ -150,3 +150,26 @@ def handler(event, context):
 def run():
     for number, target in enumerate(settings["targets"], start=1):
         create_target(number, target)
+    create_plain_clients()
+
+
+def create_plain_clients():
+    disabled = Vpc(
+        "net3",
+        az=1,
+        bastion=False,
+        customize=dict.fromkeys(
+            ("vpc", "public_subnet", "private_subnet", "isolated_subnet"), relocate(249)
+        ),
+    )
+    for number, vpc in ((3, disabled), (4, None)):
+        client = Function(
+            f"client{number}",
+            handler="handlers/probe.handler",
+            vpc=vpc,
+            url="public",
+            timeout=30,
+            environment={"TUNNEL_VPC": str(number), "PROOF_APP": settings["app"]},
+        )
+        export_output(f"function{number}_name", client.resources.function.name)
+        export_output(f"function{number}_url", client.url)
