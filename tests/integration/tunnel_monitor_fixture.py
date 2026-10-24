@@ -17,7 +17,7 @@ from stelvio.tunnel.monitor.model import Dashboard
 
 
 class MonitorProcess:
-    def __init__(self, session_id, *, log_path):
+    def __init__(self, session_id, *, log_path, quiet_stderr=False):
         master, slave = pty.openpty()
         self.master = master
         self.output = bytearray()
@@ -37,7 +37,7 @@ class MonitorProcess:
                 ],
                 stdin=slave,
                 stdout=slave,
-                stderr=slave,
+                stderr=subprocess.DEVNULL if quiet_stderr else slave,
                 env=dict(os.environ, TERM="xterm-256color"),
                 start_new_session=True,
             )
