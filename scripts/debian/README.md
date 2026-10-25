@@ -1,8 +1,9 @@
 # Traforo development on Debian 13
 
 The reference guest is Lima `debian`, Debian 13 ARM64 with systemd-resolved.
-The Mac worktree is shared read/write at its existing absolute path. Git commands
-run on the Mac because the worktree's common Git directory is not shared.
+The Mac worktree is shared read/write at its existing absolute path. Branch changes and commits
+run on the Mac because the worktree's common Git directory is not shared. The
+guest has separate Git metadata, refreshed from a local bundle for build provenance.
 The previous Lima configuration is saved as `~/.lima/debian/lima.yaml.before-traforo-linux`.
 
 Run commands through an explicit guest shell:
@@ -10,7 +11,7 @@ Run commands through an explicit guest shell:
 ```sh
 limactl shell debian -- bash -lc 'uname -a; cat /etc/os-release'
 limactl shell debian -- bash /Users/sebst/.codex/worktrees/45bb/stelvio/scripts/debian/provision.sh
-limactl shell debian -- bash /Users/sebst/.codex/worktrees/45bb/stelvio/scripts/debian/sync.sh
+./scripts/debian/sync-to-vm.sh
 ```
 
 Provisioning installs checksum-verified uv 0.13.5, Go 1.27.3, GoReleaser 2.18.3,
@@ -19,7 +20,8 @@ uv and leaves system Python unchanged. Lima's existing SSH service is retained;
 no additional SSH listener is configured. Use a fresh login shell after setup.
 
 The guest-native development directory is `/home/sebst.guest/src/stelvio-linux`.
-`sync.sh` preserves its virtual environments and build outputs. Source edits belong
+`sync-to-vm.sh` exports the current commit, refreshes guest-only Git metadata,
+and syncs working files. `sync.sh` preserves virtual environments and build outputs. Source edits belong
 in the shared Mac worktree. Use guest-local files for native permission, installer,
 recovery, and OpenSSH tests; VirtioFS is not the acceptance filesystem.
 
