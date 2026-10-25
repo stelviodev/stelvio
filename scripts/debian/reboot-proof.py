@@ -1,3 +1,4 @@
+# ruff: noqa: INP001, S101, T201 - standalone opt-in VM acceptance checks
 """Opt-in interrupted-VM proof. Run prepare, power-cycle Debian, then verify.
 
 prepare deliberately SIGSTOPs the installed helper after journaling a test unit.
@@ -23,10 +24,11 @@ directory = Path(location)
 helper = NativeHelper(timeout=1)
 boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 if mode == "prepare":
-    assert sys.platform == "linux" and os.geteuid() != 0
+    assert sys.platform == "linux"
+    assert os.geteuid() != 0
     directory.mkdir(mode=0o700, parents=False, exist_ok=False)
     state = helper.status()
-    assert not (state.owned or state.uncertain or state.units)
+    assert not any((state.owned, state.uncertain, state.units))
     before = {
         "boot": boot,
         "binary_sha256": hashlib.sha256(INSTALLED_HELPER.read_bytes()).hexdigest(),
@@ -44,9 +46,19 @@ if mode == "prepare":
     snapshot = helper.diagnostics()
     assert snapshot["owned"]
     subprocess.run(
-        ["/usr/bin/sudo", "/bin/kill", "-STOP", str(snapshot["pid"])], check=True, timeout=5
+        [
+            "/usr/bin/sudo",
+            "/usr/bin/systemctl",
+            "kill",
+            "--kill-whom=main",
+            "--signal=SIGSTOP",
+            "stelvio-traforo.service",
+        ],
+        check=True,
+        timeout=5,
     )
     (directory / "ready.json").write_text(json.dumps(snapshot, indent=2))
+    os.sync()
     print("READY: helper stopped with a durable test journal", flush=True)
     while True:
         time.sleep(1)

@@ -2,7 +2,8 @@
 # Run inside the guest; host Git metadata is intentionally not shared.
 set -euo pipefail
 umask 022
-source_dir=${1:-/Users/sebst/.codex/worktrees/45bb/stelvio}
+shared_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+source_dir=${1:-$shared_root}
 workspace="$HOME/src/stelvio-linux"
 mkdir -p "$workspace"
 cd "$workspace"

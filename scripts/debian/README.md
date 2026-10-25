@@ -10,7 +10,7 @@ Run commands through an explicit guest shell:
 
 ```sh
 limactl shell debian -- bash -lc 'uname -a; cat /etc/os-release'
-limactl shell debian -- bash /Users/sebst/.codex/worktrees/45bb/stelvio/scripts/debian/provision.sh
+limactl shell debian -- bash "$PWD/scripts/debian/provision.sh"
 ./scripts/debian/sync-to-vm.sh
 ```
 

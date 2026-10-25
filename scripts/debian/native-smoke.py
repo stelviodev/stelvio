@@ -1,3 +1,4 @@
+# ruff: noqa: INP001, S101, T201 - standalone opt-in VM acceptance checks
 """Exercise the installed Linux helper without AWS or changes outside the VM."""
 
 from uuid import uuid4

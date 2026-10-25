@@ -1,12 +1,13 @@
 # Traforo Go module
 
-This module contains Traforo's bounded protocol, Darwin system adapter, and
+This module contains Traforo's bounded protocol, native system adapters, and
 privileged helper. The protocol package is independent of operating-system APIs.
 The Darwin package contains narrow cgo bindings for native identity, descriptor,
-route, and network configuration operations. The privileged helper implementation
-lives in `internal/helper/darwin`; `internal/helper` provides a portable command
-dispatcher. The helper authorizes sessions, owns raw utun descriptors, and journals
-route and scoped resolver changes so it can recover them after interruption.
+route, and network configuration operations. The privileged helper implementations
+live in `internal/helper/darwin` and `internal/helper/linux`; `internal/helper`
+provides a portable command dispatcher. The helper authorizes sessions, owns raw
+utun or TUN descriptors, and journals route and DNS configuration changes so it
+can recover them after interruption.
 The module uses the Apache License 2.0. Its code of conduct is maintained in the
 main Stelvio repository.
 
@@ -17,8 +18,9 @@ and uses a separate private cache.
 
 ## Local builds
 
-The module uses one GoReleaser configuration for local builds and tagged releases.
-It builds Darwin `arm64` and `amd64` images with cgo and a macOS 15 minimum.
+The Darwin GoReleaser configuration builds Darwin `arm64` and `amd64` images
+with cgo and a macOS 15 minimum, and cross-builds pure Go Linux images.
+The Linux configuration builds Linux `arm64` and `amd64` images without cgo.
 The GoReleaser version and release Go toolchain are pinned in the module release
 workflow. Stelvio's asset pin remains the source of the local snapshot base version.
 
@@ -29,15 +31,15 @@ run that target; use a Stelvio checkout for local development builds. The target
 checks for the monorepo files and prints this requirement if they are absent.
 
 From the Stelvio checkout, install the pinned Go and GoReleaser versions, then
-build and validate both images:
+build and validate the platform's images:
 
 ```bash
 cd pkg/traforo-client-go
 make build
 ```
 
-This target is build-only. It checks GoReleaser metadata, both Mach-O architectures,
-the injected snapshot version, and linked system libraries. It writes an atomic
+This target is build-only. It checks GoReleaser metadata, native executable formats,
+the injected snapshot version, and Darwin linked system libraries. It writes an atomic
 bundle with `build.json` provenance under `build/` and prints the host image's
 `STLV_TRAFORO_DEV_BINARY` export. It does not install the helper or publish a release.
 
@@ -73,13 +75,14 @@ or modify host resolver settings.
 
 The executable builds on all Go-supported platforms and supports `version`.
 Helper operations (`helper serve`, `helper install`, and `helper uninstall`) and
-the internal `forwarder <carrier-fd>` operation are available only on Darwin;
-other platforms return an unsupported-platform error. The forwarder refuses
+the internal `forwarder <carrier-fd>` operation are available on Darwin and Linux.
+Debian 13 with systemd and systemd-resolved is the first supported Linux host;
+other operating systems return an unsupported-platform error. The forwarder refuses
 root and setuid execution. It creates one userspace IPv4/TCP stack per VPC,
 validates carrier generations and destination CIDRs, and opens TCP destinations
 through that VPC's loopback SOCKS proxy. UDP forwarding is rejected. Each unit
 uses bounded packet and stream queues, and shutdown closes its active streams
-and stack before returning. The helper retains raw utun descriptors and all
+and stack before returning. The helper retains raw kernel device descriptors and all
 host networking state. Stelvio provides `stlv tunnel install`, `inspect`, `cleanup`,
 and `uninstall` for helper administration. Local builds use the verified
 `STLV_TRAFORO_DEV_BINARY` selection; they do not alter release pins or cache entries.
@@ -101,9 +104,10 @@ can certify as owned, and retains recovery evidence when ownership is uncertain.
 
 The protocol package and executable can be tested independently on supported Go
 hosts with `go test ./internal/protocol ./cmd/stelvio-traforo`. Forwarder and
-helper runtime tests use Darwin Unix sockets; helper tests also require cgo, the
-Apple SDK, and Clang. Runtime support is limited to macOS 15 or newer on
-`arm64` and `amd64`.
+helper runtime tests use Unix sockets. Darwin helper tests also require cgo, the
+Apple SDK, and Clang. Supported runtimes are macOS 15 or newer on `arm64` and
+`amd64`, and Debian 13 with systemd-resolved. Native Linux validation uses ARM64;
+AMD64 currently receives build validation.
 
 Run checks from this directory:
 
@@ -128,3 +132,32 @@ and host recovery acceptance require a later, separately authorized test step.
 The independent vectors in `internal/helper/testdata/independent_vectors.json`
 are shared test data. Keep their encoded bytes stable so Go and Python tests can
 check the same protocol and journal examples independently.
+
+## Debian 13 development
+
+See `scripts/debian/README.md` in the Stelvio monorepo for the Lima environment.
+The Linux helper lives in `internal/helper/linux`. It owns nonpersistent TUN
+interfaces, rtnetlink routes, separate dummy interfaces for per-VPC DNS views,
+and a Linux-specific durable journal. The forwarder and DNS relay remain ordinary
+user processes. Peer credentials, pidfds, process birth ticks, and boot identity
+fence the owner and its foreground parent. Raw TUN descriptors never leave the
+helper. Ambiguous resource ownership retains recovery evidence.
+
+The systemd service is `stelvio-traforo.service`. Its image is installed at
+`/usr/local/libexec/stelvio-traforo`, with durable state in
+`/var/lib/stelvio/tunnel` and a runtime socket in `/run/stelvio/tunnel`.
+Resolved integration uses its D-Bus API, route-only domains, and explicit relay
+ports. It does not replace `/etc/resolv.conf` or the uplink's DNS settings.
+
+Linux snapshots use `.goreleaser-linux.yml`, build ARM64 and AMD64 without cgo,
+and validate ELF structure, version, digest, and build provenance. ARM64 runtime
+acceptance is validated in Debian; native AMD64 acceptance is separate. The
+Darwin release configuration also cross-builds the Linux images. Linux Traforo
+release downloads remain unavailable until a release is published and pinned;
+use `STLV_TRAFORO_DEV_BINARY` for local development. The pinned Linux Session
+Manager plugin is verified from its official versioned Debian package without
+running its installer.
+
+Go tests, race checks, vet, lint, and the bounded fuzz targets run on Linux.
+Privileged host tests are explicitly selected with
+`--integration-linux-privileged -n 0`; ordinary test runs cannot enable them.
