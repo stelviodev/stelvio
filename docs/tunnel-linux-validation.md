@@ -5,7 +5,7 @@ reference environment is Debian 13 ARM64 with systemd 257 and systemd-resolved.
 The Mac worktree is the only writable shared directory. Branch changes and
 commits remain on macOS; the guest has separate Git metadata for provenance.
 
-The frozen functional candidate is `3cf4d1194f6b31ea6ab1b58bcce9f58a8836c5f7`,
+The initial frozen functional candidate is `3cf4d1194f6b31ea6ab1b58bcce9f58a8836c5f7`,
 on `feat/traforo-linux`, based on monitor commit
 `261cb68a62afcd39b7b1bb8334cd0d31df0f6612`. Later commits contain the developer
 sync workflow, script verification, and this record.
@@ -62,14 +62,14 @@ It contains the frozen source and observer, build provenance, both Linux images,
 wheel/sdist, JUnit XML, command logs, original-image restoration evidence,
 `report.md`, `report.json`, and `run.json`.
 
-The installed Linux image has SHA-256:
+The initial installed Linux image had SHA-256:
 
 ```text
 a03c06f280db58c7b8321684a36b3bcc749877a910469707f1e6ac2ee69780d7
 ```
 
 The stable developer copy is `/home/sebst.guest/src/traforo-linux`, with
-`traforo-linux.build.json` beside it. It reports
+`traforo-linux.build.json` beside it. The initial image reported
 `v0.0.7-dev+g3cf4d1194f6b`. The system copy is
 `/usr/local/libexec/stelvio-traforo`.
 
@@ -99,6 +99,71 @@ uv run stlv tunnel status
 ```
 
 Live AWS acceptance, native Linux AMD64 execution, other distributions/resolvers,
-and published Linux release downloads remain unvalidated. No AWS resources were
-deployed, credentials copied, releases published, branches pushed, or PRs opened.
-Linux CI is configured but has not run on GitHub because the branch is local.
+and published Linux release downloads remain unvalidated. During initial delivery,
+no AWS resources were deployed, credentials copied, releases published, branches
+pushed, or PRs opened. Linux CI is configured for PRs and has not run on GitHub.
+
+## Subsequent correctness and security review
+
+The reviewed functional candidate is
+`9fc8a01ce8e368ad6cfa96a06dec75f11eec4626`. It supersedes the initial candidate.
+The review examined peer credentials and pidfds, namespace checks, host-resource
+certificates, DNS configuration and repair, journals, and administration rollback.
+
+The review found and fixed these issues:
+
+- DNS repair trusted a saved interface index after link ownership changed. Every
+  repair now certifies the link name, type, index, and alias before D-Bus writes.
+- Periodic DNS checks missed foreign claims added after activation. Overlapping
+  claims now withdraw packet readiness; repair refuses them and preserves foreign
+  configuration. DNS server verification also requires the expected empty TLS name.
+- Compound shell assertions could bypass checks because `set -e` does not abort
+  on a failed nonfinal command in an `&&` chain. Ownership, type, symlink, and
+  absence checks now exit explicitly. ACL inspection errors propagate before
+  filtering, rather than being hidden by a successful pipeline tail.
+- Replacement stopped a service before certifying the installation receipt and
+  effective unit. It now checks image identity, unit digest, loaded fragment,
+  drop-ins, and enablement links first. The helper also refuses service overrides.
+- A failed first install could leave partial image, receipt, and service files.
+  Receipt-before-unit persistence now certifies rollback of partial installation.
+  Failed replacement restores the prior enabled and active states, including an
+  installation that was disabled and stopped.
+
+New native regressions exercise link ownership changes, a later foreign DNS
+claim, changed unit contents, a nonroot-owned unit, a service drop-in, partial
+first installation, and rollback of enabled/running and disabled/stopped services.
+Ordinary Go tests independently exercise kernel socket credentials, UID mismatch,
+pidfd birth identity, changed boot identity, and process exit.
+
+| Review validation | Result |
+| --- | --- |
+| Frozen interoperability | 65 passed |
+| Frozen privileged Debian suite | 17 passed |
+| Independent restoration audit | All registered host checks certified |
+| Ordinary Debian tunnel regressions | 899 passed; 22 opt-in tests skipped |
+| Affected macOS Python regressions | 76 passed |
+| Linux Go race, vet, and lint | Passed; zero lint issues |
+| Linux release-format ARM64/AMD64 images | Built and validated |
+| Ruff lint and formatting | Passed |
+| Interrupted-VM recovery and cold-boot smoke | Passed |
+
+The frozen run is retained at
+`/home/sebst.guest/.local/state/stelvio/traforo-acceptance/run-p0bdv4yk`.
+It reports `partial-passed` because only build, distribution, interoperability,
+and native stages were selected. Ordinary regressions and Go checks were run
+separately. Exploratory failed test runs remain recorded separately; the final
+frozen run has no failures or selected-test skips.
+
+The installed candidate and stable developer copy now have SHA-256:
+
+```text
+887ca3db6ccd452eb2f382df22438d6457322a50bfa5650089df0a42a22b019d
+```
+
+The image reports `v0.0.7-dev+g9fc8a01ce8e3`. Reboot evidence is under
+`/home/sebst.guest/.local/state/stelvio/reboot-proof-review-9fc8a01c`.
+Other review logs are under
+`/home/sebst.guest/.local/state/stelvio/linux-security-review-9fc8a01c`.
+Private Mac evidence is under `/private/tmp/traforo-linux-security-review`.
+The validated helper remains installed and idle. AWS and native AMD64 execution
+remain pending. No PR was opened.

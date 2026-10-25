@@ -39,6 +39,11 @@ required. The helper installs at `/usr/local/libexec/stelvio-traforo`, with
 its control socket under `/run/stelvio/tunnel`. Administration uses sudo.
 The CLI and forwarder must run as the ordinary user.
 
+The certified service does not support systemd drop-ins, including inherited
+`service.d` or `stelvio-.service.d` overrides. Administration refuses changed
+images, unit files, ownership, and foreign enablement links before stopping the
+service. Retain uncertain receipts and transaction directories for inspection.
+
 Native tests modify only the Debian guest. Run them serially. They use local
 SOCKS/DNS fixtures and do not deploy AWS resources. Keep uncertain recovery
 journals and test reports until cleanup has been independently checked.
