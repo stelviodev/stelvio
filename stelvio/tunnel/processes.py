@@ -170,6 +170,10 @@ def _linux_identity(pid: int) -> ProcessIdentity | None:
         if len(raw) > _MAX_PROC_STAT:
             raise RuntimeError("Linux process identity exceeds bounds")
         fields = raw[raw.rindex(") ") + 2 :].split()
+        # Match Darwin's live identity contract. Our unreaped child remains
+        # fenced independently through waitid(WNOWAIT), including its PGID.
+        if fields[0] == "Z":
+            return None
         uid = path.stat().st_uid
         ticks = int(fields[19])
         # Incorporate boot identity without reading token-bearing arguments.

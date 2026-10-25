@@ -39,7 +39,7 @@ def test_ssm_bootstrap_checks_availability_without_document_or_run_command(trans
     clients["ssm"].describe_instance_information.assert_called_once()
 
 
-@mark.skipif(sys.platform != "darwin", reason="requires the supported macOS host")
+@mark.skipif(sys.platform not in {"darwin", "linux"}, reason="requires a supported Unix host")
 def test_actual_child_birth_registration_finishes_before_shutdown_fence(  # noqa: PLR0915 - full concurrent child lifecycle
     transport_world, monkeypatch
 ):
@@ -120,7 +120,7 @@ def test_actual_child_birth_registration_finishes_before_shutdown_fence(  # noqa
         transport.close()
 
 
-@mark.skipif(sys.platform != "darwin", reason="requires the supported macOS host")
+@mark.skipif(sys.platform not in {"darwin", "linux"}, reason="requires a supported Unix host")
 def test_birth_identity_mismatch_refuses_to_signal_actual_child(transport_world, monkeypatch):
     transport = transport_world[0]
     child = subprocess.Popen(  # noqa: S603 - fixed owned child fixture
@@ -147,7 +147,7 @@ def test_birth_identity_mismatch_refuses_to_signal_actual_child(transport_world,
             transport.stop_local()
 
 
-@mark.skipif(sys.platform != "darwin", reason="requires the supported macOS host")
+@mark.skipif(sys.platform not in {"darwin", "linux"}, reason="requires a supported Unix host")
 def test_exited_leader_does_not_leave_its_term_ignoring_descendant(transport_world):
     transport = transport_world[0]
     script = """import subprocess,sys,time
@@ -492,8 +492,8 @@ def test_ssh_is_bound_to_ssm_target_and_isolated_known_hosts(ssh_world):
 
 
 @mark.skipif(
-    sys.platform != "darwin" or os.environ.get("STLV_TEST_SSH_INTEROP") != "1",
-    reason="set STLV_TEST_SSH_INTEROP=1 on macOS for local OpenSSH interoperability",
+    sys.platform not in {"darwin", "linux"} or os.environ.get("STLV_TEST_SSH_INTEROP") != "1",
+    reason="set STLV_TEST_SSH_INTEROP=1 on macOS or Linux for local OpenSSH interoperability",
 )
 def test_actual_openssh_first_trust_restart_mismatch_and_reset(  # noqa: PLR0915 - bounded local SSH lifecycle
     transport_world, tmp_path, monkeypatch

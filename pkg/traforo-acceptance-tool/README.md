@@ -309,3 +309,34 @@ ownership, deadlines, reporting, and recovery without changing host networking.
 Native and AWS orchestration must be accepted in a separate explicitly enabled
 run. This package's local tests do not establish native Intel, macOS 26, or AWS
 acceptance. See `VALIDATION.md` for the current implementation checks.
+
+
+## Debian 13
+
+The Linux adapter supports Debian 13 with systemd and systemd-resolved. Use the
+Lima setup in `scripts/debian/README.md`. Linux run directories default to a private
+directory below `~/.local/state/stelvio/traforo-acceptance`, so OpenSSH StrictModes
+can validate every ancestor. Provisioning removes group-write access from the
+known guest development and tool-state directories.
+
+The build stage validates ARM64 and AMD64 ELF images. ARM64 runs natively in the
+reference VM; native AMD64 validation remains separate. The native stage builds
+its failed-installation fixture before pytest, then runs the explicitly selected
+Linux suite serially. It checks DNS, packet forwarding, lifecycle, diagnostics,
+the terminal monitor, foreign-resource refusal, and installation rollback. The
+independent auditor uses Linux kernel, resolved, and systemd inventories.
+
+```sh
+traforo-acceptance run COMMIT --only native --yes
+traforo-acceptance run COMMIT --only interop
+```
+
+These commands do not select AWS stages. Local native acceptance does not need an
+AWS account. Unattended AWS stages still require `--expected-account`, verified
+against the selected profile. No Linux Traforo release pin is invented: runs use
+the validated local image through `STLV_TRAFORO_DEV_BINARY`.
+
+For an interrupted-VM proof, run `scripts/debian/reboot-proof.py prepare DIRECTORY`
+inside the dedicated guest, power-cycle the VM after its READY message, and run
+`verify DIRECTORY` after boot. Preparation deliberately stops the helper with a
+durable test journal. This proof must never run on an ordinary developer host.

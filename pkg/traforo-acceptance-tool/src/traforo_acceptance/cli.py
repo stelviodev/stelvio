@@ -65,7 +65,7 @@ def timeouts(values):
 @click.option("--expected-account")
 @click.option("--go", default="1.27.3", show_default=True)
 @click.option("--timeout", multiple=True, help="Override a stage deadline: STAGE=SECONDS.")
-@click.option("--yes", is_flag=True, help="Live execution also requires --expected-account.")
+@click.option("--yes", is_flag=True, help="AWS stages also require --expected-account.")
 @click.option("--dry-run", is_flag=True, help="Print the selected graph without creating a run.")
 def run(
     commit,

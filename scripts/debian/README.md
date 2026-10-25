@@ -43,3 +43,8 @@ journals and test reports until cleanup has been independently checked.
 
 The VM's tunnel applies to Linux applications inside the VM. Mac applications do
 not inherit the guest's routes or DNS configuration.
+
+
+For real OpenSSH interoperability outside the acceptance runner, use a private
+`--basetemp` directory under the guest home. OpenSSH rejects test keys beneath
+writable ancestors such as `/tmp`; do not relax StrictModes.
