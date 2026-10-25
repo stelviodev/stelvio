@@ -24,9 +24,12 @@ export PATH
 unset ENV BASH_ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH PYTHONPATH
 umask 077
 safe_dir() {{
- [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -c %u "$1")" = 0 ]
+ [ ! -L "$1" ] || exit 1
+ [ -d "$1" ] || exit 1
+ [ "$(stat -c %u "$1")" = 0 ] || exit 1
  mode=$(stat -c %a "$1"); [ $((0$mode & 022)) = 0 ]
- acl=$(getfacl -cp "$1" | sed '/^user::/d; /^group::/d; /^other::/d; /^$/d')
+ acl=$(getfacl -cp "$1")
+ acl=$(printf '%s\\n' "$acl" | sed '/^user::/d; /^group::/d; /^other::/d; /^$/d')
  [ -z "$acl" ]
 }}
 for d in /usr /usr/local /var /var/lib /run /etc /etc/systemd /etc/systemd/system; do
@@ -39,10 +42,13 @@ for d in $directories; do
  safe_dir "$d"
 done
 safe_file() {{
- [ ! -L "$1" ] && [ -f "$1" ]
- [ "$(stat -c %u "$1")" = 0 ] && [ "$(stat -c %h "$1")" = 1 ]
+ [ ! -L "$1" ] || exit 1
+ [ -f "$1" ] || exit 1
+ [ "$(stat -c %u "$1")" = 0 ] || exit 1
+ [ "$(stat -c %h "$1")" = 1 ] || exit 1
  mode=$(stat -c %a "$1"); [ $((0$mode & 022)) = 0 ]
- acl=$(getfacl -cp "$1" | sed '/^user::/d; /^group::/d; /^other::/d; /^$/d')
+ acl=$(getfacl -cp "$1")
+ acl=$(printf '%s\\n' "$acl" | sed '/^user::/d; /^group::/d; /^other::/d; /^$/d')
  [ -z "$acl" ]
 }}
 lock=/var/lib/stelvio/tunnel/bootstrap.lock
@@ -56,6 +62,60 @@ exec 8>"$gate"
 flock -n -x 8
 [ ! -e /var/lib/stelvio/tunnel/journal.json ]
 installed=/usr/local/libexec/stelvio-traforo
+service=/etc/systemd/system/stelvio-traforo.service
+receipt=/var/lib/stelvio/tunnel/installation.json
+# Unit drop-ins can change ExecStart/ExecStop without changing the certified
+# service file. Refuse both on-disk and currently loaded overrides.
+bases="/etc/systemd/system /run/systemd/system"
+bases="$bases /usr/local/lib/systemd/system /usr/lib/systemd/system"
+for base in $bases; do
+ for unit in service.d stelvio-.service.d stelvio-traforo.service.d; do
+  [ ! -e "$base/$unit" ] || exit 1
+  [ ! -L "$base/$unit" ] || exit 1
+ done
+done
+wants=/etc/systemd/system/multi-user.target.wants
+enabled_link="$wants/stelvio-traforo.service"
+if [ -e "$wants" ] || [ -L "$wants" ]; then safe_dir "$wants"; fi
+# Certify all existing installation resources before stopping any service.
+# Root ownership alone does not make an unrelated installation ours.
+verify_receipt() {{
+ safe_file "$receipt"
+ [ "$(wc -c < "$receipt")" -le 1024 ]
+ jq -e '.version == 1 and (.digest | test("^[0-9a-f]{{64}}$")) and
+  (.service_sha256 | test("^[0-9a-f]{{64}}$"))' "$receipt" >/dev/null
+ [ "$(sha256sum "$installed" | cut -d ' ' -f 1)" = "$(jq -r .digest "$receipt")" ]
+ [ "$(stat -c %d "$installed")" = "$(jq -r .device "$receipt")" ]
+ [ "$(stat -c %i "$installed")" = "$(jq -r .inode "$receipt")" ]
+}}
+had_image=no
+was_active=no
+was_enabled=disabled
+if [ -e "$installed" ] || [ -L "$installed" ]; then
+ safe_file "$installed"
+ safe_file "$service"
+ verify_receipt
+ [ "$(sha256sum "$service" | cut -d ' ' -f 1)" = "$(jq -r .service_sha256 "$receipt")" ]
+ [ "$(systemctl show -p FragmentPath --value stelvio-traforo.service)" = "$service" ]
+ [ -z "$(systemctl show -p DropInPaths --value stelvio-traforo.service)" ]
+ if [ -e "$enabled_link" ] || [ -L "$enabled_link" ]; then
+  [ -L "$enabled_link" ] || exit 1
+  [ "$(stat -c %u "$enabled_link")" = 0 ] || exit 1
+  [ "$(readlink -f "$enabled_link")" = "$service" ]
+ fi
+ if systemctl is-active --quiet stelvio-traforo.service; then was_active=yes; fi
+ was_enabled=$(systemctl is-enabled stelvio-traforo.service) || :
+ case "$was_enabled" in enabled|disabled) ;; *) exit 1;; esac
+ had_image=yes
+else
+ [ ! -e "$service" ] || exit 1
+ [ ! -L "$service" ] || exit 1
+ [ ! -e "$receipt" ] || exit 1
+ [ ! -L "$receipt" ] || exit 1
+ [ ! -e "$enabled_link" ] || exit 1
+ [ ! -L "$enabled_link" ] || exit 1
+ [ "$(systemctl show -p LoadState --value stelvio-traforo.service)" = not-found ]
+fi
 if [ {shlex.quote(operation)} = uninstall ]; then
  safe_file "$installed"
  [ "$(sha256sum "$installed" | cut -d ' ' -f 1)" = {shlex.quote(digest)} ]
@@ -63,11 +123,13 @@ if [ {shlex.quote(operation)} = uninstall ]; then
  exit
 fi
 retired=/usr/local/libexec/.stelvio-traforo.retired
-[ ! -e "$retired" ] && [ ! -L "$retired" ]
+[ ! -e "$retired" ] || exit 1
+[ ! -L "$retired" ] || exit 1
 stage=$(mktemp /usr/local/libexec/.stelvio-traforo.XXXXXXXX)
 backup=$(mktemp -d /var/lib/stelvio/tunnel/.transaction.XXXXXXXX)
 had_service=no
 had_receipt=no
+replaced=no
 if [ -e /etc/systemd/system/stelvio-traforo.service ]; then
  safe_file /etc/systemd/system/stelvio-traforo.service
  cp -p /etc/systemd/system/stelvio-traforo.service "$backup/service"
@@ -100,7 +162,33 @@ rollback() {{
    cp -p "$backup/receipt" /var/lib/stelvio/tunnel/installation.json
   fi
   systemctl daemon-reload
-  systemctl start stelvio-traforo.service
+  if [ "$was_enabled" = enabled ]; then
+   systemctl enable stelvio-traforo.service
+  else
+   systemctl disable stelvio-traforo.service
+  fi
+  if [ "$was_active" = yes ]; then systemctl start stelvio-traforo.service; fi
+ elif [ "$rc" != 0 ] && [ "$had_image" = no ] && [ "$replaced" = yes ]; then
+  safe_file "$installed"
+  [ "$(sha256sum "$installed" | cut -d ' ' -f 1)" = {shlex.quote(digest)} ]
+  # A partial first install has no retired image. Remove only resources
+  # certified by its new receipt; retain uncertain evidence on any mismatch.
+  if [ -e "$receipt" ] || [ -L "$receipt" ]; then
+   verify_receipt
+   if [ -e "$service" ] || [ -L "$service" ]; then
+    safe_file "$service"
+    [ "$(sha256sum "$service" | cut -d ' ' -f 1)" = "$(jq -r .service_sha256 "$receipt")" ]
+    systemctl disable --now stelvio-traforo.service
+    [ ! -e /var/lib/stelvio/tunnel/journal.json ]
+    rm "$service"
+   fi
+   rm "$receipt"
+  else
+   [ ! -e "$service" ] || exit 1
+   [ ! -L "$service" ] || exit 1
+  fi
+  rm "$installed"
+  systemctl daemon-reload
  fi
  remove_backup
  exit "$rc"
@@ -118,6 +206,7 @@ if [ -e "$installed" ] || [ -L "$installed" ]; then
  mv "$installed" "$retired"
 fi
 mv "$stage" "$installed"
+replaced=yes
 "$installed" helper install
 if [ -e "$retired" ]; then safe_file "$retired"; rm "$retired"; fi
 remove_backup

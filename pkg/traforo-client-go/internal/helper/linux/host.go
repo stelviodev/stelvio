@@ -212,6 +212,17 @@ func configureDNS(u Unit) error {
 	if len(u.Request.Resolvers) == 0 {
 		return nil
 	}
+	// A journaled index can be recycled or its link can lose our ownership
+	// marker. Never repair resolver settings using the index alone.
+	if u.DNSIndex <= 0 {
+		return errUncertain
+	}
+	if _, e := ownedLink(u.DNS, u.Alias, "dummy", u.DNSIndex); e != nil {
+		return e
+	}
+	if e := resolverConflict(u); e != nil {
+		return e
+	}
 	c, e := bus()
 	if e != nil {
 		return e
@@ -282,7 +293,7 @@ func verifyDNS(u Unit) error {
 	if e = get("DefaultRoute", &def); e != nil {
 		return e
 	}
-	if def || len(servers) != 1 || servers[0].Family != unix.AF_INET || !net.IP(servers[0].Address).Equal(net.IPv4(127, 0, 0, 1)) || servers[0].Port != u.Request.Resolvers[0].Port || len(ds) != len(u.Request.Resolvers) {
+	if def || len(servers) != 1 || servers[0].Family != unix.AF_INET || !net.IP(servers[0].Address).Equal(net.IPv4(127, 0, 0, 1)) || servers[0].Port != u.Request.Resolvers[0].Port || servers[0].Name != "" || len(ds) != len(u.Request.Resolvers) {
 		return errUncertain
 	}
 	for _, r := range u.Request.Resolvers {

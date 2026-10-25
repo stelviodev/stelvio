@@ -635,7 +635,14 @@ func (s *service) poll() {
 			if u.Phase != 2 && u.Phase != 4 {
 				continue
 			}
-			if e := verifyDNS(u); e != nil || restarted {
+			// Recheck foreign claims as well as our own link. resolved can route
+			// matching queries to several links when another administrator adds
+			// an overlapping domain after activation.
+			e := resolverConflict(u)
+			if e == nil {
+				e = verifyDNS(u)
+			}
+			if e != nil || restarted {
 				s.lastFailure = "resolver-configuration-lost"
 				s.state.Units[i].Phase = 3
 				if e = save(&s.state); e != nil {

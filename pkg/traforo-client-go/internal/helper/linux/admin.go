@@ -102,6 +102,9 @@ func installedReceipt() (installation, error) {
 	return r, nil
 }
 func verifyInstallation() error {
+	if e := refuseUnitOverrides(); e != nil {
+		return e
+	}
 	r, e := installedReceipt()
 	if e != nil {
 		return e
@@ -119,6 +122,17 @@ func verifyInstallation() error {
 	}
 	return nil
 }
+
+func refuseUnitOverrides() error {
+	for _, base := range []string{"/etc/systemd/system", "/run/systemd/system", "/usr/local/lib/systemd/system", "/usr/lib/systemd/system"} {
+		for _, name := range []string{"service.d", "stelvio-.service.d", "stelvio-traforo.service.d"} {
+			if _, e := os.Lstat(filepath.Join(base, name)); !errors.Is(e, os.ErrNotExist) {
+				return errUncertain
+			}
+		}
+	}
+	return nil
+}
 func systemctl(args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
@@ -131,6 +145,9 @@ func systemctl(args ...string) error {
 	return nil
 }
 func install() error {
+	if e := refuseUnitOverrides(); e != nil {
+		return e
+	}
 	exe, e := os.Executable()
 	if e != nil || exe != Installed {
 		return errors.New("install requires the checked system helper image")
@@ -176,9 +193,6 @@ func install() error {
 	} else if !errors.Is(e, os.ErrNotExist) {
 		return e
 	}
-	if e = atomicFile(servicePath, unitFile, 0644); e != nil {
-		return e
-	}
 	r, e := imageReceipt()
 	if e != nil {
 		return e
@@ -188,6 +202,11 @@ func install() error {
 		return e
 	}
 	if e = atomicFile(receiptPath, data, 0600); e != nil {
+		return e
+	}
+	// Persist the certificate before the unit: a failed first installation can
+	// then prove which partial service file is safe to remove during rollback.
+	if e = atomicFile(servicePath, unitFile, 0644); e != nil {
 		return e
 	}
 	if e = systemctl("daemon-reload"); e != nil {

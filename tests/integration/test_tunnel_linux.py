@@ -229,7 +229,8 @@ def test_linux_foreign_interface_is_never_adopted_or_deleted():
         )
 
 
-def test_linux_failed_replacement_restores_original_image_and_service():
+@pytest.mark.parametrize("running", [True, False])
+def test_linux_failed_replacement_restores_original_image_and_service(running):
     import os
     from pathlib import Path
 
@@ -240,8 +241,191 @@ def test_linux_failed_replacement_restores_original_image_and_service():
     image = Path(os.environ["STLV_TEST_TRAFORO_FAILED_INSTALL"])
     selection = select_traforo({"STLV_TRAFORO_DEV_BINARY": str(image)})
     before = installation._installed_digest()
-    with pytest.raises(HelperError, match="administration failed"):
-        authorize(bootstrap(image, selection.digest))
-    installation._wait_ready()
-    assert installation._installed_digest() == before
-    assert not NativeHelper().status().owned
+    if not running:
+        _privileged("/usr/bin/systemctl", "disable", "--now", "stelvio-traforo.service")
+    try:
+        with pytest.raises(HelperError, match="administration failed"):
+            authorize(bootstrap(image, selection.digest))
+        assert installation._installed_digest() == before
+        if running:
+            installation._wait_ready()
+            assert not NativeHelper().status().owned
+        else:
+            for command, expected in (("is-enabled", "disabled"), ("is-active", "inactive")):
+                result = subprocess.run(
+                    ["/usr/bin/systemctl", command, "stelvio-traforo.service"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                assert result.stdout.strip() == expected
+    finally:
+        if not running:
+            _privileged("/usr/bin/systemctl", "enable", "--now", "stelvio-traforo.service")
+            installation._wait_ready()
+
+
+def _privileged(*args):
+    return subprocess.run(["/usr/bin/sudo", *args], check=True, timeout=15)
+
+
+def _wait_retained(helper):
+    deadline = time.monotonic() + 10
+    while helper.status().units[0].status.name == "ACTIVE":
+        assert time.monotonic() < deadline, "Helper did not withdraw readiness"
+        time.sleep(0.1)
+    assert helper.status().units[0].status.name == "RETAINED"
+
+
+def test_linux_dns_repair_refuses_changed_link_ownership():
+    from .linux_host import resolver_ports
+
+    helper = NativeHelper()
+    session = str(uuid4())
+    name = "st" + session.replace("-", "")[:4] + "00000001d"
+    domain = uuid4().hex + ".test"
+    lease = helper.acquire(session)
+    alias = None
+    try:
+        lease.configure(
+            unit="00000001",
+            generation=1,
+            vpc_id="vpc-12345678",
+            cidrs=("10.254.9.0/24",),
+            resolvers=(ResolverEndpoint(domain, 65130),),
+        )
+        link = json.loads(
+            subprocess.check_output(
+                ["/usr/sbin/ip", "-j", "link", "show", name], text=True, timeout=5
+            )
+        )[0]
+        alias = link["ifalias"]
+        _privileged("/usr/sbin/ip", "link", "set", "dev", name, "alias", "foreign-test-owned")
+        _privileged("/usr/bin/resolvectl", "revert", name)
+        _wait_retained(helper)
+        # Exercise several repair polls. Saved ifindex must confer no authority.
+        time.sleep(2.2)
+        assert resolver_ports((domain,)) == {}
+    finally:
+        if alias is not None:
+            _privileged("/usr/sbin/ip", "link", "set", "dev", name, "alias", alias)
+        lease.close()
+
+
+def test_linux_new_foreign_dns_claim_withdraws_readiness():
+    helper = NativeHelper()
+    name = "foreign" + uuid4().hex[:7]
+    domain = uuid4().hex + ".test"
+    lease = helper.acquire(str(uuid4()))
+    foreign = False
+    try:
+        lease.configure(
+            unit="00000001",
+            generation=1,
+            vpc_id="vpc-12345678",
+            cidrs=("10.254.9.0/24",),
+            resolvers=(ResolverEndpoint(domain, 65130),),
+        )
+        _privileged("/usr/sbin/ip", "link", "add", name, "type", "dummy")
+        foreign = True
+        _privileged("/usr/sbin/ip", "address", "add", "192.0.2.240/32", "dev", name)
+        _privileged("/usr/sbin/ip", "link", "set", name, "up")
+        _privileged("/usr/bin/resolvectl", "dns", name, "127.0.0.1:65131")
+        _privileged("/usr/bin/resolvectl", "domain", name, "~child." + domain)
+        _wait_retained(helper)
+        # resolvectl can scope a loopback server to lo in Manager.DNSEx even
+        # though Domains belongs to this dummy link. Inspect the link itself.
+        assert "127.0.0.1:65131" in subprocess.check_output(
+            ["/usr/bin/resolvectl", "dns", name], text=True, timeout=5
+        )
+        assert "~child." + domain in subprocess.check_output(
+            ["/usr/bin/resolvectl", "domain", name], text=True, timeout=5
+        )
+        with pytest.raises(OSError, match=r"timed out|unreachable|refused"):
+            socket.create_connection(("10.254.9.19", 27017), timeout=0.2)
+    finally:
+        if foreign:
+            _privileged("/usr/sbin/ip", "link", "delete", name)
+        lease.close()
+
+
+def test_linux_failed_first_install_leaves_no_partial_install(tmp_path):
+    import os
+    from pathlib import Path
+
+    from stelvio.tunnel import installation
+    from stelvio.tunnel.assets import select_traforo
+    from stelvio.tunnel.linux_installation import authorize, bootstrap
+
+    original = tmp_path / "original-helper"
+    original.write_bytes(installation.INSTALLED_HELPER.read_bytes())
+    original.chmod(0o700)
+    before = installation._installed_digest()
+    failed = Path(os.environ["STLV_TEST_TRAFORO_FAILED_INSTALL"])
+    candidate = select_traforo({"STLV_TRAFORO_DEV_BINARY": str(failed)})
+    authorize(bootstrap(installation.INSTALLED_HELPER, before, remove=True))
+    try:
+        with pytest.raises(HelperError, match="administration failed"):
+            authorize(bootstrap(failed, candidate.digest))
+        for path in (
+            installation.INSTALLED_HELPER,
+            Path("/etc/systemd/system/stelvio-traforo.service"),
+            Path("/var/lib/stelvio/tunnel/installation.json"),
+        ):
+            assert not path.exists(), path
+            assert not path.is_symlink(), path
+    finally:
+        authorize(bootstrap(original, before))
+        installation._wait_ready()
+
+
+@pytest.mark.parametrize("change", ["unit", "drop-in", "owner"])
+def test_linux_changed_service_is_refused_before_stop(change):
+    import os
+    from pathlib import Path
+
+    from stelvio.tunnel import installation
+    from stelvio.tunnel.linux_installation import authorize, bootstrap
+
+    service = Path("/etc/systemd/system/stelvio-traforo.service")
+    original = service.read_text()
+    helper = NativeHelper()
+    pid = helper.diagnostics()["pid"]
+    override = service.with_name(service.name + ".d")
+    try:
+        target = service
+        content = original + "\n# foreign modification\n"
+        if change == "drop-in":
+            _privileged("/usr/bin/mkdir", str(override))
+            target = override / "foreign.conf"
+            content = "[Service]\nEnvironment=FOREIGN_TEST=1\n"
+        if change == "owner":
+            _privileged("/usr/bin/chown", str(os.getuid()), str(service))
+        else:
+            subprocess.run(
+                ["/usr/bin/sudo", "/usr/bin/tee", str(target)],
+                input=content,
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=5,
+            )
+        with pytest.raises(HelperError, match="administration failed"):
+            authorize(bootstrap(installation.INSTALLED_HELPER, installation._installed_digest()))
+        assert helper.diagnostics()["pid"] == pid
+    finally:
+        if change == "drop-in":
+            _privileged("/usr/bin/rm", str(override / "foreign.conf"))
+            _privileged("/usr/bin/rmdir", str(override))
+        elif change == "owner":
+            _privileged("/usr/bin/chown", "0:0", str(service))
+        else:
+            subprocess.run(
+                ["/usr/bin/sudo", "/usr/bin/tee", str(service)],
+                input=original,
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=5,
+            )
