@@ -1,0 +1,48 @@
+{
+	"name": "Stelvio.dev Demo",
+	"build": {
+		"dockerfile": "./Dockerfile",
+		"context": "..",
+		"cacheFrom": "type=registry,ref=ghcr.io/stelviodev/stelviodemocontainer:latest"
+	},
+	"features": {
+		// "ghcr.io/devcontainers/features/aws-cli:1": {},
+		// using devcontainer-community aws-cli extension to disable
+		// VSCode extension installation
+		"ghcr.io/devcontainer-community/devcontainer-features/aws-cli": {},
+		// gum is needed for the interactive-setup script
+		"ghcr.io/devcontainer-community/devcontainer-features/charmbracelet-gum:1": { "version": "0.17.0" }
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/workspaces/demo/stlv-demo/.venv/bin/python",
+				"python.languageServer": "Pylance",
+				"python.analysis.typeCheckingMode": "basic",
+				"terminal.integrated.automationProfile.linux": null,
+				// Prevent VS Code from auto-activating the Python environment,
+				// as this is handled in the interactive-setup script
+				"python.terminal.activateEnvironment": false,
+				// Force a dark theme when Codespaces / the container opens
+				"workbench.colorTheme": "Default Dark+",
+				// Disable auto-detection so the chosen theme stays dark
+				"window.autoDetectColorScheme": false
+			}
+		}
+	},
+	// disabled for now as we have example directly in repo.
+    // "postAttachCommand": "/bin/bash -c 'source .devcontainer/interactive-setup && exec bash'",
+	"containerEnv": {
+		"UV_LINK_MODE": "copy",
+		"UV_VENV_CLEAR": "0"
+	},
+	"remoteEnv": {
+		"STLV_DEBUG": "0",
+		"PYTHONDONTWRITEBYTECODE": "1",
+		"PULUMI_SKIP_UPDATE_CHECK": "true"
+	}
+}

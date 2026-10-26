@@ -37,6 +37,20 @@ Key areas of the codebase:
 - **`tests/`** — unit tests (Pulumi mocks, no AWS credentials needed)
 - **`tests/integration/`** — integration tests (deploy real AWS resources)
 - **`docs/`** — Zensical documentation site
+- **`pkg/demo/`** — source for the [demo repository](https://github.com/stelviodev/demo)
+
+Make demo changes in `pkg/demo` in this repository. Changes merged into `main` are
+automatically published to `stelviodev/demo` on `main` by the demo split workflow.
+Publication is one way: direct edits in the demo repository are not synced back.
+The demo is excluded from routine root Ruff checks, but should still comply with
+the root lint and formatting rules.
+
+To check the demo explicitly with the root rules, run:
+
+```bash
+uv run ruff check --config pyproject.toml --config 'exclude=[]' pkg/demo
+uv run ruff format --check --config pyproject.toml --config 'exclude=[]' pkg/demo
+```
 
 ## Development
 

@@ -91,7 +91,7 @@ required-version = ">=0.13.5"
 [tool.ruff]
 line-length = 99
 target-version = "py312"
-exclude = ['pulumi-tmpl', 'templates']
+exclude = ['pulumi-tmpl', 'templates', 'pkg/demo']
 
 # Configure linting
 [tool.ruff.lint]

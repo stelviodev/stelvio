@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+    ],
+    "unwantedRecommendations": [
+        "amazonwebservices.aws-toolkit-vscode",
+        "ms-azuretools.vscode-containers"
+    ]
+}

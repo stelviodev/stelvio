@@ -1,0 +1,247 @@
+#!/bin/bash
+# set -euo pipefail
+
+readonly TEMPLATES=("base")
+aws_ok=0
+stlv_ok=0
+
+
+stelvio_art() {
+    local art_lines=(
+        " ____  _       _       _       "
+        "/ ___|| |_ ___| |_   _(_) ___  "
+        "\\___ \\| __/ _ \\ \\ \\ / / |/ _ \\"
+        " ___) | ||  __/ |\\ V /| | (_) |"
+        "|____/ \\__\\___|_| \\_/ |_|\\___/ "
+    )
+
+    # Find max length
+    local max_len=0
+    for line in "${art_lines[@]}"; do
+        local len=${#line}
+        if [ $len -gt $max_len ]; then
+            max_len=$len
+        fi
+    done
+
+    # Normalize lines (pad with spaces)
+    local normalized_lines=()
+    for line in "${art_lines[@]}"; do
+        local padded_line="$line"
+        while [ ${#padded_line} -lt $max_len ]; do
+            padded_line="${padded_line} "
+        done
+        normalized_lines+=("$padded_line")
+    done
+
+    # ANSI color codes
+    local reveal_color="\033[1;38;5;45m"  # bold turquoise2
+    local cursor_color="\033[2;38;5;249m" # dim grey70
+    local reset="\033[0m"
+    local reveal_delay=0.03
+
+    # Reveal animation
+    for ((column=0; column<=max_len; column++)); do
+        # Clear screen and move cursor to top
+        printf "\033[2J\033[H"
+        
+        # Add 3 lines of padding at the top
+        printf "\n\n\n"
+        
+        for full_line in "${normalized_lines[@]}"; do
+            # Revealed part
+            local revealed="${full_line:0:$column}"
+            printf "${reveal_color}%s${reset}" "$revealed"
+            
+            # Cursor and remaining part
+            if [ $column -lt $max_len ]; then
+                printf "${cursor_color}_%s${reset}" "$(printf '%*s' $((max_len - column - 1)) '')"
+            else
+                printf '%*s' $((max_len - column)) ''
+            fi
+            printf "\n"
+        done
+        
+        if [ $column -eq $max_len ]; then
+            break
+        fi
+        sleep $reveal_delay
+    done
+
+    # Final display
+    printf "\033[2J\033[H"
+
+    # Add 3 lines of padding at the top
+    printf "\n\n\n"
+
+    for full_line in "${normalized_lines[@]}"; do
+        printf "${reveal_color}%s${reset}\n" "$full_line"
+    done
+}
+
+
+check_aws_auth() {
+    # Load env config to get credentials if available
+    source /workspaces/demo/.devcontainer/env-config.sh
+    
+    # set +e
+    aws sts get-caller-identity > /dev/null 2>&1
+    aws_sts_return_code=$?
+    # set -e
+    if [ $aws_sts_return_code -eq 0 ]; then
+        aws_ok=1
+    else
+        aws_ok=0
+    fi
+}
+
+check_stlv_app() {
+    if [ -f "stlv_app.py" ]; then
+        stlv_ok=1
+    else
+        stlv_ok=0
+    fi
+}
+
+prompt_aws() {
+        # New way:
+        unset AWS_SECRET_ACCESS_KEY
+        unset AWS_ACCESS_KEY_ID
+        aws login --remote
+
+        # Old way:
+        # export AWS_ACCESS_KEY_ID=$(aws configure get aws_access_key_id)
+        # export AWS_SECRET_ACCESS_KEY=$(aws configure get aws_secret_access_key)
+        # echo -e "\nPlease provide your AWS credentials to configure the AWS CLI.\n"
+        # echo -e "Visit $(gum style --foreground 45 'https://console.aws.amazon.com/iam/home?#/security_credentials') to get your Access Key, and Secret"
+        # echo -e "\n"
+        # echo -e "AWS Access Key ID"
+        # AWS_ACCESS_KEY_ID=$(gum input --placeholder "AWS_ACCESS_KEY_ID")
+        # echo -e "\nAWS Secret Access Key"
+        # AWS_SECRET_ACCESS_KEY=$(gum input --placeholder "AWS_SECRET_ACCESS_KEY")
+        # echo -e "\nDefault AWS Region (e.g., us-east-1)"
+        # AWS_DEFAULT_REGION=$(gum input --placeholder "What is your Default Region?" --value "us-east-1")
+        # gum spin --title "Configuring AWS CLI with provided credentials..." -- sleep 0.5
+        # aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+        # aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+        # export AWS_ACCESS_KEY_ID
+        # export AWS_SECRET_ACCESS_KEY
+}
+
+configure_aws() {
+    echo -e "AWS CLI is $(gum style --italic --foreground 99 'unauthenticated')\n"
+    echo -e "Configure now?"
+
+    configure_aws=$(gum choose  "Yes" "No")
+    if [ "$configure_aws" = "No" ]; then
+        clear; echo "One moment, please."
+        return
+    fi
+
+    clear; echo "One moment, please."
+    clear
+
+    gum spin --title "Configuring AWS CLI..." -- sleep 2.5
+    if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        echo -e "\nAWS credentials detected in environment variables.\n"
+        gum spin --title "Using provided AWS credentials to configure AWS CLI..." -- sleep 0.5
+        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+        if [ -n "${AWS_DEFAULT_REGION:-}" ]; then
+            aws configure set region "$AWS_DEFAULT_REGION"
+        fi
+    fi
+
+    check_aws_auth
+    prompt_number_of_attempts=0
+    while [ $aws_ok -ne 1 ]; do
+        if [ $prompt_number_of_attempts -ge 1 ]; then
+            echo -e "\n$(gum style --foreground 196 "Warning:") AWS authentication failed. Please try again.\n"
+        fi
+        prompt_aws
+        check_aws_auth
+        prompt_number_of_attempts=$((prompt_number_of_attempts + 1))
+        if [ $prompt_number_of_attempts -ge 3 ] && [ $aws_ok -ne 1 ]; then
+            echo -e "\n$(gum style --foreground 196 "Error:") Unable to authenticate with AWS after multiple attempts. Please check your credentials and try again later.\n"
+            sleep 2.5
+            break
+        fi
+    done
+
+}
+
+prompt_stelvio_template() {
+    echo -e "\nNo $(gum style --foreground 45 "stlv_app.py") found. Would you like to initialize a template?\n"
+    templates=$TEMPLATES
+    chosen_template=$(printf "%s\n" "${templates[@]}" | gum filter --placeholder "Type to search, or press ESC to add new")
+    if [ -z "$chosen_template" ]; then
+        chosen_template=$(gum input --placeholder "Enter your own value")
+    fi
+    gum spin --title "Initializing Stelvio app with the '${chosen_template}' template..." -- sleep 2.5
+    uvx --from stelvio stlv init --template "$chosen_template"
+}
+
+configure_stelvio() {
+    gum spin --title "Configuring Stelvio..." -- sleep 2.5
+
+    check_stlv_app
+    prompt_number_of_attempts=0
+    while [ $stlv_ok -ne 1 ]; do
+        if [ $prompt_number_of_attempts -ge 1 ]; then
+            echo -e "\n$(gum style --foreground 196 "Warning:") No $(gum style --foreground 45 "stlv_app.py") found. Please try again.\n"
+        fi
+        prompt_stelvio_template
+        check_stlv_app
+        prompt_number_of_attempts=$((prompt_number_of_attempts + 1))
+        if [ $prompt_number_of_attempts -ge 3 ] && [ $stlv_ok -ne 1 ]; then
+            echo -e "\n$(gum style --foreground 196 "Error:") Unable to initialize Stelvio app after multiple attempts. Please try again later.\n"
+            sleep 2.5
+            break
+        fi
+    done
+}
+
+main() {
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        echo -e "\n$(gum style --foreground 196 "Warning:") This script should be sourced to configure the environment correctly."
+        echo -e "Usage: source ${0}\n"
+        sleep 2
+    fi
+
+    stelvio_art
+    sleep 0.5
+    clear
+
+    gum spin --title "Welcome to $(gum style --foreground 45 "Stelvio")! We're getting your environment ready..." -- sleep 1.0
+
+    check_aws_auth
+
+    if [ $aws_ok -ne 1 ]; then
+        configure_aws
+    fi
+
+    clear
+
+    check_stlv_app
+    if [ $stlv_ok -ne 1 ]; then
+        configure_stelvio
+    fi
+
+    if [ $aws_ok -eq 1 ] && [ $stlv_ok -eq 1 ]; then
+        # Ensure env-config is sourced in bashrc for future sessions
+        if ! grep -q "env-config.sh" ~/.bashrc; then
+            echo "source /workspaces/demo/.devcontainer/env-config.sh" >> ~/.bashrc
+        fi
+
+        source /workspaces/demo/.devcontainer/env-config.sh
+        echo -e "\n\n"
+        echo -e "Thank you for choosing $(gum style --foreground 45 "Stelvio")!"
+        echo -e "You can now deploy your app with $(gum style --foreground 45 "stlv deploy")"
+        return 0 2>/dev/null || exit 0
+    else
+        echo -e "\n\n"
+        echo -e "$(gum style --foreground 196 "Setup incomplete.") Please rerun the setup script to complete the configuration."
+        return 1 2>/dev/null || exit 1
+    fi
+}
+main
