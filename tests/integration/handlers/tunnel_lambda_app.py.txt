@@ -1,0 +1,175 @@
+import json
+import os
+
+import pulumi
+import pulumi_aws as aws
+
+from stelvio import export_output
+from stelvio.app import StelvioApp
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import Vpc
+from stelvio.config import AwsConfig, StelvioAppConfig
+
+settings = SETTINGS_LITERAL
+app = StelvioApp(settings["app"])
+
+
+@app.config
+def config(env):
+    return StelvioAppConfig(
+        aws=AwsConfig(profile=os.environ["STLV_TEST_AWS_PROFILE"], region=settings["region"]),
+        environments=[settings["env"]],
+    )
+
+
+def relocate(octet):
+    def adjust(props):
+        return props | {"cidr_block": props["cidr_block"].replace("10.0.", f"10.{octet}.")}
+
+    return adjust
+
+
+def create_target(number, target):
+    vpc = Vpc(
+        f"net{number}",
+        az=1,
+        bastion={"dns_domains": [target["hostname"]]},
+        customize=dict.fromkeys(
+            ("vpc", "public_subnet", "private_subnet", "isolated_subnet"), relocate(252 - number)
+        ),
+    )
+    sg = aws.ec2.SecurityGroup(
+        f"api-endpoint{number}",
+        vpc_id=vpc.resources.vpc.id,
+        ingress=[
+            aws.ec2.SecurityGroupIngressArgs(
+                protocol="tcp",
+                from_port=443,
+                to_port=443,
+                security_groups=[vpc.resources.bastion_security_group.id],
+            )
+        ],
+        egress=[],
+    )
+    endpoint = aws.ec2.VpcEndpoint(
+        f"api-endpoint{number}",
+        vpc_id=vpc.resources.vpc.id,
+        service_name=f"com.amazonaws.{settings['region']}.execute-api",
+        vpc_endpoint_type="Interface",
+        ip_address_type="ipv4",
+        private_dns_enabled=True,
+        security_group_ids=[sg.id],
+        subnet_ids=[subnet.id for subnet in vpc.resources.private_subnets],
+    )
+    prefix = f"{settings['app']}-{settings['env']}"
+    backend_name = prefix + f"-echo{number}"
+    group = aws.cloudwatch.LogGroup(
+        f"echo-logs{number}", name="/aws/lambda/" + backend_name, retention_in_days=1
+    )
+    role = aws.iam.Role(
+        f"echo-role{number}",
+        name=prefix + f"-echo-role{number}",
+        assume_role_policy=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"Service": "lambda.amazonaws.com"},
+                        "Action": "sts:AssumeRole",
+                    }
+                ],
+            }
+        ),
+    )
+    policy = aws.iam.RolePolicy(
+        f"echo-logs{number}",
+        role=role.id,
+        policy=group.arn.apply(
+            lambda arn: json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+                            "Resource": arn + ":*",
+                        }
+                    ],
+                }
+            )
+        ),
+    )
+    source = """import json, hashlib, base64, os
+
+def handler(event, context):
+    body = event.get('body') or '{}'
+    if event.get('isBase64Encoded'):
+        body = base64.b64decode(body).decode()
+    value = json.loads(body)
+    return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'backend': os.environ['PROOF_APP'], 'nonce': value['nonce'],
+            'sha256': hashlib.sha256(value['payload'].encode()).hexdigest()})}
+"""
+    backend = aws.lambda_.Function(
+        f"echo{number}",
+        name=backend_name,
+        role=role.arn,
+        runtime="python3.12",
+        handler="echo.handler",
+        timeout=10,
+        code=pulumi.AssetArchive({"echo.py": pulumi.StringAsset(source)}),
+        environment={"variables": {"PROOF_APP": f"{settings['app']}:net{number}"}},
+        opts=pulumi.ResourceOptions(depends_on=[policy]),
+    )
+    aws.lambda_.Permission(
+        f"api-invoke{number}",
+        action="lambda:InvokeFunction",
+        function=backend.name,
+        principal="apigateway.amazonaws.com",
+        source_account=settings["account"],
+        source_arn=f"arn:aws:execute-api:{settings['region']}:{settings['account']}:{target['api_id']}/*/POST/",
+    )
+    client = Function(
+        f"client{number}",
+        handler="handlers/probe.handler",
+        vpc=vpc,
+        url="public",
+        timeout=30,
+        environment={"PRIVATE_API_URL": target["api_url"], "TUNNEL_VPC": str(number)},
+    )
+    export_output(f"function{number}_name", client.resources.function.name)
+    export_output(f"function{number}_url", client.url)
+    export_output(f"bastion{number}_id", vpc.resources.bastion.id)
+    export_output(f"endpoint{number}_id", endpoint.id)
+    export_output(f"backend{number}_name", backend.name)
+    export_output(f"backend{number}_arn", backend.arn)
+
+
+@app.run
+def run():
+    for number, target in enumerate(settings["targets"], start=1):
+        create_target(number, target)
+    create_plain_clients()
+
+
+def create_plain_clients():
+    disabled = Vpc(
+        "net3",
+        az=1,
+        bastion=False,
+        customize=dict.fromkeys(
+            ("vpc", "public_subnet", "private_subnet", "isolated_subnet"), relocate(249)
+        ),
+    )
+    for number, vpc in ((3, disabled), (4, None)):
+        client = Function(
+            f"client{number}",
+            handler="handlers/probe.handler",
+            vpc=vpc,
+            url="public",
+            timeout=30,
+            environment={"TUNNEL_VPC": str(number), "PROOF_APP": settings["app"]},
+        )
+        export_output(f"function{number}_name", client.resources.function.name)
+        export_output(f"function{number}_url", client.url)

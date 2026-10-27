@@ -607,3 +607,125 @@ The pinned v0.0.7 image does not support statistics. A compatible image reports 
 capability in the existing ready handshake. Old images continue forwarding; the
 report marks missing diagnostics unavailable and uses legacy helper status where
 possible. Publishing and pinning a new release is a separate step.
+
+## AWS networking acceptance with private Lambda APIs
+
+Use the Lambda suite for AWS networking acceptance without waiting for DocumentDB
+clusters. It covers two independent VPCs, private HTTPS and DNS, partial failure,
+reconnection, invocation admission, and host-key rejection. Add the existing
+non-VPC test to complete the AWS networking command below. Keep Go unit/race and
+native host/installation tests as separate gates. Run DocumentDB acceptance when
+checking the production resource-discovery/readiness path, exact endpoint/member
+DNS ownership, database TLS, replica members, authentication, and read/write
+behavior; the Lambda suite does not replace these service-specific checks.
+
+```bash
+# Build locally; this command does not install the helper.
+GOTOOLCHAIN=go1.27.3 uv run python pkg/traforo-client-go/scripts/build.py --build-only
+# Use the exact export printed by the builder in this shell.
+export STLV_TRAFORO_DEV_BINARY=/absolute/path/printed/by/the/builder
+
+export STLV_TEST_AWS_PROFILE=default
+export STLV_TEST_AWS_REGION=us-east-1
+export STLV_TEST_TUNNEL_AWS_ACCOUNT=<verified-account-id>
+uv run pytest tests/integration/test_tunnel_lambda.py \
+  tests/integration/test_tunnel.py::test_non_vpc_actual_dev_runs_without_installed_helper \
+  --integration-macos-privileged --integration-tunnel -n 0 -vv
+```
+
+Use an ordinary-user macOS 15+ host with no live tunnel or uncertain helper state.
+Authorize helper administration when macOS requests it. The exclusive-host fixture
+preserves the original installation, installs the selected image, and restores the
+helper and independently checked network baseline afterward. The private Session
+Manager plugin must pass the normal version checks. No Traforo release download
+is needed with the developer override. `run_all.sh` never runs this suite.
+
+Seven Lambda tests share one disposable application. Two managed VPCs each have
+their own bastion, private API Gateway REST API, IPv4 interface endpoint, Lambda backend,
+and VPC-attached client Function. A third VPC has `bastion=False` and a plain
+client Function; a fourth client Function has no VPC attachment. The plain clients
+perform no private API request. All four clients use local invocation evidence to
+prove that the bridge ran the handler on the laptop. The backends have no VPC
+attachment or public URL. Each endpoint admits HTTPS from only its owning bastion security group, and
+each API policy restricts requests to its own endpoint. The API-ID hostname is a
+configured DNS domain for that VPC. Backend identity includes the VPC number.
+
+Standalone requests follow host DNS and utun through Traforo, SSH and Session
+Manager to the private endpoint. The dev tests invoke each client's public Function
+URL, then prove that its local handler called the correct private API. The public
+URL alone is not evidence of a tunnel. Requests use normal HTTPS hostname and
+certificate checks, fresh connections, and no environment HTTP proxy.
+
+Assertions check simultaneous requests, exact endpoint private addresses, distinct
+subnet routes/interfaces, distinct DNS listener ports, nonces, and payload digests.
+Each DNS listener must refuse the other VPC's hostname with `REFUSED`. Both private
+APIs must be unreachable without their tunnels. The APIs are custom-domain
+targets, so the tests explicitly probe them after CLI readiness. Initial target
+connection failures have a 90-second readiness budget; a wrong backend identity
+or payload fails immediately.
+
+The standalone fault test stops the first proof-owned bastion. The dev fault test
+stops the second, reversing the healthy and failed roles. Both require:
+
+- The failed unit retains its DNS listener and returns `SERVFAIL` for its own name.
+- Fresh HTTPS requests through the healthy peer still return its own backend data.
+- The healthy unit's generation and SSM session stay unchanged.
+- The dev bridge rejects failed-VPC invocations with `VpcUnavailableError` before
+  handler import or entry, while healthy-VPC invocations keep working.
+- The disabled-bastion and non-VPC clients keep returning fresh nonces from local
+  handlers in the same dev process. The disabled VPC emits exactly one startup
+  warning and never acquires a managed network unit.
+- Restart restores access with a fresh failed-unit generation, the same DNS ports,
+  unchanged SSH pins, and no replacement application infrastructure.
+
+Fault cleanup restarts only the verified proof bastion, including after an assertion
+fails. A separate test changes a proof bastion's host key, checks rejection and
+peer availability, confirms a new runtime cannot replace the pin, restores the
+original key, and requires a fresh session for recovery. Both unrelated plain
+clients must keep working during the host-key failure, including in a new dev
+runtime. A separate standalone test makes two startup attempts with the changed
+key. Each must exit with status 1, name the instance and trust-reset command, and
+never print `Network READY`. It checks unchanged pins and deployment state,
+empty helper state, no resolver files, and no active owned SSM sessions. After
+restoring the key, a fresh command must connect successfully. These tests use the
+existing bounded SSM fault fixture and never reset trust to accept the changed key.
+
+A separate dev lifecycle test invokes both private APIs and both plain clients,
+kills the actual `stlv dev` command with SIGKILL, and certifies host and transport
+cleanup. It starts dev again, invokes all four clients, verifies unchanged SSH
+pins, and checks graceful shutdown. The standalone SIGKILL test remains separate.
+
+The suite also checks ordinary transport termination, SIGINT, terminated owned
+SSM sessions, unchanged standalone deployment state, and retained deployment-
+owned bastions. Dev Ctrl+C can return Click's abort status (1), while standalone
+Ctrl+C must return 0. Both must meet the shutdown limit and certify cleanup.
+
+The AWS identity needs ordinary tunnel deployment permissions, plus API Gateway
+REST API administration, VPC interface endpoints, Lambda integration permissions,
+log/IAM administration, proof-owned EC2 stop/start, and SSM Run Command for the key
+fault. The account is checked before resource creation. The fixture saves each
+exact API ID before application deployment, verifies ownership before deletion,
+and audits API and endpoint absence independently. One missing endpoint must not
+hide a surviving peer. Quota-limited API create, deploy, and delete calls retry explicit throttle
+responses with bounded backoff; unknown mutation outcomes are not retried. See the
+[AWS management quotas](https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html).
+
+Costs include two running bastions, two interface endpoints, API calls, Lambda,
+and logs until teardown finishes. The suite removes DocumentDB delays; VPC-attached
+client Functions can still delay Lambda interface cleanup. Both bastions remain
+after normal tunnel exit and are removed only by application teardown.
+
+Keep the pytest temporary directory after failures. It contains each
+`private-api-<number>.json`, `lambda-acceptance.json` (API IDs, endpoint IDs, volume
+IDs, and deployment/exercise/teardown durations), per-test CLI logs, SSM cleanup
+receipts, and host baseline/restoration evidence. Cleanup or audit failures fail
+acceptance. Record each run's commit, platform, binary digest, plugin version,
+results, durations, skips, and certified cleanup. Do not infer a pass from
+collection or a prior candidate. Generated state can contain secrets; keep full
+evidence private.
+
+The fixture's non-AWS checks run with:
+
+```bash
+uv run pytest tests/tunnel/test_lambda_acceptance_fixture.py -q
+```
