@@ -3,6 +3,8 @@ import multiprocessing
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import Mock
 
 from click.testing import CliRunner, Result
 from pytest import mark, raises
@@ -245,6 +247,47 @@ def test_ci_requires_explicit_environment_for_diff_json(cli, monkeypatch) -> Non
         env=None,
         message="Environment is required in CI. Pass an explicit env like 'stlv diff prod'.",
     )
+
+
+def test_default_env_is_the_cleaned_os_username_and_is_saved(cli, monkeypatch) -> None:
+    saved: list[str] = []
+    monkeypatch.setattr(cli, "get_user_env", lambda: None)
+    monkeypatch.setattr(cli, "save_user_env", saved.append)
+    monkeypatch.setattr("getpass.getuser", lambda: "_José.Doe__x-")
+
+    result = CliRunner().invoke(cli.outputs, [])
+
+    assert result.exit_code == 0
+    assert saved == ["jose-doe-x"]
+    cli.run_outputs.assert_called_once_with("jose-doe-x", json_output=False)
+
+
+def test_saved_user_env_is_used_as_is(cli, monkeypatch) -> None:
+    monkeypatch.setattr(cli, "get_user_env", lambda: "John.Doe")
+    monkeypatch.setattr("getpass.getuser", Mock(side_effect=AssertionError("not called")))
+
+    CliRunner().invoke(cli.outputs, [])
+
+    cli.run_outputs.assert_called_once_with("John.Doe", json_output=False)
+
+
+def test_os_username_with_no_usable_chars_is_a_usage_error(cli, monkeypatch) -> None:
+    save = Mock()
+    monkeypatch.setattr(cli, "get_user_env", lambda: None)
+    monkeypatch.setattr(cli, "save_user_env", save)
+    monkeypatch.setattr(cli, "get_dot_stelvio_dir", lambda: Path("/work/app/.stelvio"))
+    monkeypatch.setattr("getpass.getuser", lambda: "_.ß")
+
+    result = CliRunner().invoke(cli.outputs, ["--json"])
+
+    _assert_usage_error(
+        result,
+        operation="outputs",
+        env=None,
+        message="Can't make an environment name from the OS username '_.ß'. Set one with: "
+        'mkdir -p /work/app/.stelvio && echo "<name>" > /work/app/.stelvio/userenv',
+    )
+    save.assert_not_called()
 
 
 def _run_cli_with_a_stuck_pool_worker(argv: list[str]) -> None:

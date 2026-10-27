@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 from functools import cache
 from pathlib import Path
 
@@ -61,3 +63,14 @@ def get_user_env() -> str | None:
 
 def save_user_env(env: str) -> None:
     _write_metadata_file("userenv", env)
+
+
+def clean_name(raw: str) -> str:
+    """Lowercase, each run of other chars becomes one '-'. For names the user never typed.
+
+    The app and env lead every AWS name, and S3, Lambda and DocumentDB each reject a char the
+    others accept, so only letters, digits and '-' are safe everywhere. NFKD first keeps the
+    base letter of an accented one: `José` becomes `jose`, not `jos`.
+    """
+    ascii_name = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
