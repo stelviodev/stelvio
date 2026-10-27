@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import select
+import socket
 import subprocess
 import time
 from contextlib import contextmanager
@@ -12,7 +13,6 @@ from threading import Lock
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import socket
     from collections.abc import Iterator
     from pathlib import Path
 
@@ -50,17 +50,32 @@ class Forwarding:
             raise RuntimeError("Forwarding must run without root privileges")
         self._lock = Lock()
         self._next_id = 0
-        self.process = subprocess.Popen(  # noqa: S603 - verified packaged nonroot artifact
-            [str(binary), "forwarder", str(carrier.fileno())],
-            pass_fds=(carrier.fileno(),),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
+        self._diagnostics_lock = Lock()
+        self._diagnostics, diagnostics_child = socket.socketpair()
+        environment = dict(os.environ, STLV_TRAFORO_DIAGNOSTICS_FD=str(diagnostics_child.fileno()))
+        try:
+            self.process = subprocess.Popen(  # noqa: S603 - verified packaged nonroot artifact
+                [str(binary), "forwarder", str(carrier.fileno())],
+                pass_fds=(carrier.fileno(), diagnostics_child.fileno()),
+                env=environment,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+        except BaseException:
+            self._diagnostics.close()
+            raise
+        finally:
+            diagnostics_child.close()
+        self._diagnostics.settimeout(0.5)
         try:
             hello = self._reply()
             if hello.get("version") != CONTROL_VERSION or hello.get("status") != "ready":
                 raise RuntimeError("Nonroot forwarder failed to start")  # noqa: TRY301
+            support = hello.get("diagnostics")
+            self._diagnostics_supported = type(support) is int and support == 1
+            if not self._diagnostics_supported:
+                self._diagnostics.close()
         except BaseException:
             self.close()
             raise
@@ -232,10 +247,31 @@ class Forwarding:
             )
         )
 
+    def diagnostics(self) -> dict:
+        if not self._diagnostics_supported:
+            raise NotImplementedError("Forwarder statistics are unsupported by this image")
+        from stelvio.tunnel.diagnostics.protocol import (  # noqa: PLC0415
+            SOURCE_LIMIT,
+            receive,
+            request,
+            send,
+            validate_snapshot,
+        )
+
+        with self._diagnostics_lock:
+            try:
+                self._diagnostics.settimeout(0.5)
+                send(self._diagnostics, request(), SOURCE_LIMIT)
+                return validate_snapshot(receive(self._diagnostics, SOURCE_LIMIT))
+            except (OSError, EOFError, ValueError, TypeError):
+                self._diagnostics.close()
+                raise
+
     def healthy(self) -> bool:
         return self.process.poll() is None
 
     def close(self) -> None:
+        self._diagnostics.close()
         if self.process.stdin:
             self.process.stdin.close()
         try:

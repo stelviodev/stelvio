@@ -129,6 +129,14 @@ You have three options:
 
 ### Native VPC helper issues
 
+Use `stlv tunnel diagnose` to inspect local state in tables, or
+`stlv tunnel diagnose --json` to get the same parsed data in JSON report schema
+version 2. Interfaces, routes, DNS, proxy settings, and service state are records,
+not command-output strings. All collected rows appear in the human report.
+An unavailable source or parse warning does not discard healthy sections.
+An `incomplete` result can contain valid records but is not a complete view of
+that source. The report does not include raw text when parsing fails.
+
 The `stlv tunnel` administration commands run on macOS. `install` requires macOS
 15 or later and asks for administrator authorization. Run Stelvio as your normal
 user; only the helper runs with elevated privileges.
@@ -258,3 +266,24 @@ If you're still stuck:
     - The error message
     - Relevant logs (with sensitive data removed)
 5. Get in touch with us at [@stelviodev](http://x.com/stelviodev) on X (Twitter) or [@michal_stlv](http://x.com/michal_stlv) or [@bascodes](http://x.com/bascodes)
+
+
+### Collect a local tunnel report
+
+Run `stlv tunnel diagnose` for a formatted report, or use `stlv tunnel diagnose
+--json` to save the same data as JSON. It works without a project or active tunnel.
+The report includes helper ownership, session readiness, bounded events,
+interfaces, routing and resolver configuration, sanitized proxy settings, known
+process identities, and supported traffic/DNS/TCP counters.
+
+Check each source's status and age. Unavailable statistics are not zero traffic,
+and an active interface does not prove database readiness. Overlap findings show
+observed routes and interfaces; they do not establish the cause by themselves.
+In particular, a foreign route covering the helper's `192.0.2.x` interface
+addresses can stop setup even when the selected VPC subnets do not overlap.
+
+The command does not repair networking, request elevation, or contact AWS. Local
+reports retain network addresses and resource identities but exclude credentials,
+private keys, tokens, environment values, capabilities, and arbitrary logs.
+Review a report before sharing it. Use the normal installation or cleanup
+commands only after you understand the reported condition.

@@ -17,6 +17,8 @@ from botocore.exceptions import ClientError, HTTPClientError
 
 from stelvio.tunnel.aws_inventory import resolve_vpc_network
 from stelvio.tunnel.credentials import AWS_IO, AwsExecutionContext
+from stelvio.tunnel.diagnostics.protocol import timestamp
+from stelvio.tunnel.diagnostics.runtime import Events, RuntimeDiagnostics
 from stelvio.tunnel.discovery import ResourceDiscovery
 from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
 from stelvio.tunnel.helper_client import NativeHelper
@@ -151,6 +153,9 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
         captured = contexts[network.provider]
         if captured.account != network.account or captured.region != network.region:
             raise ValueError("VPC provider/account/region differs from captured context")
+    started_at = timestamp()
+    started_monotonic = time.monotonic()
+    diagnostics_events = Events()
     stop = Event()
     lock = Lock()
     sdk_lock = Lock()
@@ -229,6 +234,7 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                         lease,
                         forwarding,
                         discovery,
+                        diagnostics_events=diagnostics_events,
                         inventory_check=confirm_inventory,
                         inventory_terminal=release_inventory,
                     )
@@ -355,6 +361,39 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             with suppress(OSError):
                 control.shutdown(socket.SHUT_RDWR)
 
+        def diagnostic_state() -> dict:
+            from stelvio.tunnel.wire import session_to_wire  # noqa: PLC0415
+
+            with lock:
+                current_workers = tuple(workers)
+                current_snapshots = dict(snapshots)
+            value = session_to_wire(description)
+            current = {identity: asdict(status) for identity, status in current_snapshots.items()}
+            current.update(
+                {worker.network.identity: worker.diagnostics() for worker in current_workers}
+            )
+            value.update(
+                started_at=started_at,
+                age_seconds=time.monotonic() - started_monotonic,
+                runtime_pid=os.getpid(),
+                forwarder_pid=forwarding.process.pid,
+                vpcs=list(current.values()),
+            )
+            return value
+
+        diagnostic_service = RuntimeDiagnostics(
+            description.session_id,
+            diagnostic_state,
+            {"helper": NativeHelper(timeout=0.5).diagnostics, "forwarder": forwarding.diagnostics},
+            diagnostics_events,
+        )
+        try:
+            diagnostic_service.start()
+        except (OSError, ValueError):
+            diagnostic_service.close()
+        scope.callback(diagnostic_service.close)
+        diagnostics_events.append("session-starting")
+
         Thread(target=orphaned, daemon=True, name="stelvio-network-owner").start()
         preparer = Thread(target=prepare, name="stelvio-network-inventory")
         preparer.start()
@@ -377,6 +416,7 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
         except (EOFError, OSError):
             pass
         finally:
+            diagnostic_service.close()
             stop.set()
             with lock:
                 owned = tuple(workers)

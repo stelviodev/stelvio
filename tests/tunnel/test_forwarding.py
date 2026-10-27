@@ -250,3 +250,11 @@ def test_empty_destination_set_never_writes_forwarder_control():
     with raises(ValueError, match="no private or isolated"):
         forwarding.add("00000001", 1, 1, SimpleNamespace(route_cidrs=()), 12000)
     forwarding._command.assert_not_called()
+
+
+def test_older_forwarder_without_statistics_keeps_mutation_control(control_peer):
+    with closing(control_peer("ok")) as forwarding:
+        with raises(NotImplementedError, match="unsupported"):
+            forwarding.diagnostics()
+        forwarding.remove("00000001", 1, 1)
+        assert forwarding.healthy()

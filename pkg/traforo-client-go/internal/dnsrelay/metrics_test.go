@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnsutil"
 )
 
 func TestMetricsInitializesForZeroValueRelay(t *testing.T) {
@@ -42,5 +43,51 @@ func TestMetricsSurviveRelayReplacement(t *testing.T) {
 	}
 	if second.metrics != metrics || metrics.UDP.Load() != 2 || metrics.Responses[dns.RcodeRefused].Load() != 2 {
 		t.Fatal(metrics.Snapshot())
+	}
+}
+
+func TestMetricsRecordRefusedQueriesWithoutQueryHistory(t *testing.T) {
+	relay := &Relay{}
+	query := new(dns.Msg)
+	dnsutil.SetQuestion(query, "outside.example.", dns.TypeA)
+	wire, err := packDNS(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := relay.Answer(wire, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if relay.metrics.UDP.Load() != 3 || relay.metrics.Responses[dns.RcodeRefused].Load() != 3 || relay.metrics.Active.Load() != 0 {
+		t.Fatal(relay.metrics.Snapshot())
+	}
+	relay.metrics.duration(12)
+	relay.metrics.duration(4)
+	if relay.metrics.DurationNS.Load() != 16 || relay.metrics.MaximumNS.Load() != 12 || relay.metrics.Exchanges.Load() != 2 {
+		t.Fatal(relay.metrics.Snapshot())
+	}
+}
+
+func TestDiagnosticsUpstreamGateTracksRejectAndActivate(t *testing.T) {
+	relay, err := New(config("127.0.0.1:1080", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+	if !relay.UpstreamEnabled() {
+		t.Fatal("configured upstream disabled")
+	}
+	if err = relay.Reject(1); err != nil {
+		t.Fatal(err)
+	}
+	if relay.UpstreamEnabled() {
+		t.Fatal("rejected upstream reported enabled")
+	}
+	if err = relay.Activate(config("127.0.0.1:1080", 2)); err != nil {
+		t.Fatal(err)
+	}
+	if !relay.UpstreamEnabled() {
+		t.Fatal("reactivated upstream disabled")
 	}
 }
