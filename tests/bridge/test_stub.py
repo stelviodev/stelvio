@@ -627,6 +627,12 @@ def test_publishes_correct_request_message(
 ):
     """Should publish invocation with correct message format."""
     stub = reset_global_state
+    lambda_env = {
+        "AWS_LAMBDA_FUNCTION_NAME": "test-app-dev-test-function",
+        "AWS_LAMBDA_FUNCTION_VERSION": "$LATEST",
+        "AWS_LAMBDA_LOG_GROUP_NAME": "/aws/lambda/test-app-dev-test-function",
+        "AWS_LAMBDA_LOG_STREAM_NAME": "2026/10/27/[$LATEST]abc",
+    }
 
     mock_ws = AsyncMock()
     mock_get_connection.return_value = (mock_ws, True)
@@ -642,7 +648,8 @@ def test_publishes_correct_request_message(
     context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789:function:test"
     context.tenant_id = None
 
-    _run(stub.async_handler(event, context))
+    with patch.dict("os.environ", lambda_env):
+        _run(stub.async_handler(event, context))
 
     # Verify publish was called with correct channel and message
     mock_publish.assert_called_once()
@@ -658,6 +665,7 @@ def test_publishes_correct_request_message(
         "invoke_id": "req-123",
         "endpointId": "test_endpoint_id",
         "functionName": "test_function",
+        "lambdaEnv": lambda_env,
         "event": event,
         "context": {
             "invoke_id": "req-123",

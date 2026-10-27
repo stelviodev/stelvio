@@ -252,6 +252,17 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         "invoke_id": getattr(context, "aws_request_id", None),
         "endpointId": ENDPOINT_ID,
         "functionName": FUNCTION_NAME,
+        # The local handler sees the deployed function's values, as in a real invocation
+        "lambdaEnv": {
+            key: os.environ[key]
+            for key in (
+                "AWS_LAMBDA_FUNCTION_NAME",
+                "AWS_LAMBDA_FUNCTION_VERSION",
+                "AWS_LAMBDA_LOG_GROUP_NAME",
+                "AWS_LAMBDA_LOG_STREAM_NAME",
+            )
+            if key in os.environ
+        },
         "event": event,
         "context": {
             "invoke_id": getattr(context, "aws_request_id", None),
