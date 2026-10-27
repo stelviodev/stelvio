@@ -112,16 +112,19 @@ class Layer(Component[LayerResources, LayerCustomizationDict]):
         # TODO: validate arch and runtime values
 
     def _validate_requirements(self) -> None:
-        if not self._config.requirements:
+        requirements = self._config.requirements
+        if isinstance(requirements, str) and not requirements.strip():
+            raise ValueError("If 'requirements' is a string (path), it cannot be empty.")
+        if not requirements:
             return
 
-        if isinstance(self._config.requirements, list):
-            if not all(isinstance(item, str) for item in self._config.requirements):
+        if isinstance(requirements, list):
+            if not all(isinstance(item, str) for item in requirements):
                 raise TypeError("If 'requirements' is a list, all its elements must be strings.")
-        elif not isinstance(self._config.requirements, str):
+        elif not isinstance(requirements, str):
             raise TypeError(
                 f"'requirements' must be a string (path), list of strings, or None. "
-                f"Got type: {type(self._config.requirements).__name__}."
+                f"Got type: {type(requirements).__name__}."
             )
 
     @property
