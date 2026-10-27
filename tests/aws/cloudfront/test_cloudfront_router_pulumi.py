@@ -2,6 +2,7 @@ import pulumi
 from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import HttpApi, RestApi
+from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.function import Function
@@ -511,6 +512,30 @@ def test_wildcard_routes_pass_the_path_through(pulumi_mocks):
             R.FUNCTION_URL: 1,
             R.LAMBDA_PERMISSION: 1,
             R.ORIGIN_ACCESS_CONTROL: 2,
+            R.CLOUDFRONT_FUNCTION: 1,  # the default 404
+            R.DISTRIBUTION: 1,
+        }
+    )
+
+
+def test_url_string_in_the_constructor_routes_becomes_a_url_origin(pulumi_mocks):
+    """Same as `route(path, url)`: the constructor wraps the string before any adapter
+    looks for one."""
+
+    @pulumi.runtime.test
+    def deploy():
+        return Router("router", routes=[Route("/u/*", " https://example.com ")]).resources
+
+    deploy()
+
+    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
+    [origin] = distribution.inputs["origins"]
+    assert (origin["originId"], origin["domainName"]) == (TP + "url-origin-0", "example.com")
+    pulumi_mocks.assert_res_counts(
+        {
+            R.FUNCTION: 1,  # the URL route's Lambda@Edge
+            R.ROLE: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
             R.CLOUDFRONT_FUNCTION: 1,  # the default 404
             R.DISTRIBUTION: 1,
         }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi
@@ -281,7 +281,14 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             if existing_route.component == route.component:
                 raise ValueError(f"Route for origin {route.component} already exists.")
 
-        if not isinstance(route.component, Component | str):
+        if isinstance(route.component, str):
+            url = route.component.strip()
+            sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+            url_origin = Url(
+                context().prefix(f"{self.name}-url-origin-{sha_url}"), url=url, tags=self.tags
+            )
+            route = replace(route, component=url_origin)
+        elif not isinstance(route.component, Component):
             raise TypeError(
                 f"component_or_url must be a Component or str, got "
                 f"{type(route.component).__name__}."
@@ -311,14 +318,6 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             function_url: Function URL config (only used if component_or_url is a Function).
         """
         self._check_not_created("routes")
-        if isinstance(component_or_url, str):
-            url = component_or_url.strip()
-            sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
-            component_or_url = Url(
-                context().prefix(f"{self.name}-url-origin-{sha_url}"),
-                url=url,
-                tags=self.tags,
-            )
         self._add_route(Route(path, component_or_url, function_url))
         # Sort routes by path pattern length in descending order (more specific first)
         self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
