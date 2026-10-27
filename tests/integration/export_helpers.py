@@ -57,6 +57,7 @@ def export_http_api(api: HttpApi) -> None:
     export_output(f"http_api_{api.name}_url", api.url.apply(lambda u: u.rstrip("/")))
     export_output(f"http_api_{api.name}_stage_id", r.stage.id)
     export_output(f"http_api_{api.name}_stage_name", r.stage.name)
+    export_output(f"http_api_{api.name}_log_group_name", r.log_group.name)
 
 
 def export_websocket_api(api: WebsocketApi) -> None:
@@ -67,6 +68,7 @@ def export_websocket_api(api: WebsocketApi) -> None:
     export_output(f"websocket_api_{api.name}_url", api.url)
     export_output(f"websocket_api_{api.name}_stage_id", r.stage.id)
     export_output(f"websocket_api_{api.name}_stage_name", r.stage.name)
+    export_output(f"websocket_api_{api.name}_log_group_name", r.log_group.name)
 
 
 def export_http_api_domain(domain: ApiDomain) -> None:

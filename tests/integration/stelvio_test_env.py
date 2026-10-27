@@ -163,7 +163,11 @@ class StelvioTestEnv:
         return {k: v.value for k, v in result.outputs.items()}
 
     def destroy(self) -> None:
-        """Destroy all resources and clean up. Always safe to call."""
+        """Destroy all resources and clean up.
+
+        Raises RuntimeError when the stack survives the refresh-and-retry; the state dir
+        stays on disk for manual cleanup.
+        """
         if not self._stack:
             if self._workdir and self._workdir.exists():
                 shutil.rmtree(self._workdir, ignore_errors=True)
@@ -178,14 +182,18 @@ class StelvioTestEnv:
                 self._stack.refresh(on_output=print)
                 self._stack.destroy(on_output=print)
             except Exception as retry_err:
-                # Cannot destroy — keep workdir for manual cleanup
+                # Keep the workdir for manual cleanup. The fixture teardown calls this, so a
+                # swallowed failure kept the test green and hid the leaked stack; raising makes
+                # it a teardown ERROR with a non-zero exit code.
                 print(f"CRITICAL: Could not destroy stack '{self._stack_name}'")
                 print(f"First error: {first_err}")
                 print(f"Retry error: {retry_err}")
                 print(f"State dir: {self._workdir}")
-                print("Manual cleanup required. Resources have 'integ-' prefix.")
+                print("Manual cleanup required: resources are named stlv-<hex>-test-*.")
                 self._reset_singletons()
-                return
+                raise RuntimeError(
+                    f"stack {self._stack_name} not destroyed, state dir {self._workdir}"
+                ) from retry_err
 
         # Destroy succeeded — clean up state
         if self._workdir and self._workdir.exists():

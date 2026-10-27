@@ -94,6 +94,15 @@ def test_is_test_app_tag(tag, expected):
             id="apigateway-resource-skipped",
         ),
         ("arn:aws:acm:us-east-1:123456789012:certificate/abc-123", "acm"),
+        (
+            "arn:aws:ses:us-east-1:123456789012:identity/stlv-abc123-integ@example.com",
+            "ses-identity",
+        ),
+        param(
+            "arn:aws:ses:us-east-1:123456789012:configuration-set/stlv-abc123-test-identity-mail",
+            "ses-config-set",
+            id="ses-config-set-named-identity",
+        ),
         # execute-api ARNs are invocation endpoints, not manageable resources
         param(
             "arn:aws:execute-api:us-east-1:123456789012:abc123/prod/GET/items",
@@ -150,6 +159,21 @@ def test_service_from_arn(arn, expected):
             "arn:aws:events:us-east-1:123456789012:rule/stlv-abc123-test-rule",
             "stlv-abc123-test-rule",
             id="events-rule",
+        ),
+        param(
+            "arn:aws:ses:us-east-1:123456789012:identity/stlv-abc123-integ@example.com",
+            "stlv-abc123-integ@example.com",
+            id="ses-identity",
+        ),
+        param(
+            "arn:aws:ses:us-east-1:123456789012:configuration-set/stlv-abc123-test-cfg",
+            "stlv-abc123-test-cfg",
+            id="ses-configuration-set",
+        ),
+        param(
+            "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012",
+            "12345678-1234-1234-1234-123456789012",
+            id="acm",
         ),
         param("arn:aws:apigateway:us-east-1::/restapis/abc123def", "abc123def", id="apigateway"),
         param(

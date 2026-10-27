@@ -119,7 +119,7 @@ def _service_from_arn(arn: str) -> str | None:
         "events": "events",
         "apigateway": _classify_apigateway_resource(resource),
         "acm": "acm",
-        "ses": "ses-identity" if "identity" in resource else "ses-config-set",
+        "ses": "ses-identity" if resource.startswith("identity/") else "ses-config-set",
         "cloudfront": "cloudfront",
         "route53": "route53",
     }
@@ -143,6 +143,9 @@ def _name_from_arn(arn: str) -> str | None:
         "table/",
         "rule/",
         "distribution/",
+        "identity/",
+        "configuration-set/",
+        "certificate/",
     ):
         if resource.startswith(prefix):
             resource = resource[len(prefix) :]
@@ -708,10 +711,7 @@ def _delete_acm_certificate(session: boto3.Session, r: DiscoveredResource) -> No
 
 def _delete_ses_identity(session: boto3.Session, r: DiscoveredResource) -> None:
     client = session.client("sesv2")
-    # Extract identity name from ARN
-    # arn:aws:ses:{region}:{account}:identity/{identity}
-    identity = r.name
-    client.delete_email_identity(EmailIdentity=identity)
+    client.delete_email_identity(EmailIdentity=r.name)
 
 
 def _delete_ses_config_set(session: boto3.Session, r: DiscoveredResource) -> None:
