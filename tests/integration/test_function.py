@@ -19,6 +19,13 @@ from .export_helpers import export_function, export_vpc
 
 pytestmark = pytest.mark.integration
 
+# Right after a fresh deploy AWS can drop a VPC Lambda's first outbound connects with the NAT
+# available and every route active (2 of 4 runs, always open again by +30 s).
+_NAT_EGRESS_TIMEOUT = 120
+_NAT_EGRESS_INTERVAL = 10
+# 4 probes 10 s apart span those 30 s, so broken isolation answers True at least once
+_ISOLATED_PROBES = 4
+
 
 # --- Properties ---
 
@@ -244,14 +251,16 @@ def test_function_in_vpc_with_nat(stelvio_env, project_dir):
 
     outputs = stelvio_env.deploy(infra)
 
-    # behavior: the NAT serves the private subnets only; isolated stays cut off.
-    # Right after a fresh deploy AWS can drop the first egress with the NAT available and
-    # every route active (2 of 4 runs, open by +30 s), so poll instead of asserting once.
-    deadline = time.monotonic() + 120
+    # behavior: the NAT serves the private subnets only; isolated stays cut off. A dropped
+    # connect reads as False, so private polls until True and isolated must stay False on
+    # every probe.
+    deadline = time.monotonic() + _NAT_EGRESS_TIMEOUT
     egress = invoke_lambda(outputs["function_private_arn"])
     while egress != {"egress": True} and time.monotonic() < deadline:
-        time.sleep(10)
+        time.sleep(_NAT_EGRESS_INTERVAL)
         egress = invoke_lambda(outputs["function_private_arn"])
     assert egress == {"egress": True}
-    # only once the NAT path is open does False here mean routing, not timing
-    assert invoke_lambda(outputs["function_isolated_arn"]) == {"egress": False}
+    for probe in range(_ISOLATED_PROBES):
+        if probe:
+            time.sleep(_NAT_EGRESS_INTERVAL)
+        assert invoke_lambda(outputs["function_isolated_arn"]) == {"egress": False}, probe
