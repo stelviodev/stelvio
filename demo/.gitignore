@@ -11,3 +11,6 @@ wheels/
 
 .stelvio/
 stlv-demo/.stelvio
+
+# Resolve dependencies from PyPI locally; do not publish lockfiles.
+uv.lock

@@ -189,3 +189,31 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-demo:
+    name: Publish demo copy
+    if: github.event_name == 'push'
+    needs: publish-pypi
+    permissions:
+      contents: read
+    uses: ./.github/workflows/publish-copy.yml
+    with:
+      source_sha: ${{ github.sha }}
+      source_path: demo
+      target_repository: stelviodev/demo
+    secrets:
+      PAT_GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}
+
+  publish-templates:
+    name: Publish templates copy
+    if: github.event_name == 'push'
+    needs: publish-pypi
+    permissions:
+      contents: read
+    uses: ./.github/workflows/publish-copy.yml
+    with:
+      source_sha: ${{ github.sha }}
+      source_path: templates
+      target_repository: stelviodev/templates
+    secrets:
+      PAT_GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}

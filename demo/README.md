@@ -1,5 +1,11 @@
 # Stelvio
 
+[![Watch the Stelvio demo](https://img.youtube.com/vi/lMhYRoh5BOs/hqdefault.jpg)](https://www.youtube.com/watch?v=lMhYRoh5BOs)
+
+Source: [`stelviodev/stelvio/demo`](https://github.com/stelviodev/stelvio/tree/main/demo).
+This repository is a release-published, read-only copy. Please open issues and pull
+requests in [the main repository](https://github.com/stelviodev/stelvio).
+
 ## AWS for Python devs - made simple
 
 [**Documentation**](https://stelvio.dev/docs/getting-started/quickstart/) - [**Stelvio Manifesto**](https://stelvio.dev/manifesto/) - [**Intro article with quickstart**](https://stelvio.dev/blog/introducing-stelvio/)

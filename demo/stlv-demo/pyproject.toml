@@ -8,6 +8,3 @@ dependencies = [
     "botocore[crt]>=1.42.38",
     "stelvio",
 ]
-
-[tool.uv.sources]
-stelvio = { git = "https://github.com/stelviodev/stelvio", rev = "main" }

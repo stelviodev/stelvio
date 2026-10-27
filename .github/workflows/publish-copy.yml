@@ -1,0 +1,96 @@
+name: Publish release copy
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_path:
+        required: true
+        type: string
+      target_repository:
+        required: true
+        type: string
+    secrets:
+      PAT_GITHUB_TOKEN:
+        required: true
+
+concurrency:
+  group: release-copy-${{ inputs.target_repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_REPOSITORY: ${{ github.repository }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_PATH: ${{ inputs.source_path }}
+      TARGET_REPOSITORY: ${{ inputs.target_repository }}
+      COMMIT_AUTHOR_NAME: github-actions[bot]
+      COMMIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          path: origin
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout public copy
+        uses: actions/checkout@v4
+        with:
+          path: target
+          repository: ${{ inputs.target_repository }}
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.PAT_GITHUB_TOKEN }}
+
+      - name: Capture target revision
+        id: target
+        shell: bash
+        run: |
+          echo "revision=$(git -C target rev-parse refs/heads/main)" >> "$GITHUB_OUTPUT"
+
+      - name: Install git-filter-repo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-filter-repo
+
+      - name: Split release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          # checkout uses detached HEAD for a SHA; give the filter an explicit branch.
+          git -C origin checkout -B main "$SOURCE_SHA"
+          expected_tree=$(git -C origin rev-parse "${SOURCE_SHA}:${SOURCE_PATH}")
+          git filter-repo \
+            --refs main \
+            --path "${SOURCE_PATH}/" \
+            --path-rename "${SOURCE_PATH}/:" \
+            --name-callback 'return os.environ["COMMIT_AUTHOR_NAME"].encode("utf-8")' \
+            --email-callback 'return os.environ["COMMIT_AUTHOR_EMAIL"].encode("utf-8")' \
+            --commit-callback \
+              'commit.message += "\noriginal-commit: https://github.com/{}/commit/{}/".format(os.environ["SOURCE_REPOSITORY"], commit.original_id.decode()).encode("ascii")' \
+            --source ./origin \
+            --target ./target
+          actual_tree=$(git -C target rev-parse 'refs/heads/main^{tree}')
+          if [ "$actual_tree" != "$expected_tree" ]; then
+            echo "::error::Filtered tree does not match ${SOURCE_SHA}:${SOURCE_PATH}"
+            exit 1
+          fi
+
+      - name: Push release copy
+        shell: bash
+        env:
+          TARGET_REVISION: ${{ steps.target.outputs.revision }}
+        run: |
+          git -C target push \
+            --force-with-lease="refs/heads/main:${TARGET_REVISION}" \
+            "https://github.com/${TARGET_REPOSITORY}.git" \
+            refs/heads/main:refs/heads/main

@@ -91,7 +91,7 @@ required-version = ">=0.13.5"
 [tool.ruff]
 line-length = 99
 target-version = "py312"
-exclude = ['pulumi-tmpl', 'templates', 'pkg/demo']
+extend-exclude = ['pulumi-tmpl']
 
 # Configure linting
 [tool.ruff.lint]
@@ -113,6 +113,7 @@ mypy-init-return = true
 known-first-party = ["stelvio"]
 
 [tool.ruff.lint.per-file-ignores]
+"templates/**/stlv_app.py" = ["INP001"]
 "tests/**/*.py" = [
     "S101", # asserts allowed in tests
     "T20", # asserts allowed in tests

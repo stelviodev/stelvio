@@ -1,0 +1,2 @@
+# Resolve dependencies locally; published templates do not include lockfiles.
+uv.lock
