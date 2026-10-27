@@ -17,7 +17,7 @@ environment, a DynamoDB table named "users" becomes `my-api-staging-users`.
 
 ## Default Behavior
 
-If you don't specify an environment, Stelvio uses your personal environment (computer username by default):
+If you don't specify an environment, Stelvio uses your personal environment. By default it's your computer username, lowercased and reduced to letters, digits and `-`, so `John.Doe` becomes `john-doe`:
 
 ```bash
 stlv deploy  # Deploys to your personal environment (e.g., "john")
@@ -38,7 +38,6 @@ This is useful when:
 
 - Multiple developers on the team have the same computer username
 - You want a consistent name across different machines
-- Your computer username contains special characters
 - You want to use something other than your computer username
 
 !!! info
@@ -122,7 +121,7 @@ def run() -> None:
 ## Tips
 
 - Keep environment names short: `dev`, `staging`, `prod`
-- Avoid special characters - stick to letters and numbers
+- App and environment names use only letters, digits and single `-` between them, and the app name starts with a letter. `stlv` stops before deploying anything otherwise.
 - Consider using different AWS accounts for production
 
 ## Resource Naming

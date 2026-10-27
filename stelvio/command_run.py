@@ -42,6 +42,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import sys
@@ -252,6 +253,12 @@ def _load_app_config(env: str) -> tuple[StelvioApp, StelvioAppConfig]:
 
 def _validate_environment(config: StelvioAppConfig, env: str) -> None:
     username = get_user_env()
+    if not re.fullmatch(r"[A-Za-z0-9]+(-[A-Za-z0-9]+)*", env):
+        hint = " Your personal environment is set in .stelvio/userenv." if env == username else ""
+        raise StelvioValidationError(
+            f"Invalid environment name '{env}': use only letters, digits and single '-' "
+            f"between them.{hint}"
+        )
     if not config.is_valid_environment(env, username):
         raise StelvioValidationError(
             _invalid_environment_message(env, username, config.environments)

@@ -1,4 +1,5 @@
 import logging
+import re
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
@@ -9,6 +10,7 @@ from pulumi import Resource as PulumiResource
 # Import cleanup functions for both functions and layers
 from stelvio.component import Component, ComponentRegistry
 from stelvio.config import StelvioAppConfig
+from stelvio.exceptions import StelvioValidationError
 from stelvio.link import LinkConfig
 
 from .project import get_project_root
@@ -33,6 +35,13 @@ class StelvioApp:
     ):
         if StelvioApp.__instance is not None:
             raise RuntimeError("StelvioApp has already been instantiated.")
+        # The app name leads every AWS name. DocumentDB identifiers must start with a letter
+        # and reject `--` and a trailing `-` (the prefix adds its own `-` after the name).
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*", name):
+            raise StelvioValidationError(
+                f"Invalid app name '{name}': use only letters, digits and single '-' "
+                "between them, starting with a letter."
+            )
 
         self._name = name
         self._modules = modules or []

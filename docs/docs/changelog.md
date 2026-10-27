@@ -8,6 +8,10 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Breaking Changes
+
+- **App and env names: letters, digits and single `-` only, the app name starting with a letter.** Destroy an app or env named otherwise before you upgrade. The default env from your OS username is now cleaned (`John.Doe` → `john-doe`).
+
 ## 0.10.2b8 (2026-10-23)
 
 ### Security fixes

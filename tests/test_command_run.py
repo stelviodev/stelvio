@@ -14,6 +14,7 @@ from stelvio.command_run import (
 )
 from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore
+from stelvio.exceptions import StelvioValidationError
 
 
 def test_invalid_environment_message_without_shared_environments() -> None:
@@ -61,6 +62,66 @@ def test_environment_confirmation_preloads_config_for_following_load(monkeypatch
     assert validate_mock.call_count == 2
     assert not _PRELOADED_APP_CONFIGS
     context_set_mock.assert_called_once()
+
+
+@pytest.fixture
+def no_app_after():
+    yield
+    StelvioApp._StelvioApp__instance = None  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    "name", ["my_app", "my.app", "my app", "1app", "-app", "app-", "a--b", "", "app\n"]
+)
+def test_app_name_outside_letters_digits_and_hyphen_is_rejected(no_app_after, name) -> None:
+    with pytest.raises(StelvioValidationError) as exc:
+        StelvioApp(name)
+
+    assert str(exc.value) == (
+        f"Invalid app name '{name}': use only letters, digits and single '-' between them, "
+        "starting with a letter."
+    )
+
+
+@pytest.mark.parametrize("name", ["a", "My-App-2", "a1-b2-c3"])
+def test_app_name_allows_letters_digits_and_hyphens(no_app_after, name) -> None:
+    StelvioApp(name)
+
+    assert StelvioApp.get_instance()._name == name
+
+
+def _confirm_env(monkeypatch, env: str, *, user_env: str) -> tuple[str, bool]:
+    config = StelvioAppConfig(environments=[env])
+    monkeypatch.setattr(
+        "stelvio.command_run._load_app_config", lambda _: (SimpleNamespace(_name="app"), config)
+    )
+    monkeypatch.setattr("stelvio.command_run.get_user_env", lambda: user_env)
+    return get_environment_confirmation_info(env)
+
+
+@pytest.mark.parametrize("env", ["my_env", "john.doe", "a b", "-dev", "dev-", "a--b", "dev\n"])
+def test_env_name_outside_letters_digits_and_hyphen_is_rejected(monkeypatch, env) -> None:
+    with pytest.raises(StelvioValidationError) as exc:
+        _confirm_env(monkeypatch, env, user_env="michal")
+
+    assert str(exc.value) == (
+        f"Invalid environment name '{env}': use only letters, digits and single '-' between them."
+    )
+
+
+def test_invalid_personal_env_name_points_at_userenv(monkeypatch) -> None:
+    with pytest.raises(StelvioValidationError) as exc:
+        _confirm_env(monkeypatch, "john.doe", user_env="john.doe")
+
+    assert str(exc.value) == (
+        "Invalid environment name 'john.doe': use only letters, digits and single '-' between "
+        "them. "
+        "Your personal environment is set in .stelvio/userenv."
+    )
+
+
+def test_env_name_allows_uppercase_digits_and_hyphens(monkeypatch) -> None:
+    assert _confirm_env(monkeypatch, "Staging-2", user_env="michal") == ("app", True)
 
 
 @pytest.fixture
