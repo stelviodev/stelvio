@@ -1,9 +1,11 @@
+import time
+
 import pytest
 
 from stelvio.aws.function import Function
 from stelvio.aws.function.config import FunctionUrlConfig
 from stelvio.aws.layer import Layer
-from stelvio.aws.vpc import Vpc
+from stelvio.aws.vpc import NatConfig, Vpc
 
 from .assert_helpers import (
     assert_lambda_function,
@@ -16,6 +18,13 @@ from .assert_vpc import get_security_group
 from .export_helpers import export_function, export_vpc
 
 pytestmark = pytest.mark.integration
+
+# Right after a fresh deploy AWS can drop a VPC Lambda's first outbound connects with the NAT
+# available and every route active (2 of 4 runs, always open again by +30 s).
+_NAT_EGRESS_TIMEOUT = 120
+_NAT_EGRESS_INTERVAL = 10
+# 4 probes 10 s apart span those 30 s, so broken isolation answers True at least once
+_ISOLATED_PROBES = 4
 
 
 # --- Properties ---
@@ -227,3 +236,31 @@ def test_function_in_vpc(stelvio_env, project_dir):
     assert [
         (r["IpProtocol"], r["IpRanges"], r["Ipv6Ranges"]) for r in app_sg["IpPermissionsEgress"]
     ] == [("-1", [{"CidrIp": "0.0.0.0/0"}], [])]
+
+
+@pytest.mark.integration_vpc
+def test_function_in_vpc_with_nat(stelvio_env, project_dir):
+    def infra():
+        vpc = Vpc("net", az=2, nat=NatConfig(type="managed", single=True))
+        private = Function("private", handler="handlers/net_probe.main", vpc=vpc)
+        isolated = Function(
+            "isolated", handler="handlers/net_probe.main", vpc={"vpc": vpc, "subnets": "isolated"}
+        )
+        export_function(private)
+        export_function(isolated)
+
+    outputs = stelvio_env.deploy(infra)
+
+    # behavior: the NAT serves the private subnets only; isolated stays cut off. A dropped
+    # connect reads as False, so private polls until True and isolated must stay False on
+    # every probe.
+    deadline = time.monotonic() + _NAT_EGRESS_TIMEOUT
+    egress = invoke_lambda(outputs["function_private_arn"])
+    while egress != {"egress": True} and time.monotonic() < deadline:
+        time.sleep(_NAT_EGRESS_INTERVAL)
+        egress = invoke_lambda(outputs["function_private_arn"])
+    assert egress == {"egress": True}
+    for probe in range(_ISOLATED_PROBES):
+        if probe:
+            time.sleep(_NAT_EGRESS_INTERVAL)
+        assert invoke_lambda(outputs["function_isolated_arn"]) == {"egress": False}, probe

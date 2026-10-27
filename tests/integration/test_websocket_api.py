@@ -19,6 +19,7 @@ from .assert_helpers import (
     assert_lambda_role_permissions,
     assert_lambda_tags,
 )
+from .assert_logs import assert_api_access_logs
 from .assert_websocket_api import (
     assert_websocket_api,
     websocket_connect,
@@ -44,7 +45,7 @@ def _connect_and_exchange(url: str, message: dict) -> dict:
 
 def test_websocket_api_connect(stelvio_env, project_dir):
     def infra():
-        api = WebsocketApi("chat")
+        api = WebsocketApi("chat", access_log_retention_days=7)
         api.route("$connect", "handlers/websocket_connect.main")
         export_websocket_api(api)
 
@@ -58,6 +59,14 @@ def test_websocket_api_connect(stelvio_env, project_dir):
 
     time.sleep(_WEBSOCKET_API_DEPLOY_WAIT)
     websocket_connect(url)
+
+    # read-back: access logging is invisible to the client; 7 is the non-default retention
+    assert_api_access_logs(
+        api_id,
+        outputs["websocket_api_chat_stage_name"],
+        outputs["websocket_api_chat_log_group_name"],
+        retention_days=7,
+    )
 
 
 def test_websocket_api_custom_stage_name(stelvio_env, project_dir):
