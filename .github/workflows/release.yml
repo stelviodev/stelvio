@@ -202,7 +202,8 @@ jobs:
       source_path: demo
       target_repository: stelviodev/demo
     secrets:
-      PAT_GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}
+      REPO_SPLIT_APP_ID: ${{ secrets.REPO_SPLIT_APP_ID }}
+      REPO_SPLIT_APP_PRIVATE_KEY: ${{ secrets.REPO_SPLIT_APP_PRIVATE_KEY }}
 
   publish-templates:
     name: Publish templates copy
@@ -216,4 +217,5 @@ jobs:
       source_path: templates
       target_repository: stelviodev/templates
     secrets:
-      PAT_GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}
+      REPO_SPLIT_APP_ID: ${{ secrets.REPO_SPLIT_APP_ID }}
+      REPO_SPLIT_APP_PRIVATE_KEY: ${{ secrets.REPO_SPLIT_APP_PRIVATE_KEY }}

@@ -51,9 +51,22 @@ from PyPI and do not commit lockfiles. The root development lockfile stays track
 
 ### Release-copy operations
 
-Before the first publication, verify that `PAT_GITHUB_TOKEN` can read and write both
-public repositories, including workflow files, and that branch rules permit the
-bot's force-with-lease pushes. Organization-secret access must include this repo.
+Release copies authenticate as the private, organization-owned **Stelvio Release
+Copies** GitHub App. It has webhooks disabled, Contents and Workflows read/write
+permissions, and is installed only on `templates` and `demo`. Store its numeric App
+ID and PEM private key in organization Actions secrets `REPO_SPLIT_APP_ID` and
+`REPO_SPLIT_APP_PRIVATE_KEY`, each restricted to the `stelvio` repository. Each
+publication mints a short-lived installation token for those two repositories;
+the action revokes it when the job finishes. Source checkout uses `GITHUB_TOKEN`.
+
+Before the first publication, verify App access and that branch rules permit its
+force-with-lease pushes. After the first successful release, compare both public
+trees with the release source and verify the demo container-build workflow. Then
+revoke the personal token `REPO_SPLIT_STELVIO` in its owner's GitHub settings and
+remove the organization secret `PAT_GITHUB_TOKEN` that stores it. Removing a
+secret alone does not revoke the token. Do
+not revoke it before the first App-authenticated release succeeds.
+
 Disable issues on both public copies. The video from `stelviodev/demo#3` is included
 in `demo/README.md`; close that PR as superseded once this change has landed,
 before the first publication. The first publish replaces public branch history.

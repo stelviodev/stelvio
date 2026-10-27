@@ -13,7 +13,9 @@ on:
         required: true
         type: string
     secrets:
-      PAT_GITHUB_TOKEN:
+      REPO_SPLIT_APP_ID:
+        required: true
+      REPO_SPLIT_APP_PRIVATE_KEY:
         required: true
 
 concurrency:
@@ -42,6 +44,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Create release-copy App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.REPO_SPLIT_APP_ID }}
+          private-key: ${{ secrets.REPO_SPLIT_APP_PRIVATE_KEY }}
+          owner: stelviodev
+          repositories: templates,demo
+          permission-contents: write
+          permission-workflows: write
+
       - name: Checkout public copy
         uses: actions/checkout@v4
         with:
@@ -49,7 +62,7 @@ jobs:
           repository: ${{ inputs.target_repository }}
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.PAT_GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Capture target revision
         id: target

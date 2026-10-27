@@ -113,7 +113,8 @@ mypy-init-return = true
 known-first-party = ["stelvio"]
 
 [tool.ruff.lint.per-file-ignores]
-"templates/**/stlv_app.py" = ["INP001"]
+"templates/base/stlv_app.py" = ["INP001", "ARG001"]
+"demo/stlv-demo/stlv_app.py" = ["ARG001"]
 "tests/**/*.py" = [
     "S101", # asserts allowed in tests
     "T20", # asserts allowed in tests

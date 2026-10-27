@@ -6,7 +6,6 @@ app = StelvioApp("stelvio-template")
 
 @app.config
 def configuration(env: str) -> StelvioAppConfig:
-    del env
     return StelvioAppConfig(
         aws=AwsConfig(
             # region="us-east-1",        # Uncomment to override AWS CLI/env var region
