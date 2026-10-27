@@ -458,3 +458,21 @@ routes and DNS. Statistics need a compatible Traforo image; older images remain
 usable with those fields unavailable. Local reports include network addresses
 and resource identities. Review the report before sharing it. Uploads are not
 included.
+
+### `stlv tunnel monitor`
+
+Open the live macOS terminal dashboard for an existing tunnel session:
+
+```bash
+stlv tunnel monitor
+stlv tunnel monitor --session 12345678-1234-1234-1234-123456789012
+```
+
+Run this command as your ordinary user in an interactive terminal. It discovers
+sessions without loading a project or starting a tunnel. Use arrows to select a
+VPC, `s` to select a session, `r` to refresh, and `q` or Ctrl+C to exit only the
+monitor. Use `stlv tunnel diagnose --json` for noninteractive observations.
+
+The monitor shows a 60-second traffic chart, source freshness, and diagnostic
+TLS/member endpoint results. Active TLS probes use the owning project's cached
+AWS CA bundle and generate traffic; they do not change tunnel readiness.
