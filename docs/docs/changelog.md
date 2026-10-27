@@ -11,6 +11,7 @@
 ### Bug Fixes
 
 - **`stlv dev` matches the deployed Lambda.** `context.function_name` and the `AWS_LAMBDA_*` env vars are set, and a request waits for the Function's `timeout` (up to 25 s), not 16 s.
+- **Router rejects route paths it routed wrong.** `/api/`, `api`, `*`, a `?` or a `*` before the end deployed but routed wrong. Use `/api`, `/api/*` or `/*`.
 
 ### Breaking Changes
 

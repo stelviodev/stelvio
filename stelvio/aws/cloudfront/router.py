@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, final
 
@@ -248,6 +249,21 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         )
 
     def _add_route(self, route: Route) -> None:
+        # The prefix-strip function compares the path literally against `request.uri`: a path
+        # without the leading '/', with a trailing '/' or a wildcard before the end never
+        # matches it. `'` and `\` break its JS string; `"`, space and non-ASCII arrive
+        # percent-encoded and never match. CloudFront drops empty, `.` and `..` segments from
+        # the request path before matching, so a path with one never matches either.
+        path = route.path_pattern
+        if not re.fullmatch(r"(/[A-Za-z0-9_.~$@:+/-]*\*?)?", path) or (
+            path != "/" and re.search(r"/\.{0,2}(?:/|$)", path)
+        ):
+            raise ValueError(
+                f"Invalid route path {path!r}: start with '/', no trailing '/', no empty, '.' "
+                "or '..' segment, '*' only at the end, other chars only letters, digits and "
+                "_ . ~ - / $ @ : +. Use '/api' to send '/api/users' to the origin as '/users', "
+                "or '/api/*' to keep '/api/users'."
+            )
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")

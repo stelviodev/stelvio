@@ -123,6 +123,61 @@ def test_route_rejects_a_second_root_route(first, second):
         router.route(second, Mock(spec=Bucket))
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "api",
+        "*",
+        "/api/",
+        "/a/*/b",
+        "/*.jpg",
+        "/a?",
+        "/it's",
+        "/a\\b",
+        "/a\nb",
+        "/a&b",
+        "/a b",
+        '/a"b',
+        "/café",
+        "/api\n",
+        "/a//b",
+        "//api",
+        "/.",
+        "/..",
+        "/a/./b",
+        "/a/../b",
+    ],
+)
+def test_route_rejects_a_path_it_cannot_serve(path):
+    router = Router(name="test-router")
+
+    with pytest.raises(ValueError, match=rf"^Invalid route path {re.escape(repr(path))}: start"):
+        router.route(path, Mock(spec=Bucket))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "/",
+        "/*",
+        "/api",
+        "/api*",
+        "/api/*",
+        "/Api/V2",
+        "/v1.2/a_b~c-d",
+        "/$@:+",
+        "/.well-known/x",
+    ],
+)
+def test_route_accepts_a_path_cloudfront_and_the_prefix_strip_both_handle(path):
+    router = Router(name="test-router")
+
+    router.route(path, Mock(spec=Bucket))
+
+    assert [r.path_pattern for r in router.routes] == [path]
+
+
 def test_router_keeps_the_order_of_routes_given_to_the_constructor():
     routes = [Route("/a", Mock(spec=Bucket)), Route("/abc", Mock(spec=Bucket))]
 
@@ -160,8 +215,19 @@ def _function_with_url():
             r"^Route for path pattern '/\*' clashes with '/': both are the root route\.$",
         ),
         (lambda: [Route("/api", _function_with_url())], r"^Function 'fn-with-url' has 'url'"),
+        (
+            lambda: [Route("api", Mock(spec=Bucket))],
+            "^"
+            + re.escape(
+                "Invalid route path 'api': start with '/', no trailing '/', no empty, '.' or "
+                "'..' segment, '*' only at the end, other chars only letters, digits and "
+                "_ . ~ - / $ @ : +. Use '/api' to send '/api/users' to the origin as '/users', "
+                "or '/api/*' to keep '/api/users'."
+            )
+            + "$",
+        ),
     ],
-    ids=["duplicate-path", "two-roots", "function-with-url"],
+    ids=["duplicate-path", "two-roots", "function-with-url", "bad-path"],
 )
 def test_router_checks_routes_given_to_the_constructor(make_routes, error):
     with pytest.raises(ValueError, match=error):
