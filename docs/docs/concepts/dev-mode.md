@@ -64,6 +64,76 @@ hostnames to that VPC's private DNS view. Changed ownership or host identity is
 refused. AWS service or SSM availability issues can be retried after the deployed
 resources and permissions are checked.
 
+### Session ownership and readiness
+
+Before local handler code runs, Stelvio reads the deployed network metadata and
+captures the selected AWS provider, account, region, profile, and startup
+environment. It starts networking in a separate nonroot Python process with that
+captured environment. Later handler changes to AWS variables cannot redirect the
+session's clients. The parent and runtime exchange bounded messages over a private
+local socket; an independent lease pipe lets the runtime detect parent exit.
+The session metadata preserves the VPC ownership ranges and each public, private,
+and isolated subnet's ID, availability zone, and CIDR across that process boundary.
+
+Each eligible VPC has its own worker, transport attempt, helper generation, DNS
+revision, discovery state, and retry schedule. A failure in one VPC leaves workers
+for other VPCs running. The worker rejects that VPC's private DNS while its
+transport is down and keeps owned resolver claims and the DNS listener port stable
+while it reconnects to the existing bastion. It does not replace the bastion.
+The worker freezes the deployed private and isolated subnet ranges for the session.
+The forwarder and privileged helper use that same destination set. Reconnection,
+member discovery, and recovery of a lost helper reply cannot widen it to a whole
+VPC block. An empty destination set or a changed subnet selection fails before
+SSH starts; there is no public-subnet or whole-VPC fallback.
+
+If an existing LAN or VPN route overlaps a selected destination, the VPC fails
+closed. Status includes the helper's configure stage, requested range, conflicting
+range, and interface index when the helper supplies those facts. Inspect the
+conflict and restart after resolving it. Other ready VPCs and unrelated handlers
+can continue. Cleanup uncertainty retains the conflict evidence; use
+`stlv tunnel status` and `stlv tunnel cleanup` to inspect and retry owned cleanup.
+Do not delete foreign routes or ownership journals to bypass a refusal.
+
+A changed SSH host key is a terminal failure for that VPC. Status reports
+`cause=ssh-host-key`, the instance identity, and the expected and presented
+fingerprints. The worker stops reconnecting and keeps its existing DNS view
+rejecting queries. Dependent invocations remain blocked; other ready VPCs and
+unrelated handlers can continue. Restoring the original key requires a new
+network session. For intentional rotation, stop the affected tunnels, explicitly
+reset that instance's trust, and restart. A new runtime process reads the same
+persistent pin; restarting alone does not accept a changed key.
+
+`READY` means the scoped resolver answered through the VPC path, the helper's
+routes and resolver files are active, the transport and forwarder are healthy,
+and each discovered resource hostname resolved to an address inside the selected
+private or isolated subnets and accepted a TCP connection on its declared port
+through both SOCKS and ordinary host routing. Resolver queries use TCP through
+SOCKS to the owning VPC's primary resolver; that address need not be routed through
+the virtual interface. Startup and periodic health checks also resolve every
+discovered resource hostname through the operating system. Each name must return
+IPv4 addresses inside that VPC's selected subnets. A failed or timed-out lookup
+keeps dependent invocations blocked while the worker retries. A separate
+system-resolver observation proves fresh macOS scoped DNS delivery independently
+of cached resource addresses. Each VPC has a session-specific probe scope under `stelvio.test`;
+readiness observes a fresh name in that scope. The scope remains stable across
+reconnects and is removed with the session. It counts toward the DNS name limit.
+Database and member hostnames keep exact-name ownership; their subdomains do not
+become private DNS suffixes. A resolver-only direct probe cannot prove resource routing and is
+not used. A working SOCKS proxy by itself
+does not make a VPC ready. New invocations that depend on an unready VPC are
+rejected before handler execution; unrelated VPCs and handlers without a VPC can
+continue.
+
+With no enabled VPC dependencies, Stelvio skips helper activation. A VPC whose
+bastion policy is disabled is reported and left to the developer's local network.
+On normal shutdown, each worker stops its owned SSH/SSM transport and retires its
+helper generation before the lease is released. If the parent exits unexpectedly,
+the lease closes and the helper recovers host state from its durable journal. A
+transport cleanup that cannot be certified leaves its ownership receipts and
+helper evidence available through `stlv tunnel status`; Stelvio reports the
+existing recovery commands instead of claiming the VPC is ready. This status is
+local helper ownership state and does not verify AWS or database connectivity.
+
 ## Using it
 
 No changes to `stlv_app.py` are needed.
