@@ -37,6 +37,50 @@ Key areas of the codebase:
 - **`tests/`** — unit tests (Pulumi mocks, no AWS credentials needed)
 - **`tests/integration/`** — integration tests (deploy real AWS resources)
 - **`docs/`** — Zensical documentation site
+- **`demo/`** — source for the [demo repository](https://github.com/stelviodev/demo)
+- **`templates/`** — source for the [templates repository](https://github.com/stelviodev/templates)
+
+Make demo and template changes here. Both public repositories are read-only copies:
+after a successful PyPI publication, the release workflow publishes these folders
+from the exact release commit to their respective `main` branches. Merging into
+this repository does not publish them; even demo-only fixes wait for a release.
+Direct changes in the public repositories are not synced back.
+
+Both folders use the ordinary root Ruff checks. Their projects depend on Stelvio
+from PyPI and do not commit lockfiles. The root development lockfile stays tracked.
+
+### Release-copy operations
+
+Release copies authenticate as the private, organization-owned **Stelvio Release
+Copies** GitHub App. It has webhooks disabled, Contents and Workflows read/write
+permissions, and is installed only on `templates` and `demo`. Store its numeric App
+ID and PEM private key in organization Actions secrets `REPO_SPLIT_APP_ID` and
+`REPO_SPLIT_APP_PRIVATE_KEY`, each restricted to the `stelvio` repository. Each
+publication mints a short-lived installation token for those two repositories;
+the action revokes it when the job finishes. Source checkout uses `GITHUB_TOKEN`.
+
+Before the first publication, verify App access and that branch rules permit its
+force-with-lease pushes. After the first successful release, compare both public
+trees with the release source and verify the demo container-build workflow. Then
+revoke the personal token `REPO_SPLIT_STELVIO` in its owner's GitHub settings and
+remove the organization secret `PAT_GITHUB_TOKEN` that stores it. Removing a
+secret alone does not revoke the token. Do
+not revoke it before the first App-authenticated release succeeds.
+
+Disable issues on both public copies. The video from `stelviodev/demo#3` is included
+in `demo/README.md`; close that PR as superseded once this change has landed,
+before the first publication. The first publish replaces public branch history.
+
+If a copy fails after PyPI succeeds, use **Re-run failed jobs** on that release run.
+This retries the failed copy from the same release commit without publishing the
+package again. Do not re-run all jobs: package versions cannot be uploaded twice.
+A rejected lease means the target changed during publication; inspect the change
+before retrying. The other copy can finish independently.
+
+After the first release, fetch each public `main` and compare its root tree with
+`<release-commit>:demo` or `<release-commit>:templates` in this repository. Each
+publication also checks this equality before pushing. Verify the README notices,
+Codespaces configuration, and the demo container-build workflow in the copies.
 
 ## Development
 
