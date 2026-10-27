@@ -100,6 +100,7 @@ like `Resources.results`, so the component name in your test has to match.
 | VPC | `integration_vpc` | `--integration-vpc` | AWS profile (4 workers max; account VPC quota is 10 including the default VPC) |
 | CloudFront | `integration_cf` | `--integration-cf` | AWS profile |
 | DNS | `integration_dns` | `--integration-dns` | + `STLV_TEST_DNS_DOMAIN`, `STLV_TEST_DNS_ZONE_ID` (optional `STLV_TEST_ACM_CERTIFICATE_ARN` for a pre-issued `*.domain` cert). One `*.domain` cert plus its validation record stay in the account for reuse (`stelvio:env=test` only, no `stelvio:app`, so cleanup skips them). |
+| Native macOS | `integration_macos_privileged` | `--integration-macos-privileged` | macOS 15+, ordinary user, exclusive host lane, `-n 0`; may install or replace the helper and changes routes and resolver files during tests. |
 
 CloudFront distributions take 3–5 minutes to delete, so they get their own tier; their property
 tests skip edge propagation with `customize=NO_WAIT_DEPLOY`. DNS tests skip themselves when the
@@ -130,6 +131,21 @@ Never combine tier flags in one pytest run: it opens too many files and the run 
 Don't interrupt after `[100%]` — teardown is still destroying stacks. Wait for the summary
 line.
 
+The native macOS lane is separate from `run_all.sh`. The runner never passes
+`--integration-macos-privileged`. Run this lane only when you have authorization to
+change the host and can restore its existing helper and networking state:
+
+```bash
+uv run pytest tests/integration/test_tunnel_host.py tests/integration/test_tunnel_dns.py \
+  --integration-macos-privileged -n 0 -q
+```
+
+The lane records the existing helper and host baseline before it runs. It restores
+the original helper and compares interfaces, routes, scoped resolvers, DNS state,
+and networking processes during teardown. Stop if the preflight finds an active
+session, foreign state, or an unfinished administration transaction. Do not run
+this lane with another integration tier or with xdist workers.
+
 A killed run leaves stacks and resources behind:
 
 ```bash
@@ -156,3 +172,23 @@ SNS stay near free tier, CloudFront and NAT gateways don't.
 - A bucket that receives objects needs `customize=FORCE_DESTROY_BUCKET`, otherwise destroy
   fails on a non-empty bucket.
 - Sleeps are named module constants with a comment explaining the number.
+
+### Helper control ownership
+
+An active helper accepts control requests only from the process that owns its lease.
+A different process must not inspect the active lease directly. The helper can
+reject a connection before it reads the request. The client preserves a valid
+rejection reply as a typed error. A missing or invalid reply does not imply that
+the helper is busy. Failed requests are not replayed.
+
+Run the owner-rejection lifecycle regression with the privileged tier enabled:
+
+```bash
+uv run pytest tests/integration/test_tunnel_host.py -k owner_lifecycle \
+  --integration-macos-privileged -n 0
+```
+
+Use a validated local image through `STLV_TRAFORO_DEV_BINARY` for local testing.
+The fixture restores the initial helper and host state. Complete any macOS
+authorization dialog needed for restoration. A canceled restoration is not a
+passing acceptance run.
