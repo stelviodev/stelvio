@@ -9,6 +9,7 @@ from pulumi.automation import DiffKind, EngineEvent, OpType
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markup import escape
+from rich.segment import Segment
 from rich.spinner import Spinner
 from rich.text import Text
 
@@ -57,9 +58,41 @@ if TYPE_CHECKING:
 
     from pulumi.automation import StepEventMetadata
     from pulumi.automation.events import StepEventStateMetadata
-    from rich.console import RenderableType
+    from rich.console import ConsoleOptions, RenderableType, RenderResult
 
 logger = logging.getLogger(__name__)
+
+
+class _DeploymentFrame:
+    """Fit an active terminal tree above its progress footer."""
+
+    def __init__(self, content: Text, spinner: Spinner) -> None:
+        self.content = content
+        self.spinner = spinner
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        if not console.is_terminal:
+            yield Group(self.content, self.spinner)
+            return
+
+        # Measure wrapped rows without clipping or padding to the container's height.
+        render_options = options.reset_height()
+        footer_lines = console.render_lines(self.spinner, render_options, pad=False)
+        tree_lines = console.render_lines(self.content, render_options, pad=False)
+        height = max(1, min(options.size.height, options.max_height))
+        footer_lines = footer_lines[:height]
+        tree_height = height - len(footer_lines)
+        if len(tree_lines) > tree_height:
+            tree_lines = tree_lines[: max(0, tree_height - 1)]
+            if tree_height:
+                ellipsis = Text(
+                    "...", justify="center", overflow="crop", style="live.ellipsis", end=""
+                )
+                tree_lines.extend(console.render_lines(ellipsis, render_options, pad=False))
+
+        for line in [*tree_lines, *footer_lines]:
+            yield from line
+            yield Segment.line()
 
 
 def _child_sort_key(child: ResourceInfo | ComponentInfo) -> tuple[bool, str, list[str]]:
@@ -650,7 +683,7 @@ class RichDeploymentHandler:
             progress_text = f"{self.spinner_operation}  {total_seconds}s"
 
         self.spinner.update(text=progress_text, style="cyan")
-        return Group(content, self.spinner)
+        return _DeploymentFrame(content, self.spinner)
 
     def _render_final_content(self) -> RenderableType:
         """Render the final frame without spinner — kept by live.stop() as static output."""

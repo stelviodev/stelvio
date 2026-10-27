@@ -8,6 +8,10 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Bug Fixes
+
+- **`stlv deploy` does not truncate progress for larger resource trees.** Fix [#313](https://github.com/stelviodev/stelvio/issues/313) by reserving space for the progress footer beneath the resource tree.
+
 ## 0.10.2b8 (2026-10-23)
 
 ### Security fixes
