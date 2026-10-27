@@ -86,6 +86,21 @@ Human-readable deploy output shows changed components as they finish, then print
     for shared environments. `stlv deploy ENV --stream` follows the same rule.
     Outside CI, commands keep the existing default of using your personal environment when env is omitted.
 
+### dev
+
+`stlv dev [env]` deploys the local-handler bridge and starts the local server. For
+Functions that depend on enabled VPC resources, it starts managed networking before
+the bridge accepts invocations. It rejects dependent invocations until each required
+VPC is ready. Functions without enabled VPC dependencies can continue independently.
+
+```bash
+stlv dev
+stlv dev staging
+```
+
+Press `Ctrl+C` to stop. Stelvio closes the networking session and AppSync connection;
+the deployed bastions remain available for later dev or standalone sessions.
+
 ### refresh
 
 `stlv refresh [env]` - Updates your state to match what's actually in AWS for specified environment. Defaults to personal environment if not provided.
