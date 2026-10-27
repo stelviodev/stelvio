@@ -94,7 +94,7 @@ class ComponentCloudfrontAdapter(ABC):
     def _cache_behaviors(self, behavior: dict) -> list[dict]:
         """`behavior` for the exact path and for everything under it: `/api/*` alone sends
         `/api` to the default behavior. Root and wildcard routes have no exact path."""
-        patterns = [self._path_pattern()]
+        patterns = [self.route.prefix_pattern]
         if not (self.route.is_root or self.route.path_pattern.endswith("*")):
             patterns.insert(0, self.route.path_pattern)
         return [{"path_pattern": pattern, **behavior} for pattern in patterns]
@@ -134,8 +134,3 @@ class ComponentCloudfrontAdapter(ABC):
                 pulumi.ResourceOptions(depends_on=depends_on),
             ),
         )
-
-    def _path_pattern(self) -> str:
-        if self.route.path_pattern.endswith("*"):
-            return self.route.path_pattern
-        return f"{self.route.path_pattern}/*"

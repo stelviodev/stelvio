@@ -178,6 +178,29 @@ def test_route_accepts_a_path_cloudfront_and_the_prefix_strip_both_handle(path):
     assert [r.path_pattern for r in router.routes] == [path]
 
 
+@pytest.mark.parametrize(("first", "second"), [("/api", "/api/*"), ("/api/*", "/api")])
+def test_route_rejects_a_path_whose_behavior_another_route_takes(first, second):
+    """`/api` needs `/api` and `/api/*`; `/api/*` needs `/api/*`: CloudFront rejects a
+    distribution with one path pattern twice."""
+    router = Router(name="test-router", routes=[Route(first, Mock(spec=Bucket))])
+
+    with pytest.raises(
+        ValueError,
+        match=rf"^Route for path pattern {re.escape(repr(second))} clashes with "
+        rf"{re.escape(repr(first))}: both need the CloudFront behavior '/api/\*'\.$",
+    ):
+        router.route(second, Mock(spec=Bucket))
+
+
+def test_route_accepts_api_star_next_to_api():
+    """`/api*` also matches `/apix`; CloudFront accepts both, so the Router does too."""
+    router = Router(name="test-router", routes=[Route("/api*", Mock(spec=Bucket))])
+
+    router.route("/api", Mock(spec=Bucket))
+
+    assert [r.path_pattern for r in router.routes] == ["/api*", "/api"]
+
+
 def test_router_keeps_the_order_of_routes_given_to_the_constructor():
     routes = [Route("/a", Mock(spec=Bucket)), Route("/abc", Mock(spec=Bucket))]
 

@@ -59,7 +59,7 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             component_name=self.bucket.name, depends_on=[self.bucket.resources.bucket]
         )
         cache_behavior = {
-            "path_pattern": self._path_pattern(),
+            "path_pattern": self.route.prefix_pattern,
             "allowed_methods": ["GET", "HEAD", "OPTIONS"],
             "cached_methods": ["GET", "HEAD"],
             "target_origin_id": origin_dict["origin_id"],

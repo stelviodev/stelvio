@@ -272,6 +272,12 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                     f"Route for path pattern {route.path_pattern!r} clashes with "
                     f"{existing_route.path_pattern!r}: both are the root route."
                 )
+            if existing_route.prefix_pattern == route.prefix_pattern:
+                raise ValueError(
+                    f"Route for path pattern {route.path_pattern!r} clashes with "
+                    f"{existing_route.path_pattern!r}: both need the CloudFront behavior "
+                    f"{route.prefix_pattern!r}."
+                )
             if existing_route.component == route.component:
                 raise ValueError(f"Route for origin {route.component} already exists.")
 

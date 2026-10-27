@@ -26,3 +26,12 @@ class Route:
     @property
     def is_root(self) -> bool:
         return self.path_pattern in ("", "/", "/*")
+
+    @property
+    def prefix_pattern(self) -> str:
+        """The cache behavior for everything under the path; a wildcard path is one already.
+        Two routes sharing it would give the distribution one path pattern twice, which
+        CloudFront rejects, so `Router` checks it when a route is added."""
+        if self.path_pattern.endswith("*"):
+            return self.path_pattern
+        return f"{self.path_pattern}/*"
