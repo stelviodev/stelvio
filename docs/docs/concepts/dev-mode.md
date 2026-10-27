@@ -20,6 +20,50 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 
 Your public entrypoint (API Gateway URL / Function URL) stays the same — you hit it like normal.
 
+### Managed VPC transport
+
+For a VPC with an enabled bastion, Stelvio uses the deployed networking metadata
+to identify the AWS account, provider, region, VPC, and owned access instance.
+It checks the complete VPC CIDR and subnet inventory and requires VPC DNS support
+and hostnames to be enabled before using private DNS. Handler changes to AWS
+environment variables cannot redirect the captured AWS session.
+
+VPC CIDRs describe AWS ownership. Inventory includes the primary block and all
+associated IPv4 blocks, and verifies every declared public, private, and isolated
+subnet by ID, account, VPC, Availability Zone, CIDR, and availability. Missing,
+duplicate, or changed records are refused. Subnet tiers come from the deployment
+metadata, not API response order or public IPv4 auto-assignment settings.
+
+Only the declared private and isolated subnet CIDRs are eligible resource routes.
+Public subnets, unused VPC space, and newly associated blocks do not implicitly
+add destinations. The VPC resolver remains the primary block's address plus two;
+it uses the separate SOCKS path and need not be inside a routed subnet. Full VPC
+ownership overlap remains an error even when the selected subnet routes differ.
+The AWS inventory check does not inspect route tables to reclassify subnets.
+
+The access path uses Systems Manager and EC2 Instance Connect; it does not open
+inbound SSH. OpenSSH learns the bastion's Ed25519 host key through the verified
+SSM connection on first use. After SSH authentication succeeds, Stelvio stores
+that key by AWS partition, account, region, and instance ID. It requires the same
+key on reconnect and across command restarts. A changed key stops the connection;
+it is never accepted by automatic recovery.
+
+Pins are private, per-user records under Stelvio's binary cache in
+`ssh-host-trust`. Session cleanup and helper uninstall leave these records intact.
+An instance replacement gets a new identity and a new pin. Intentional key rotation
+on the same instance requires an explicit trust reset; see
+[host-key recovery](../intro/troubleshooting.md#managed-vpc-transport-identity-and-authorization).
+
+OpenSSH uses the verified Session Manager plugin at its
+private cache path. A missing or unsafe plugin is a local artifact error; repair
+it with `stlv tunnel install` rather than retrying the AWS connection.
+
+For DocumentDB, discovery checks the cluster ARN, VPC, security groups, subnet
+group, port, and current member list before adding cluster, reader, and member
+hostnames to that VPC's private DNS view. Changed ownership or host identity is
+refused. AWS service or SSM availability issues can be retried after the deployed
+resources and permissions are checked.
+
 ## Using it
 
 No changes to `stlv_app.py` are needed.

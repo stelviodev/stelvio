@@ -147,6 +147,43 @@ If installation reports an active helper, close the networking session and retry
 Use `stlv tunnel status` to see local helper ownership and whether any VPC unit
 remains active. This does not verify AWS or database connectivity.
 
+### Managed VPC transport identity and authorization
+
+Managed VPC access stops when the captured AWS account or region differs from the
+deployment metadata, the bastion or its security groups are no longer owned by the
+deployment, or inbound SSH is enabled.
+Check `AwsConfig`, the selected profile, and the deployment's account and region;
+redeploy when the access resources or metadata have changed. Do not bypass a host
+key or ownership refusal.
+
+The AWS identity used by Stelvio needs permission to inspect the VPC and its
+subnets, bastion, security groups, and DocumentDB resources; use Systems Manager
+sessions; and send an EC2 Instance Connect key. Check the selected
+profile's IAM policy and confirm the bastion is running and its SSM agent is
+online. Stelvio does not create or replace a bastion during a connection attempt.
+
+SSH host-key changes are a separate refusal. The error names the instance and
+shows the expected and presented fingerprints. First check whether the change
+was authorized. Restore the original host key when the change was unexpected.
+For an intentional rotation, stop all tunnels for that instance and reset only
+its trust entry:
+
+```bash
+stlv tunnel trust reset --partition aws --account 123456789012 \
+  --region us-east-1 --instance-id i-0123456789abcdef0
+```
+
+The command shows the stored fingerprint and asks for confirmation. The next
+connection establishes a new pin through SSM. Reset does not change AWS resources,
+install the helper, or remove other pins. A new instance ID does not require
+resetting the old instance's pin.
+
+If the error says the private Session Manager plugin is missing, corrupt, or
+unsafe, run `stlv tunnel install` from the active Stelvio environment to repair
+the verified cache entry. A local plugin artifact error is terminal for that
+attempt; it is not an AWS connectivity retry. Authentication details are not
+included in transport errors.
+
 ### Permission Denied Errors
 
 **Problem:** "AccessDeniedException" when Stelvio reads its state, or "Access Denied" during a deploy
