@@ -8,6 +8,10 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Bug Fixes
+
+- **`stlv dev` matches the deployed Lambda.** `context.function_name` and the `AWS_LAMBDA_*` env vars are set, and a request waits for the Function's `timeout` (up to 25 s), not 16 s.
+
 ### Breaking Changes
 
 - **App and env names: letters, digits and single `-` only, the app name starting with a letter.** Destroy an app or env named otherwise before you upgrade. The default env from your OS username is now cleaned (`John.Doe` → `john-doe`).

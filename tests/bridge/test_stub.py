@@ -27,6 +27,7 @@ def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
         invoked_function_arn="arn:aws:lambda:us-east-1:123456789:function:test",
         _epoch_deadline_time_in_ms=0,
         tenant_id=None,
+        get_remaining_time_in_millis=lambda: 30_000,
     )
 
 
@@ -677,6 +678,26 @@ def test_publishes_correct_request_message(
         },
     }
     assert message == expected_message
+
+
+@pytest.mark.parametrize(("remaining_ms", "expected"), [(30_000, 25), (10_000, 9.5), (900, 0.4)])
+def test_waits_for_the_functions_remaining_time_up_to_the_cap(
+    reset_global_state, remaining_ms, expected
+):
+    stub = reset_global_state
+    mock_ws = AsyncMock()
+    context = make_lambda_context()
+    context.get_remaining_time_in_millis = lambda: remaining_ms
+
+    with (
+        patch.object(stub, "get_or_create_connection", AsyncMock(return_value=(mock_ws, True))),
+        patch.object(stub, "ensure_subscribed", AsyncMock()),
+        patch.object(stub, "publish_to_appsync", AsyncMock()),
+        patch.object(stub, "wait_for_response", AsyncMock(return_value=None)) as mock_wait,
+    ):
+        _run(stub.async_handler({}, context))
+
+    mock_wait.assert_called_once_with(mock_ws, "req-123", timeout=pytest.approx(expected))
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)
