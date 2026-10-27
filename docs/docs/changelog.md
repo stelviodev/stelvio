@@ -8,6 +8,10 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### CLI
+
+- **`stlv install-completion` sets up shell completions.** Generates completions for both `stlv` and `stelvio` in Bash, Zsh, Fish, and PowerShell, with optional profile setup.
+
 ## 0.10.2b8 (2026-10-23)
 
 ### Security fixes
