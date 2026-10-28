@@ -226,20 +226,25 @@ def test_route_keeps_a_plain_path_added_before_a_wildcard_of_the_same_length_fir
     assert [r.path_pattern for r in router.routes] == ["/v/1", "/v/*"]
 
 
-def test_router_root_route_given_first_to_the_constructor_catches_nothing():
-    routes = [Route("/", Mock(spec=Bucket)), Route("/api", Mock(spec=Bucket))]
+@pytest.mark.parametrize("root", ["", "/", "/*"])
+def test_router_root_route_given_first_to_the_constructor_catches_nothing(root):
+    """The root is the default behavior, never an ordered one; `/` alone proves nothing, as its
+    prefix pattern `//*` matches no path anyway."""
+    routes = [Route(root, Mock(spec=Bucket)), Route("/api", Mock(spec=Bucket))]
 
     router = Router(name="test-router", routes=routes)
 
-    assert [r.path_pattern for r in router.routes] == ["/", "/api"]
+    assert [r.path_pattern for r in router.routes] == [root, "/api"]
 
 
-def test_router_keeps_the_order_of_routes_given_to_the_constructor():
-    routes = [Route("/a", Mock(spec=Bucket)), Route("/abc", Mock(spec=Bucket))]
+@pytest.mark.parametrize("paths", [["/a", "/abc"], ["/ap", "/api"]])
+def test_router_keeps_the_order_of_routes_given_to_the_constructor(paths):
+    """`/ap` is a prefix of `/api` as a string only: its behavior `/ap/*` ends in a slash."""
+    routes = [Route(path, Mock(spec=Bucket)) for path in paths]
 
     router = Router(name="test-router", routes=routes)
 
-    assert [r.path_pattern for r in router.routes] == ["/a", "/abc"]
+    assert [r.path_pattern for r in router.routes] == paths
 
 
 def test_route_leaves_the_constructor_list_as_given():

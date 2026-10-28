@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from stelvio.bridge.local import listener
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.listener import (
     connect_to_appsync,
@@ -12,6 +13,7 @@ from stelvio.bridge.local.listener import (
     publish_to_channel,
     subscribe_to_channel,
 )
+from stelvio.bridge.remote.infrastructure import AppSyncResource
 from stelvio.component import BridgeableMixin
 
 
@@ -385,8 +387,6 @@ def test_handle_bridge_event_with_empty_event_string():
 def test_main_keeps_listening_after_a_message_the_handler_cannot_process(monkeypatch, capsys):
     """Anyone with the AppSync key can publish on the channel; one bad message must not end
     `stlv dev`."""
-    from stelvio.bridge.local import listener
-    from stelvio.bridge.remote.infrastructure import AppSyncResource
 
     class FakeWs:
         def __init__(self, messages):
