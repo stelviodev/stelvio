@@ -69,8 +69,9 @@ def clean_name(raw: str) -> str:
     """Lowercase, each run of other chars becomes one '-'. For names the user never typed.
 
     The app and env lead every AWS name, and S3, Lambda and DocumentDB each reject a char the
-    others accept, so only letters, digits and '-' are safe everywhere. NFKD first keeps the
-    base letter of an accented one: `José` becomes `jose`, not `jos`.
+    others accept, so only letters, digits and '-' are safe everywhere. NFKD first splits an
+    accent off its letter: `José` becomes `jose`, not `jos`. A letter it can't split (`Ł`, `Ø`)
+    is dropped: `Łukasz` becomes `ukasz`.
     """
     ascii_name = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
