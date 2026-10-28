@@ -71,6 +71,7 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
 
 !!! note "Path matching rules"
     - A path starts with `/`, has no trailing `/`, no empty, `.` or `..` segment, no `?`, and `*` only at the end. Other characters: letters, digits and `_ . ~ - $ @ : +`. The Router rejects any other path
+    - A route another route always catches first (`/api` next to `/api*`) is rejected
     - Longer, more specific paths take priority over shorter ones
     - The root path `/` acts as a catch-all for unmatched requests. `/*` is the same route, so a Router accepts only one of them
     - If no root path is defined, unmatched requests return a 404 response

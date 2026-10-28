@@ -69,6 +69,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         self.routes: list[Route] = []
         for route in routes or []:
             self._add_route(route)
+        self._check_routes_reachable()
         self.price_class = price_class
         self.custom_domain = custom_domain
         # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
@@ -304,6 +305,24 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             )
         self.routes.append(route)
 
+    def _check_routes_reachable(self) -> None:
+        # CloudFront takes the first ordered behavior that matches. A route under a wildcard
+        # behavior ordered before it (`/api` after `/api*`, `/api/admin` after `/api`) gets
+        # nothing. The root route is the default behavior: never ordered, never caught.
+        ordered = [r for r in self.routes if not r.is_root]
+        for idx, route in enumerate(ordered):
+            under = route.path_pattern.rstrip("*")
+            catcher = next(
+                (r for r in ordered[:idx] if under.startswith(r.prefix_pattern.rstrip("*"))),
+                None,
+            )
+            if catcher is not None:
+                raise ValueError(
+                    f"Route for path pattern {route.path_pattern!r} never gets a request: "
+                    f"{catcher.path_pattern!r} comes first and matches everything "
+                    f"{route.path_pattern!r} would."
+                )
+
     def route(
         self,
         path: str,
@@ -319,5 +338,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         """
         self._check_not_created("routes")
         self._add_route(Route(path, component_or_url, function_url))
-        # Sort routes by path pattern length in descending order (more specific first)
-        self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
+        # Longer paths first (more specific); on equal length the plain path before the
+        # wildcard, which would catch it (`/a/*` takes `/a/b` and `/a/b/*`).
+        self.routes.sort(
+            key=lambda r: (len(r.path_pattern), not r.path_pattern.endswith("*")), reverse=True
+        )
+        self._check_routes_reachable()

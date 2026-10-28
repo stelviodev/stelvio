@@ -192,13 +192,34 @@ def test_route_rejects_a_path_whose_behavior_another_route_takes(first, second):
         router.route(second, Mock(spec=Bucket))
 
 
-def test_route_accepts_api_star_next_to_api():
-    """`/api*` also matches `/apix`; CloudFront accepts both, so the Router does too."""
-    router = Router(name="test-router", routes=[Route("/api*", Mock(spec=Bucket))])
+@pytest.mark.parametrize(("first", "second"), [("/api*", "/api"), ("/api", "/api*")])
+def test_route_rejects_a_path_a_wildcard_route_catches_first(first, second):
+    """`/api*` sorts first (longer) and matches `/api` and `/api/*`, whichever came first."""
+    router = Router(name="test-router")
+    router.route(first, Mock(spec=Bucket))
 
-    router.route("/api", Mock(spec=Bucket))
+    with pytest.raises(
+        ValueError,
+        match=r"^Route for path pattern '/api' never gets a request: '/api\*' comes first and "
+        r"matches everything '/api' would\.$",
+    ):
+        router.route(second, Mock(spec=Bucket))
 
-    assert [r.path_pattern for r in router.routes] == ["/api*", "/api"]
+
+def test_route_puts_a_plain_path_before_a_wildcard_of_the_same_length():
+    router = Router(name="test-router")
+    router.route("/v/*", Mock(spec=Bucket))
+    router.route("/v/1", Mock(spec=Bucket))
+
+    assert [r.path_pattern for r in router.routes] == ["/v/1", "/v/*"]
+
+
+def test_router_root_route_given_first_to_the_constructor_catches_nothing():
+    routes = [Route("/", Mock(spec=Bucket)), Route("/api", Mock(spec=Bucket))]
+
+    router = Router(name="test-router", routes=routes)
+
+    assert [r.path_pattern for r in router.routes] == ["/", "/api"]
 
 
 def test_router_keeps_the_order_of_routes_given_to_the_constructor():
@@ -249,8 +270,13 @@ def _function_with_url():
             )
             + "$",
         ),
+        (
+            lambda: [Route("/api", Mock(spec=Bucket)), Route("/api/admin", Mock(spec=Bucket))],
+            r"^Route for path pattern '/api/admin' never gets a request: '/api' comes first "
+            r"and matches everything '/api/admin' would\.$",
+        ),
     ],
-    ids=["duplicate-path", "two-roots", "function-with-url", "bad-path"],
+    ids=["duplicate-path", "two-roots", "function-with-url", "bad-path", "hidden-route"],
 )
 def test_router_checks_routes_given_to_the_constructor(make_routes, error):
     with pytest.raises(ValueError, match=error):
