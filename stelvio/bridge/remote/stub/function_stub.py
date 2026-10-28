@@ -30,6 +30,14 @@ STAGE_SEGMENT = channel_segment(STAGE)
 
 WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
 RESPONSE_WAIT_MAX = 25  # under API Gateway's 29 s integration timeout
+# The deployed function's own values the local handler gets in its env. The stub ships alone
+# and can't import stelvio, so stelvio.aws.function.function keeps a copy; a test pins them equal.
+STUB_LAMBDA_ENV_KEYS = (
+    "AWS_LAMBDA_FUNCTION_NAME",
+    "AWS_LAMBDA_FUNCTION_VERSION",
+    "AWS_LAMBDA_LOG_GROUP_NAME",
+    "AWS_LAMBDA_LOG_STREAM_NAME",
+)
 
 # Global state for connection reuse (survives across warm container invocations)
 _event_loop = None
@@ -254,16 +262,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         "endpointId": ENDPOINT_ID,
         "functionName": FUNCTION_NAME,
         # The local handler sees the deployed function's values, as in a real invocation
-        "lambdaEnv": {
-            key: os.environ[key]
-            for key in (
-                "AWS_LAMBDA_FUNCTION_NAME",
-                "AWS_LAMBDA_FUNCTION_VERSION",
-                "AWS_LAMBDA_LOG_GROUP_NAME",
-                "AWS_LAMBDA_LOG_STREAM_NAME",
-            )
-            if key in os.environ
-        },
+        "lambdaEnv": {key: os.environ[key] for key in STUB_LAMBDA_ENV_KEYS if key in os.environ},
         "event": event,
         "context": {
             "invoke_id": getattr(context, "aws_request_id", None),
