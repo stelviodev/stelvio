@@ -892,3 +892,19 @@ def test_router_rejects_a_function_url_config_of_the_wrong_type(pulumi_mocks, pr
         TypeError, match=r"^Invalid config type: expected FunctionUrlConfig or dict, got str$"
     ):
         _ = router.resources
+
+
+def test_uri_rewrite_function_comment_fits_the_cloudfront_limit(pulumi_mocks):
+    """AWS rejects a CloudFront Function comment over 128 chars."""
+    bucket = Bucket("b")
+    router = Router("r")
+    router.route("/" + "a" * 110, bucket)
+
+    @pulumi.runtime.test
+    def deploy():
+        return [bucket.resources, router.resources]
+
+    deploy()
+
+    [fn] = [f for f in pulumi_mocks.created(R.CLOUDFRONT_FUNCTION) if "uri-rewrite" in f.name]
+    assert len(fn.inputs["comment"]) == 128

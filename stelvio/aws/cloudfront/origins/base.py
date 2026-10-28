@@ -114,7 +114,8 @@ class ComponentCloudfrontAdapter(ABC):
         defaults = {
             "runtime": "cloudfront-js-2.0",
             "code": strip_path_pattern_function_js(self.route.path_pattern),
-            "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}",
+            # AWS caps a CloudFront Function comment at 128 chars
+            "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}"[:128],
         }
         props = self.customize("cloudfront_functions", {}, defaults)
         # The root route has no prefix to strip, and its function would run on every request
