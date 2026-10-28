@@ -317,10 +317,16 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 None,
             )
             if catcher is not None:
+                # `route()` sorts by length: only equal-length routes keep the order added.
+                hint = (
+                    f" Add {route.path_pattern!r} before {catcher.path_pattern!r}."
+                    if len(route.path_pattern) == len(catcher.path_pattern)
+                    else ""
+                )
                 raise ValueError(
                     f"Route for path pattern {route.path_pattern!r} never gets a request: "
                     f"{catcher.path_pattern!r} comes first and matches everything "
-                    f"{route.path_pattern!r} would."
+                    f"{route.path_pattern!r} would.{hint}"
                 )
 
     def route(
@@ -338,9 +344,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         """
         self._check_not_created("routes")
         self._add_route(Route(path, component_or_url, function_url))
-        # Longer paths first (more specific); on equal length the plain path before the
-        # wildcard, which would catch it (`/a/*` takes `/a/b` and `/a/b/*`).
-        self.routes.sort(
-            key=lambda r: (len(r.path_pattern), not r.path_pattern.endswith("*")), reverse=True
-        )
+        # Longer paths first (more specific). Stable, so equal-length routes keep the order
+        # added: a tie-break would renumber the idx-named resources of a working stack.
+        self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
         self._check_routes_reachable()

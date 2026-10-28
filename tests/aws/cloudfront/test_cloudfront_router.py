@@ -206,10 +206,22 @@ def test_route_rejects_a_path_a_wildcard_route_catches_first(first, second):
         router.route(second, Mock(spec=Bucket))
 
 
-def test_route_puts_a_plain_path_before_a_wildcard_of_the_same_length():
+def test_route_rejects_a_plain_path_added_after_a_wildcard_of_the_same_length():
     router = Router(name="test-router")
     router.route("/v/*", Mock(spec=Bucket))
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Route for path pattern '/v/1' never gets a request: '/v/\*' comes first and "
+        r"matches everything '/v/1' would\. Add '/v/1' before '/v/\*'\.$",
+    ):
+        router.route("/v/1", Mock(spec=Bucket))
+
+
+def test_route_keeps_a_plain_path_added_before_a_wildcard_of_the_same_length_first():
+    router = Router(name="test-router")
     router.route("/v/1", Mock(spec=Bucket))
+    router.route("/v/*", Mock(spec=Bucket))
 
     assert [r.path_pattern for r in router.routes] == ["/v/1", "/v/*"]
 
