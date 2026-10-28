@@ -242,7 +242,15 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 continue
             # Data message (Lambda invocation)
             case "data":
-                await _handle_data_message(data, ws, config.api_key, app_name, env)
+                # Anyone with the API key can publish here; one bad message must not end the
+                # server
+                try:
+                    await _handle_data_message(data, ws, config.api_key, app_name, env)
+                except Exception:
+                    console.print(
+                        "[bold red]Error handling a request:[/bold red]\n"
+                        f"[red]{escape(traceback.format_exc())}[/red]"
+                    )
             case _:
                 pass
 
