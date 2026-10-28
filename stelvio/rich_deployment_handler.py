@@ -568,7 +568,8 @@ class RichDeploymentHandler:
 
     def _short_resource_name(self, logical_name: str) -> str:
         """Strip app/env prefix from generated resource names when present."""
-        prefix = f"{self.app_name}-{self.environment}-"
+        # Lowercased like `AppContext.prefix()`: an app named `My-App` deploys `my-app-...`
+        prefix = f"{self.app_name}-{self.environment}-".lower()
         if logical_name.startswith(prefix):
             return logical_name[len(prefix) :]
         return logical_name
