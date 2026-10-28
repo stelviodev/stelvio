@@ -178,6 +178,25 @@ def test_route_accepts_a_path_cloudfront_and_the_prefix_strip_both_handle(path):
     assert [r.path_pattern for r in router.routes] == [path]
 
 
+def test_route_accepts_a_path_whose_prefix_pattern_fits_cloudfronts_255_chars():
+    router = Router(name="test-router")
+
+    router.route("/" + "a" * 252, Mock(spec=Bucket))
+
+    assert len(router.routes[0].prefix_pattern) == 255
+
+
+def test_route_rejects_a_path_whose_prefix_pattern_exceeds_cloudfronts_255_chars():
+    router = Router(name="test-router")
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Invalid route path '/a{253}': CloudFront caps a path pattern at 255 chars and "
+        r"'/a{253}/\*' has 256\.$",
+    ):
+        router.route("/" + "a" * 253, Mock(spec=Bucket))
+
+
 @pytest.mark.parametrize(("first", "second"), [("/api", "/api/*"), ("/api/*", "/api")])
 def test_route_rejects_a_path_whose_behavior_another_route_takes(first, second):
     """`/api` needs `/api` and `/api/*`; `/api/*` needs `/api/*`: CloudFront rejects a
