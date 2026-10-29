@@ -3,48 +3,32 @@ import json
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
-from stelvio.aws.cloudfront.origins.base import (
-    ComponentCloudfrontAdapter,
-    Customizer,
-    _as_is,
-)
+from stelvio.aws.cloudfront.dtos import RouteOriginConfig
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.aws.s3.s3 import Bucket
-from stelvio.context import context
 
 
 @register_adapter(Bucket)
 class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
-    def __init__(
-        self,
-        idx: int,
-        route: Route,
-        resource_opts: pulumi.ResourceOptions | None = None,
-        customize: Customizer = _as_is,
-    ) -> None:
-        super().__init__(idx, route, resource_opts, customize)
-        self.bucket = route.component
+    @property
+    def bucket(self) -> Bucket:
+        return self.route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
         oac = pulumi_aws.cloudfront.OriginAccessControl(
-            context().prefix(f"{self.bucket.name}-oac-{self.idx}"),
+            self._name("oac", limit=64),
             **self.customize(
                 "origin_access_controls",
                 {},
                 {
-                    "description": (
-                        f"Origin Access Control for {self.bucket.name} route {self.idx}"
-                    ),
+                    "description": f"Origin Access Control for {self.bucket.name}",
                     "origin_access_control_origin_type": "s3",
                     "signing_behavior": "always",
                     "signing_protocol": "sigv4",
                 },
             ),
-            opts=pulumi.ResourceOptions.merge(
-                self.resource_opts,
-                pulumi.ResourceOptions(depends_on=[self.bucket.resources.bucket]),
-            ),
+            opts=self._opts("oac", depends_on=[self.bucket.resources.bucket]),
         )
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=self.bucket.resources.bucket.arn,
@@ -55,9 +39,7 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             "domain_name": origin_args.domain_name,
             "origin_access_control_id": oac.id,
         }
-        cf_function = self._uri_rewrite_function(
-            component_name=self.bucket.name, depends_on=[self.bucket.resources.bucket]
-        )
+        cf_function = self._uri_rewrite_function(depends_on=[self.bucket.resources.bucket])
         cache_behavior = {
             "path_pattern": self.route.prefix_pattern,
             "allowed_methods": ["GET", "HEAD", "OPTIONS"],
@@ -109,7 +91,7 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
             )
         )
         return pulumi_aws.s3.BucketPolicy(
-            context().prefix(f"{self.bucket.name}-bucket-policy-{self.idx}"),
+            self._name("bucket-policy", limit=None),
             **self.customize("access_policies", {"bucket": bucket.id}, {"policy": policy}),
-            opts=self.resource_opts,
+            opts=self._opts("bucket-policy"),
         )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, TypedDict, final
@@ -13,7 +12,7 @@ from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationD
 from stelvio.aws.api_gateway.validators import url_domain, validate_domain_name
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
-from stelvio.aws.cloudfront.origins.components.url import Url
+from stelvio.aws.cloudfront.origins.components.url import Url, url_origin_name
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.aws.s3.s3 import Bucket
@@ -59,8 +58,12 @@ def _check_route_path(route: Route) -> None:
 def _same_origin(existing: Component | str, new: Component | str) -> bool:
     # A url string is wrapped in a `Url` after the clash checks: compare it with the wrapped
     # url here, or the second route fails later on the duplicate component name instead.
-    if isinstance(new, str) and isinstance(existing, Url):
+    # Two `Url`s with one url share their per-route resource names: the deploy would fail
+    # on a duplicate URN.
+    if isinstance(existing, Url) and isinstance(new, str):
         return existing.url == new.strip()
+    if isinstance(existing, Url) and isinstance(new, Url):
+        return existing.url == new.url
     return existing == new
 
 
@@ -99,8 +102,9 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:Router", name, tags=tags, customize=customize
         )
-        # Checked like `route()` calls but not sorted: a new order would rename every resource
-        # named by route index on a stack deployed with this one.
+        # Checked like `route()` calls but not sorted: the migration aliases are built from
+        # the index a deployed stack has, which for `routes=` is the order given. Sort when
+        # the aliases go.
         self.routes: list[Route] = []
         for route in routes or []:
             self._add_route(route)
@@ -132,7 +136,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         adapters = [
             CloudfrontAdapterRegistry.get_adapter_for_component(route.component)(
-                idx, route, self._resource_opts(), self._customizer
+                idx, route, self._resource_opts(), self._customizer, router_name=self.name
             )
             for idx, route in enumerate(self.routes)
         ]
@@ -305,9 +309,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         if isinstance(route.component, str):
             url = route.component.strip()
-            sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
             url_origin = Url(
-                context().prefix(f"{self.name}-url-origin-{sha_url}"), url=url, tags=self.tags
+                context().prefix(url_origin_name(self.name, url)), url=url, tags=self.tags
             )
             route = replace(route, component=url_origin)
         elif not isinstance(route.component, Component):
@@ -366,7 +369,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         """
         self._check_not_created("routes")
         self._add_route(Route(path, component_or_url, function_url))
-        # Longer paths first (more specific). Stable, so equal-length routes keep the order
-        # added: a tie-break would renumber the idx-named resources of a working stack.
+        # Longer paths first (more specific). Stable, so equal-length routes keep the index a
+        # deployed stack has, which its migration aliases are built from.
         self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
         self._check_routes_reachable(order_given=False)
