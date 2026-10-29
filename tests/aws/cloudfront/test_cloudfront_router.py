@@ -363,6 +363,16 @@ def test_route_converts_plain_url_to_url_component():
     assert isinstance(route.component, Url)
 
 
+def test_route_rejects_a_second_route_to_the_same_url():
+    router = Router(name="test-router")
+    router.route("/a", "https://example.com")
+
+    with pytest.raises(
+        ValueError, match=r"^Route for origin https://example\.com already exists\.$"
+    ):
+        router.route("/b", "https://example.com")
+
+
 def test_route_method_with_different_http_methods():
     """Test that route method works with different HTTP methods."""
     router = Router(name="test-router")

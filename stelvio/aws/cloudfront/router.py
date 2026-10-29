@@ -56,6 +56,14 @@ def _check_route_path(route: Route) -> None:
         )
 
 
+def _same_origin(existing: Component | str, new: Component | str) -> bool:
+    # A url string is wrapped in a `Url` after the clash checks: compare it with the wrapped
+    # url here, or the second route fails later on the duplicate component name instead.
+    if isinstance(new, str) and isinstance(existing, Url):
+        return existing.url == new.strip()
+    return existing == new
+
+
 @final
 @dataclass(frozen=True)
 class RouterResources:
@@ -292,7 +300,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                     f"{existing_route.path_pattern!r}: both need the CloudFront behavior "
                     f"{route.prefix_pattern!r}."
                 )
-            if existing_route.component == route.component:
+            if _same_origin(existing_route.component, route.component):
                 raise ValueError(f"Route for origin {route.component} already exists.")
 
         if isinstance(route.component, str):
