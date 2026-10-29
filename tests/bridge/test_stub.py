@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from stelvio.aws.function.function import _STUB_LAMBDA_ENV_KEYS
 from stelvio.bridge._chunking import MAX_CHUNK_SIZE, split_message
 
 TEST_EPOCH_DEADLINE_MS = 1768780800000  # 2026-01-18 00:00:00 UTC
@@ -679,11 +678,6 @@ def test_publishes_correct_request_message(
         },
     }
     assert message == expected_message
-
-
-def test_stub_sends_the_env_keys_the_local_side_copies(reset_global_state):
-    """Two copies of the tuple: the stub ships alone and can't import stelvio."""
-    assert reset_global_state.STUB_LAMBDA_ENV_KEYS == _STUB_LAMBDA_ENV_KEYS
 
 
 @pytest.mark.parametrize(("remaining_ms", "expected"), [(30_000, 25), (10_000, 9.5), (900, 0.4)])

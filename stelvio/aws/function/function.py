@@ -49,6 +49,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.vpc import VpcAttachment
 from stelvio.aws.vpc.vpc import normalize_vpc_attachment
+from stelvio.bridge._chunking import STUB_LAMBDA_ENV_KEYS
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.local.lambda_context import LambdaContext
@@ -78,15 +79,6 @@ if TYPE_CHECKING:
     from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
-
-# The deployed function's own values the dev stub sends (same list in function_stub.py, which
-# can't import stelvio). Anything else in a bridge message must not reach the handler's env.
-_STUB_LAMBDA_ENV_KEYS = (
-    "AWS_LAMBDA_FUNCTION_NAME",
-    "AWS_LAMBDA_FUNCTION_VERSION",
-    "AWS_LAMBDA_LOG_GROUP_NAME",
-    "AWS_LAMBDA_LOG_STREAM_NAME",
-)
 
 
 @final
@@ -402,11 +394,12 @@ class Function(
 
         new_environ = await self._get_environment_for_bridge_event()
         # Absent when the stub was deployed by an older Stelvio; not a dict only in a message
-        # somebody else published
+        # somebody else published. Only the stub's keys: nothing else in a bridge message may
+        # reach the handler's env.
         lambda_env = event.get("lambdaEnv")
         if isinstance(lambda_env, dict):
             new_environ.update(
-                {k: str(lambda_env[k]) for k in _STUB_LAMBDA_ENV_KEYS if k in lambda_env}
+                {k: str(lambda_env[k]) for k in STUB_LAMBDA_ENV_KEYS if k in lambda_env}
             )
         # Lambda puts the zip root on sys.path: the folder for folder mode, nothing a
         # single-file handler could import a sibling from

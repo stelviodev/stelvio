@@ -14,7 +14,7 @@ import uuid
 
 import stlv_chunking
 import websockets
-from stlv_chunking import channel_segment
+from stlv_chunking import STUB_LAMBDA_ENV_KEYS, channel_segment
 
 # Environment variables (set by deployment)
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
@@ -30,14 +30,6 @@ STAGE_SEGMENT = channel_segment(STAGE)
 
 WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
 RESPONSE_WAIT_MAX = 25  # under API Gateway's 29 s integration timeout
-# The deployed function's own values the local handler gets in its env. The stub ships alone
-# and can't import stelvio, so stelvio.aws.function.function keeps a copy; a test pins them equal.
-STUB_LAMBDA_ENV_KEYS = (
-    "AWS_LAMBDA_FUNCTION_NAME",
-    "AWS_LAMBDA_FUNCTION_VERSION",
-    "AWS_LAMBDA_LOG_GROUP_NAME",
-    "AWS_LAMBDA_LOG_STREAM_NAME",
-)
 
 # Global state for connection reuse (survives across warm container invocations)
 _event_loop = None
