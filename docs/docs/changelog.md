@@ -12,6 +12,7 @@
 
 - **`stlv dev` matches the deployed Lambda.** `context.function_name` and the `AWS_LAMBDA_*` env vars are set, and a request waits for the Function's `timeout` (up to 25 s), not 16 s.
 - **Router rejects route paths it routed wrong.** `/api/`, `api`, `*`, a `?` or a `*` before the end deployed but routed wrong. Use `/api`, `/api/*` or `/*`. A route another route always catches first (`/api` next to `/api*`) is rejected too.
+- **Adding a Router route no longer touches the other routes' resources.** Before, a new `/static/*` could leave a bucket route at 403. Existing stacks: deploy once with routes unchanged first, nothing is replaced.
 
 ### Breaking Changes
 
