@@ -66,12 +66,14 @@ def save_user_env(env: str) -> None:
 
 
 def clean_name(raw: str) -> str:
-    """Lowercase, each run of other chars becomes one '-'. For names the user never typed.
+    """Each run of chars other than letters and digits becomes one '-'. For names the user
+    never typed. Case stays: the env names the stack, and lowercasing `John` would put that
+    user on a new, empty stack `john` from the next clone (`.stelvio/` is gitignored).
 
     The app and env lead every AWS name, and S3, Lambda and DocumentDB each reject a char the
     others accept, so only letters, digits and '-' are safe everywhere. NFKD first splits an
-    accent off its letter: `José` becomes `jose`, not `jos`. A letter it can't split (`Ł`, `Ø`)
+    accent off its letter: `José` becomes `Jose`, not `Jos`. A letter it can't split (`Ł`, `Ø`)
     is dropped: `Łukasz` becomes `ukasz`.
     """
     ascii_name = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
+    return re.sub(r"[^A-Za-z0-9]+", "-", ascii_name).strip("-")

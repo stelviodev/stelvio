@@ -258,8 +258,8 @@ def test_default_env_is_the_cleaned_os_username_and_is_saved(cli, monkeypatch) -
     result = CliRunner().invoke(cli.outputs, [])
 
     assert result.exit_code == 0
-    assert saved == ["jose-doe-x"]
-    cli.run_outputs.assert_called_once_with("jose-doe-x", json_output=False)
+    assert saved == ["Jose-Doe-x"]
+    cli.run_outputs.assert_called_once_with("Jose-Doe-x", json_output=False)
 
 
 def test_saved_user_env_is_used_as_is(cli, monkeypatch) -> None:

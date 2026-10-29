@@ -17,7 +17,7 @@ environment, a DynamoDB table named "users" becomes `my-api-staging-users`.
 
 ## Default Behavior
 
-If you don't specify an environment, Stelvio uses your personal environment. By default it's your computer username, lowercased and reduced to letters, digits and `-`, so `John.Doe` becomes `john-doe`:
+If you don't specify an environment, Stelvio uses your personal environment. By default it's your computer username reduced to letters, digits and `-`, so `John.Doe` becomes `John-Doe`:
 
 ```bash
 stlv deploy  # Deploys to your personal environment (e.g., "john")
