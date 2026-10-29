@@ -5,6 +5,7 @@ import getpass
 import json
 import logging
 import os
+import shlex
 import sys
 import traceback
 from datetime import datetime
@@ -570,8 +571,8 @@ def determine_env(
             stelvio_dir = get_dot_stelvio_dir()
             raise StelvioValidationError(
                 f"Can't make an environment name from the OS username '{username}'. "
-                f'Set one with: mkdir -p "{stelvio_dir}" && '
-                f'echo "<name>" > "{stelvio_dir}/userenv"'
+                f"Set one with: mkdir -p {shlex.quote(str(stelvio_dir))} && "
+                f'echo "<name>" > {shlex.quote(str(stelvio_dir / "userenv"))}'
             )
         save_user_env(user_env)
     return user_env

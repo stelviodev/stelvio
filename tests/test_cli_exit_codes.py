@@ -282,7 +282,8 @@ def test_saved_user_env_is_used_as_is(cli, monkeypatch) -> None:
 
 
 def test_os_username_with_no_usable_chars_is_a_usage_error(cli, monkeypatch) -> None:
-    """The hint is pasted as a shell command: the project dir is quoted for a space in it."""
+    """The hint is pasted as a shell command: the project dir is shell-quoted (space, `$`,
+    quotes)."""
     save = Mock()
     monkeypatch.setattr(cli, "get_user_env", lambda: None)
     monkeypatch.setattr(cli, "save_user_env", save)
@@ -296,7 +297,7 @@ def test_os_username_with_no_usable_chars_is_a_usage_error(cli, monkeypatch) -> 
         operation="outputs",
         env=None,
         message="Can't make an environment name from the OS username 'Иван'. Set one with: "
-        'mkdir -p "/work/my app/.stelvio" && echo "<name>" > "/work/my app/.stelvio/userenv"',
+        "mkdir -p '/work/my app/.stelvio' && echo \"<name>\" > '/work/my app/.stelvio/userenv'",
     )
     save.assert_not_called()
 
