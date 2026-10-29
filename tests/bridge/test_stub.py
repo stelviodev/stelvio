@@ -576,7 +576,7 @@ def test_timeout_returns_helpful_error(
 
     assert result["statusCode"] == 500
     body = json.loads(result["body"])
-    assert "Local dev server not responding" in body["error"]
+    assert body["error"] == "Local dev server did not respond within 25.0 s"
     assert "Is 'stlv dev' running?" in body["hint"]
 
 

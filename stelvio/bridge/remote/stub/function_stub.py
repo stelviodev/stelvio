@@ -311,8 +311,9 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
             "statusCode": 500,
             "body": json.dumps(
                 {
-                    "error": "Local dev server not responding",
-                    "hint": "Is 'stlv dev' running?",
+                    "error": f"Local dev server did not respond within {timeout:.1f} s",
+                    "hint": "Is 'stlv dev' running? If it is, the handler took longer than "
+                    f"the Function's timeout or the {RESPONSE_WAIT_MAX} s dev cap.",
                     "timings": timings,
                     "env": {
                         "APP_NAME": APP_NAME,
