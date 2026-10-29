@@ -96,7 +96,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         self.routes: list[Route] = []
         for route in routes or []:
             self._add_route(route)
-        self._check_routes_reachable()
+        self._check_routes_reachable(order_given=True)
         self.price_class = price_class
         self.custom_domain = custom_domain
         # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
@@ -318,7 +318,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             )
         self.routes.append(route)
 
-    def _check_routes_reachable(self) -> None:
+    def _check_routes_reachable(self, *, order_given: bool) -> None:
         # CloudFront takes the first ordered behavior that matches. A route under a wildcard
         # behavior ordered before it (`/api` after `/api*`, `/api/admin` after `/api`) gets
         # nothing. The root route is the default behavior: never ordered, never caught.
@@ -330,10 +330,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 None,
             )
             if catcher is not None:
-                # `route()` sorts by length: only equal-length routes keep the order added.
+                # Reordering fixes it when the order is the user's: always in `routes=`, after
+                # `route()`'s length sort only for equal lengths.
                 hint = (
                     f" Add {route.path_pattern!r} before {catcher.path_pattern!r}."
-                    if len(route.path_pattern) == len(catcher.path_pattern)
+                    if order_given or len(route.path_pattern) == len(catcher.path_pattern)
                     else ""
                 )
                 raise ValueError(
@@ -360,4 +361,4 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         # Longer paths first (more specific). Stable, so equal-length routes keep the order
         # added: a tie-break would renumber the idx-named resources of a working stack.
         self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
-        self._check_routes_reachable()
+        self._check_routes_reachable(order_given=False)

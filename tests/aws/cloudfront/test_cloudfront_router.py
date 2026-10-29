@@ -309,7 +309,7 @@ def _function_with_url():
         (
             lambda: [Route("/api", Mock(spec=Bucket)), Route("/api/admin", Mock(spec=Bucket))],
             r"^Route for path pattern '/api/admin' never gets a request: '/api' comes first "
-            r"and matches everything '/api/admin' would\.$",
+            r"and matches everything '/api/admin' would\. Add '/api/admin' before '/api'\.$",
         ),
     ],
     ids=["duplicate-path", "two-roots", "function-with-url", "bad-path", "hidden-route"],
