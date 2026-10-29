@@ -65,6 +65,24 @@ def save_user_env(env: str) -> None:
     _write_metadata_file("userenv", env)
 
 
+# Letters NFKD can't split into base + accent: the common European ones, mapped by hand.
+_UNSPLITTABLE = str.maketrans(
+    {
+        "Ł": "L",
+        "ł": "l",
+        "Ø": "O",
+        "ø": "o",
+        "Đ": "D",
+        "đ": "d",
+        "Æ": "AE",
+        "æ": "ae",
+        "Œ": "OE",
+        "œ": "oe",
+        "ß": "ss",
+    }
+)
+
+
 def clean_name(raw: str) -> str:
     """Each run of chars other than letters and digits becomes one '-'. For names the user
     never typed. Case stays: the env names the stack, and lowercasing `John` would put that
@@ -72,8 +90,9 @@ def clean_name(raw: str) -> str:
 
     The app and env lead every AWS name, and S3, Lambda and DocumentDB each reject a char the
     others accept, so only letters, digits and '-' are safe everywhere. NFKD first splits an
-    accent off its letter: `José` becomes `Jose`, not `Jos`. A letter it can't split (`Ł`, `Ø`)
-    is dropped: `Łukasz` becomes `ukasz`.
+    accent off its letter: `José` becomes `Jose`, not `Jos`; `_UNSPLITTABLE` covers the letters
+    it can't (`Łukasz` becomes `Lukasz`). Any other char with no ASCII form is dropped.
     """
-    ascii_name = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
+    folded = unicodedata.normalize("NFKD", raw.translate(_UNSPLITTABLE))
+    ascii_name = folded.encode("ascii", "ignore").decode()
     return re.sub(r"[^A-Za-z0-9]+", "-", ascii_name).strip("-")

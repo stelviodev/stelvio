@@ -249,17 +249,27 @@ def test_ci_requires_explicit_environment_for_diff_json(cli, monkeypatch) -> Non
     )
 
 
-def test_default_env_is_the_cleaned_os_username_and_is_saved(cli, monkeypatch) -> None:
+@mark.parametrize(
+    ("username", "env"),
+    [
+        ("_José.Doe__x-", "Jose-Doe-x"),
+        ("Łukasz.Sørensen", "Lukasz-Sorensen"),
+        ("Straße", "Strasse"),
+    ],
+)
+def test_default_env_is_the_cleaned_os_username_and_is_saved(
+    cli, monkeypatch, username, env
+) -> None:
     saved: list[str] = []
     monkeypatch.setattr(cli, "get_user_env", lambda: None)
     monkeypatch.setattr(cli, "save_user_env", saved.append)
-    monkeypatch.setattr("getpass.getuser", lambda: "_José.Doe__x-")
+    monkeypatch.setattr("getpass.getuser", lambda: username)
 
     result = CliRunner().invoke(cli.outputs, [])
 
     assert result.exit_code == 0
-    assert saved == ["Jose-Doe-x"]
-    cli.run_outputs.assert_called_once_with("Jose-Doe-x", json_output=False)
+    assert saved == [env]
+    cli.run_outputs.assert_called_once_with(env, json_output=False)
 
 
 def test_saved_user_env_is_used_as_is(cli, monkeypatch) -> None:
@@ -277,7 +287,7 @@ def test_os_username_with_no_usable_chars_is_a_usage_error(cli, monkeypatch) -> 
     monkeypatch.setattr(cli, "get_user_env", lambda: None)
     monkeypatch.setattr(cli, "save_user_env", save)
     monkeypatch.setattr(cli, "get_dot_stelvio_dir", lambda: Path("/work/my app/.stelvio"))
-    monkeypatch.setattr("getpass.getuser", lambda: "_.ß")
+    monkeypatch.setattr("getpass.getuser", lambda: "Иван")
 
     result = CliRunner().invoke(cli.outputs, ["--json"])
 
@@ -285,7 +295,7 @@ def test_os_username_with_no_usable_chars_is_a_usage_error(cli, monkeypatch) -> 
         result,
         operation="outputs",
         env=None,
-        message="Can't make an environment name from the OS username '_.ß'. Set one with: "
+        message="Can't make an environment name from the OS username 'Иван'. Set one with: "
         'mkdir -p "/work/my app/.stelvio" && echo "<name>" > "/work/my app/.stelvio/userenv"',
     )
     save.assert_not_called()
