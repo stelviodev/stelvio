@@ -10,7 +10,7 @@ Use the `customize` parameter when you need to:
 
 - Set Pulumi properties not exposed by Stelvio's API (e.g., `force_destroy` on S3 buckets)
 - Override default values that Stelvio sets internally
-- Add tags, encryption settings, or other resource-specific configurations
+- Add encryption settings or other resource-specific configurations
 - Configure advanced features like VPC settings or custom IAM policies
 
 !!! warning "Customize doesn't change what Stelvio itself reads"
@@ -132,7 +132,8 @@ api = RestApi(
     "my-api",
     customize={"rest_api": {"endpoint_configuration": {"ip_address_type": "dualstack"}}},
 )
-# Result: endpoint_configuration = {"ip_address_type": "dualstack"} (types removed)
+# Result: endpoint_configuration = {"ip_address_type": "dualstack"}, types is missing
+# and the deploy fails: "endpoint_configuration.0.types" is required
 
 # ✅ To keep the default endpoint type, include it:
 other_api = RestApi(
@@ -140,7 +141,7 @@ other_api = RestApi(
     customize={
         "rest_api": {
             "endpoint_configuration": {
-                "types": "REGIONAL",  # Preserved
+                "types": "REGIONAL",  # must match endpoint_type, "regional" by default
                 "ip_address_type": "dualstack",
             }
         }

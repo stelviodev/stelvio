@@ -50,6 +50,7 @@ Global tags are applied through AWS provider `default_tags`, alongside auto-tags
     resource gets tags of its own: from a component's `tags=`, or the `Name` tag Stelvio sets
     on `Vpc` and `DocumentDb` resources. A callable's `tags` replace all of the resource's
     tags, `Name` included, unless the callable merges in `props.get("tags", {})` itself.
+    Auto-tags and global tags still apply.
 
 ## Component Tags
 
@@ -103,7 +104,8 @@ Result for `jobs` queue tags:
 - auto-tags are still present
 
 `tags` in a component's own `customize` replace its whole `tags=` dict, so a key you set only in
-`tags=` is dropped. Auto-tags and global tags still apply.
+`tags=` is dropped. On `Vpc` and `DocumentDb` resources they also drop the `Name` tag Stelvio
+sets. Auto-tags and global tags still apply.
 
 ## Common Patterns
 

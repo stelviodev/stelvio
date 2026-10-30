@@ -64,7 +64,7 @@ Explain to a smart colleague. Friendly, direct, concrete.
 
 - No marketing language ("powerful", "simple", "blazing fast"). Say what it does and what
   it costs; readers judge for themselves.
-- Stelvio API names, not the underlying AWS, ASL, or Pulumi names: `visibility_timeout`, not
+- Stelvio API names, not the underlying AWS or Pulumi names: `visibility_timeout`, not
   `VisibilityTimeout`. A one-time "maps to X" when introducing a parameter is fine; don't
   re-surface it at every mention.
 - One good example beats three similar ones. If a second example doesn't show a different
