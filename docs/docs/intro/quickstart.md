@@ -315,12 +315,16 @@ It will show a  preview like this:
 ```bash
 Diff for stelvio-app → michal
 
-+ RestApi todo-api  (20 to create)
-    + Function todo-api-functions-todos_get  (3 to create)
-        + IAM Policy Attachment
++ DynamoTable todos  (1 to create)
+    + DynamoDB Table
++ RestApi todo-api  (22 to create)
+    + Function functions-todos_get  (5 to create)
+        + IAM Policy
+        + IAM Policy Attachment (basic-execution)
+        + IAM Policy Attachment (default)
         + IAM Role
         + Lambda Function
-    + Function todo-api-functions-todos_post  (5 to create)
+    + Function functions-todos_post  (5 to create)
         + IAM Policy
         + IAM Policy Attachment (basic-execution)
         + IAM Policy Attachment (default)
@@ -335,13 +339,11 @@ Diff for stelvio-app → michal
     + API Resource (/todos/{username})
     + API Stage
     + CloudWatch Log Group
-    + Lambda Permission (functions-todos_get)
-    + Lambda Permission (functions-todos_post)
+    + Lambda Permission (todo-api-functions-todos_get)
+    + Lambda Permission (todo-api-functions-todos_post)
     + REST API
-+ DynamoTable todos  (1 to create)
-    + DynamoDB Table
-✓ Analyzed in 10s
-  2 components: 21 resources to create
+✓ Analyzed in 5s
+  2 components: 23 resources to create
 ```
 
 It shows you all resources that will be created. 
@@ -379,7 +381,7 @@ Stelvio will create all your infrastructure with real-time progress indicators.
 When deployment finishes, you'll see component URLs at the bottom:
 ```bash
 ✓ Deployed in 40s
-  2 components (21 resources) deployed
+  2 components (23 resources) deployed
 
 Outputs:
   RestApi todo-api
