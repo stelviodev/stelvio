@@ -136,6 +136,9 @@ orders_queue.subscribe("batch-processor", "functions/orders.process", batch_size
 The handler takes every [handler form](lambda.md#handler-forms) except a `Function`:
 
 ```python
+from stelvio.aws.queue import Queue
+
+orders_queue = Queue("orders")
 orders_queue.subscribe("processor", "functions/orders.process", memory=512, timeout=60)
 ```
 

@@ -131,8 +131,8 @@ audit_fn = Function("audit-fn", handler="functions/audit.handler", memory=512)
 Cron("audit", "rate(1 day)", audit_fn)
 ```
 
-The options are the ones in [Function Configuration](#function-configuration). Keyword
-options go with a handler path only: with a `FunctionConfig`, a dict or a `Function`, set
+The options are the keyword arguments of `Function`, such as `links`, `memory`, `timeout`,
+`environment` and `vpc`. Keyword options go with a handler path only: with a `FunctionConfig`, a dict or a `Function`, set
 them there, or Stelvio raises an error.
 
 Two exceptions:

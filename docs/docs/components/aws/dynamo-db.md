@@ -225,6 +225,9 @@ orders_table.subscribe("update-inventory", "functions/inventory.update_stock")
 The handler takes every [handler form](lambda.md#handler-forms) except a `Function`:
 
 ```python
+from stelvio.aws.dynamo_db import DynamoTable
+
+orders_table = DynamoTable("orders", fields={"id": "string"}, partition_key="id", stream="new-image")
 orders_table.subscribe("custom-handler", "functions/orders.handler", timeout=60, memory=512)
 ```
 

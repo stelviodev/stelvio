@@ -229,7 +229,7 @@ read_only_link = table.link().with_permissions(
 
 # Link with custom properties (creates a new Link object)
 fn = Function(
-   "users",
+   "users-west",
    handler="users/handler.process",
    links=[table.link().add_properties(table_region="us-west-2")]
 )

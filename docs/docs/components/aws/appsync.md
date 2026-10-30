@@ -219,6 +219,7 @@ api = AppSync("myapi", schema="schema.graphql",
 | `handler`                         | —       | Every [handler form](lambda.md#handler-forms) (required) |
 | `result_ttl`                      | `None`  | Authorization result cache TTL in seconds        |
 | `identity_validation_expression`  | `None`  | Regex to validate the authorization token        |
+| `**fn_opts`                       | —       | Function options such as `links`, `memory` and `timeout`, with a handler path only |
 
 ### Multi-Auth
 

@@ -126,11 +126,8 @@ api.route("ANY", "$default", "functions/fallback.handler")
 
 ### Connecting Lambda Functions
 
-A route's handler takes every [handler form](lambda.md#handler-forms).
-
-Routes that point to the same handler share a single Lambda function and
-integration, and a shared function must be configured on only one of its routes,
-the same rules as for [REST API routes](rest-api.md#organizing-code).
+A route's handler takes every [handler form](lambda.md#handler-forms). With a handler
+path, pass the function options as keyword arguments:
 
 ```python
 api.route(
@@ -142,6 +139,10 @@ api.route(
     links=[users],
 )
 ```
+
+Routes that point to the same handler share a single Lambda function and
+integration, and a shared function must be configured on only one of its routes,
+the same rules as for [REST API routes](rest-api.md#organizing-code).
 
 !!! important "30 second timeout"
     HTTP APIs cap Lambda integrations at 30 seconds. A route Lambda can have a

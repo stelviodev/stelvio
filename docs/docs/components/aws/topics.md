@@ -55,6 +55,9 @@ Each subscription creates a separate Lambda function that receives messages publ
 The handler takes every [handler form](lambda.md#handler-forms) except a `Function`:
 
 ```python
+from stelvio.aws.topic import Topic
+
+notifications = Topic("notifications")
 notifications.subscribe("processor", "functions/notify.process", memory=512, timeout=60)
 ```
 
