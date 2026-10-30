@@ -132,8 +132,8 @@ Cron("audit", "rate(1 day)", audit_fn)
 ```
 
 The options are the fields of `FunctionConfig`, such as `links`, `memory`, `timeout`,
-`environment` and `vpc`. Keyword options go with a handler path only: with a `FunctionConfig`, a dict or a `Function`, set
-them there, or Stelvio raises an error.
+`environment` and `vpc`. Keyword options go with a handler path only: with a
+`FunctionConfig`, a dict or a `Function`, set them there, or Stelvio raises an error.
 
 Two exceptions:
 
