@@ -94,11 +94,20 @@ users = UserPool("users",
 )
 ```
 
-Each trigger value accepts the same forms as Lambda handlers elsewhere in Stelvio:
+Each trigger value takes a [handler](lambda.md#handler-forms): a path, a `FunctionConfig`, a
+dict or a `Function`. Triggers take no keyword options, so set `memory`, `timeout` and the
+rest in a `FunctionConfig` or a dict:
 
-- A handler path string: `"functions/auth/validate.handler"`
-- A `FunctionConfig` for full control over the Lambda
-- An existing `Function` instance to reuse a function
+```python
+from stelvio.aws.cognito import UserPool
+
+users = UserPool("users",
+    usernames=["email"],
+    triggers={
+        "pre_sign_up": {"handler": "functions/auth/validate.handler", "memory": 256},
+    },
+)
+```
 
 ### Common Triggers
 

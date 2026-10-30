@@ -173,7 +173,7 @@ The above will create a
 [DynamoDB table](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/WorkingWithTables.Basics.html) 
 with partition key `username`, sort key `created` and billing mode `PAY_PER_REQUEST`.
 
-Now let's add an API and routes to the same function:
+Now let's add an API with two routes:
 
 ```python title="stlv_app.py" hl_lines="13-16"
 @app.run
@@ -190,7 +190,7 @@ def run() -> None:
     
     api = RestApi("todo-api")
     api.route("POST", "/todos", handler="functions/todos.post", links=[table])
-    api.route("GET", "/todos/{username}", handler="functions/todos.get")
+    api.route("GET", "/todos/{username}", handler="functions/todos.get", links=[table])
 ```
 
 The above will create:
@@ -198,9 +198,8 @@ The above will create:
 - An API Gateway REST API
 - API resources (e.g., `/todos`, `/todos/{username}`)
 - API methods (GET and POST)
-- A Lambda function with code from `functions/todos.py` file with:
+- Two Lambda functions, one per route, with code from `functions/todos.py` file with:
   - properly configured env vars containing table name and arn
-  - generated routing code to properly route requests to proper functions
 - lambda integration between methods and lambda 
 - IAM (roles, policies, etc.) 
 - stage
@@ -233,7 +232,7 @@ def run() -> None:
     
     api = RestApi("todo-api")
     api.route("POST", "/todos", handler="functions/todos.post", links=[table])
-    api.route("GET", "/todos/{username}", handler="functions/todos.get")
+    api.route("GET", "/todos/{username}", handler="functions/todos.get", links=[table])
 ```
 
 ### Lambda code

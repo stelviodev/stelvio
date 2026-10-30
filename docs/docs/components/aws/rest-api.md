@@ -171,33 +171,14 @@ api.route('*', '/users', 'functions/users.handler')  # Alternative syntax
 
 ## Lambda function Integration
 
-Stelvio offers flexible ways to connect your routes to Lambda functions. The handler 
-path in your route definition can have two formats:
+A route's handler takes every [handler form](lambda.md#handler-forms):
 
-1. For [Single-File Functions](lambda.md#single-file-lambda-functions) use a simple path
-   convention:
+```python
+from stelvio.aws.api_gateway import RestApi
 
-    ```
-    folder/file.function_name
-    ```
-
-2. [Folder-Based Functions](lambda.md#folder-based-lambda-functions) (when you need to 
-   package multiple files) use this format:
-
-    ```
-    folder/path::file.function_name
-    ```
-    Where everything before `::` is the path to the folder of your lambda function, and 
-    everything after is the relative path to file and function name within that folder.
-
-    Examples:
-    ```python
-    # Single-file function
-    api.route('GET', '/users', 'functions/users.index')
-    
-    # Folder-based function
-    api.route('GET', '/orders', 'functions/orders::handler.process_order')
-    ```
+api = RestApi("my-api")
+api.route("GET", "/orders", "functions/orders.list", memory=512, timeout=30)
+```
 
 ### Organizing Code
 
@@ -255,153 +236,10 @@ api.route("get", "/b", "functions/api.handler_2")
 api.route("get", "/c", "functions/api.handler_2")
 ```
 
-
-### Lambda Configuration
-
-The above samples will create functions with default configuration. If you want to
-customize Lambda function settings like memory size, timeout or
-runtime settings, you have several options:
-
-1. Through `FunctionConfig` class
-    
-    ```python
-    # In this example we configure custom memory size and timeout
-    api.route(
-        "GET",
-        "/users",
-        FunctionConfig(
-            handler="functions/users.index",
-            memory=512,
-            timeout=30,
-        ),
-    )
-    ```
-
-2. Through dictionary `FunctionConfigDict`.
-    
-    `FunctionConfigDict()` is typed dict so all your keys and values will be typed checked 
-    if you use IDE or mypy or other type checking tool.
-
-    ```python
-    # In this example we configure custom memory size and timeout
-    api.route(
-        "GET",
-        "/users",
-        {
-            "handler": "functions/users.index",
-            "memory":512,
-            "timeout":30,
-        },
-    )
-    ```
-   
-3. Through keyword arguments
-    ```python
-    # In this example we configure custom memory size and timeout
-    api.route(
-        "GET",
-        "/users",
-        "functions/users.index",
-        memory=512,
-        timeout=30,
-    )
-    ```
-
-4. Passing function instance as a handler:
-
-    You can create lambda function yourself and pass it to the route as a handler.
-
-    ```python
-    # Defined in separate variable.
-    users_fn = Function(
-        "users-function",
-        handler="functions/users.index",
-        memory=512,
-    )
-    
-    api.route("GET", "/users", users_fn)
-    
-    # Inline.  
-    api.route(
-        "GET",
-        "/orders",
-        Function(
-            "orders-function",
-            folder="functions/orders",
-            handler="handler.index",
-        ),
-    )
-    ```
-    !!! warning
-        When you create function yourself Stelvio will not generate any routing code for
-        you, you're responsible for it. 
-    
-    !!! note "Remember"
-        Each instance of `Function` creates new lambda function so if you want to 
-        use one function as a handler for multiple routes
-        you need to store it in a variable first. 
-    
-
 !!! warning "Only One Configuration per Function"
-    When multiple routes use same function (identified 
-    by the same file for [Single-File Functions](lambda.md#single-file-lambda-functions) 
-    and by the same folder (`src`) for 
-    [Folder-Based Functions](lambda.md#folder-based-lambda-functions)), the function 
-    should be configured only once. If other route uses same function it shares config 
-    from the route that has config. 
-
-    If you provide configuration in multiple places for the same function , Stelvio will 
-    fail with an error message. This ensures clear and predictable behavior. 
-    
-    To configure a shared function, either configure it on its first use or create a 
-    separate  `Function` instance and reuse it across routes. (As shown above in point 4.)
-
-??? note "A note about handler format for Folder-based functions"
-    The `::` format (`folder/path::file.function_name`) for folder-based functions is a 
-    convenient shorthand specific to API Gateway routes. However, you can still create 
-    folder-based functions using configuration options. Here are all the ways to define 
-    a folder-based function:
-
-    ```python
-    # Using FunctionConfig class
-    api.route(
-        "POST",
-        "/orders",
-        FunctionConfig(
-            folder="functions/orders",
-            handler="function.handler",
-        ),
-    )
-    
-    # Using configuration dictionary
-    api.route(
-        "POST",
-        "/orders",
-        {
-            "src": 'functions/orders',
-            "handler": "function.handler",
-        },
-    )
-    
-    # Using keyword arguments
-    api.route(
-        "POST",
-        "/orders",
-        folder="functions/orders",
-        handler="function.handler",
-    )
-    
-    # Using Function instance
-    api.route(
-        "GET",
-        "/orders",
-        Function(
-            "orders-function",
-            folder="functions/orders",
-            handler="handler.index",
-        ),
-    )
-    ```
+    Routes with the same handler share one Lambda function, so configure it on only one of
+    them. If two routes configure the same function, Stelvio raises an error. To configure a
+    shared function in one place, create a `Function` and pass it to each route.
 
 ## Authorization
 
@@ -477,7 +315,7 @@ def handler(event, context):
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `handler`: handler path, `FunctionConfig`, config dict, or `Function` instance
+- `handler`: any [handler form](lambda.md#handler-forms)
 - `identity_source`: Header to extract token from (default: `"method.request.header.Authorization"`)
 - `ttl`: Cache TTL in seconds (default: 300)
 - `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
@@ -540,7 +378,7 @@ def handler(event, context):
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `handler`: handler path, `FunctionConfig`, config dict, or `Function` instance
+- `handler`: any [handler form](lambda.md#handler-forms)
 - `identity_source`: Single source string or list of sources (default: `"method.request.header.Authorization"`)
 - `ttl`: Cache TTL in seconds (default: 300)
 - `**function_config`: Additional Lambda configuration, with a handler path only

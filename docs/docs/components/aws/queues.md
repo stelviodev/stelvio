@@ -133,34 +133,10 @@ orders_queue.subscribe("batch-processor", "functions/orders.process", batch_size
 
 ### Lambda Configuration
 
-Customize the Lambda function for your subscription:
+The handler takes every [handler form](lambda.md#handler-forms) except a `Function`:
 
 ```python
-# With direct options
-orders_queue.subscribe(
-    "processor",
-    "functions/orders.process",
-    memory=512,
-    timeout=60,
-)
-
-# With FunctionConfig
-from stelvio.aws.function import FunctionConfig
-
-orders_queue.subscribe(
-    "processor",
-    FunctionConfig(
-        handler="functions/orders.process",
-        memory=512,
-        timeout=60,
-    )
-)
-
-# With dictionary
-orders_queue.subscribe(
-    "processor",
-    {"handler": "functions/orders.process", "memory": 256}
-)
+orders_queue.subscribe("processor", "functions/orders.process", memory=512, timeout=60)
 ```
 
 ### Batch Size
