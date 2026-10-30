@@ -2,9 +2,7 @@ import pulumi
 from pytest import mark, param, raises
 
 from stelvio.aws.api_gateway import HttpApi, RestApi
-from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.aws.cloudfront.origins.components.url import Url
 from stelvio.aws.cloudfront.router import Router
 from stelvio.aws.function import Function
 from stelvio.aws.function import function as function_module
@@ -158,7 +156,6 @@ API_RESOURCES = {
         param(
             lambda: Bucket("site"),
             {
-                "targetOriginId": f"arn:aws:s3:::{tn(TP + 'site')}",
                 "allowedMethods": ["GET", "HEAD", "OPTIONS"],
                 "cachedMethods": ["GET", "HEAD"],
                 "compress": True,
@@ -185,7 +182,6 @@ API_RESOURCES = {
         param(
             _rest_api,
             {
-                "targetOriginId": tid(TP + "api"),
                 "allowedMethods": API_METHODS,
                 "cachedMethods": ["GET", "HEAD"],
                 "viewerProtocolPolicy": "redirect-to-https",
@@ -206,7 +202,6 @@ API_RESOURCES = {
         param(
             _http_api,
             {
-                "targetOriginId": tid(TP + "api"),
                 "allowedMethods": API_METHODS,
                 "cachedMethods": ["GET", "HEAD"],
                 "viewerProtocolPolicy": "redirect-to-https",
@@ -226,7 +221,6 @@ API_RESOURCES = {
         param(
             lambda: Function("fn", handler="functions/simple.handler"),
             {
-                "targetOriginId": tn(TP + "fn"),
                 "allowedMethods": API_METHODS,
                 "cachedMethods": ["GET", "HEAD"],
                 "viewerProtocolPolicy": "redirect-to-https",
@@ -248,7 +242,6 @@ API_RESOURCES = {
         param(
             lambda: "https://example.com",
             {
-                "targetOriginId": TP + "router-url-origin-100680ad",
                 "allowedMethods": API_METHODS,
                 "cachedMethods": ["GET", "HEAD"],
                 "compress": True,
@@ -291,7 +284,11 @@ def test_root_route_behavior_is_the_default_behavior(
     deploy()
 
     distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
-    assert distribution.inputs["defaultCacheBehavior"] == default_behavior
+    [origin] = distribution.inputs["origins"]
+    assert distribution.inputs["defaultCacheBehavior"] == {
+        "targetOriginId": origin["originId"],
+        **default_behavior,
+    }
     assert "orderedCacheBehaviors" not in distribution.inputs
     assert router.resources.cloudfront_functions == []
     pulumi_mocks.assert_res_counts(counts)
@@ -502,7 +499,7 @@ def test_wildcard_routes_pass_the_path_through(pulumi_mocks):
     ] == [
         ("/files/*", f"arn:aws:s3:::{tn(TP + 'files')}", []),
         ("/w/*", tn(TP + "fn"), []),
-        ("/u/*", TP + "router-url-origin-100680ad", []),
+        ("/u/*", TP + "router-url-e941f502", []),
     ]
     pulumi_mocks.assert_res("router-default-404", R.CLOUDFRONT_FUNCTION)
     pulumi_mocks.assert_res_counts(
@@ -516,33 +513,6 @@ def test_wildcard_routes_pass_the_path_through(pulumi_mocks):
             R.FUNCTION_URL: 1,
             R.LAMBDA_PERMISSION: 1,
             R.ORIGIN_ACCESS_CONTROL: 2,
-            R.CLOUDFRONT_FUNCTION: 1,  # the default 404
-            R.DISTRIBUTION: 1,
-        }
-    )
-
-
-def test_url_string_in_the_constructor_routes_becomes_a_url_origin(pulumi_mocks):
-    """Same as `route(path, url)`: the constructor wraps the string before any adapter
-    looks for one."""
-
-    @pulumi.runtime.test
-    def deploy():
-        return Router("router", routes=[Route("/u/*", " https://example.com ")]).resources
-
-    deploy()
-
-    distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
-    [origin] = distribution.inputs["origins"]
-    assert (origin["originId"], origin["domainName"]) == (
-        TP + "router-url-origin-100680ad",
-        "example.com",
-    )
-    pulumi_mocks.assert_res_counts(
-        {
-            R.FUNCTION: 1,  # the URL route's Lambda@Edge
-            R.ROLE: 1,
-            R.ROLE_POLICY_ATTACHMENT: 1,
             R.CLOUDFRONT_FUNCTION: 1,  # the default 404
             R.DISTRIBUTION: 1,
         }
@@ -798,12 +768,12 @@ def test_router_function_and_url_routes(pulumi_mocks, project_cwd):
 
     api_fn = tn(f"{TP}api-fn")
     pulumi_mocks.assert_res(
-        "my-router-api-fn-url",
+        "api-fn-router-url",
         R.FUNCTION_URL,
         {"functionName": api_fn, "invokeMode": "RESPONSE_STREAM", "authorizationType": "AWS_IAM"},
     )
     pulumi_mocks.assert_res(
-        "my-router-open-fn-url",
+        "open-fn-router-url",
         R.FUNCTION_URL,
         {
             "functionName": tn(f"{TP}open-fn"),
@@ -839,7 +809,7 @@ def test_router_function_and_url_routes(pulumi_mocks, project_cwd):
     for function in (
         "my-router-open-fn-uri-rewrite",
         "my-router-api-fn-uri-rewrite",
-        "my-router-url-origin-100680ad-uri-rewrite",
+        "my-router-url-abe5c496-uri-rewrite",
         "my-router-default-404",
     ):
         pulumi_mocks.assert_res(
@@ -879,7 +849,7 @@ def test_router_function_url_aliases_its_earlier_names(pulumi_mocks, project_cwd
     deploy()
 
     old = f"{TP}api-fn-router-0-url"
-    assert aliases[f"{TP}my-router-api-fn-url"] == [
+    assert aliases[f"{TP}api-fn-router-url"] == [
         (..., pulumi.ROOT_STACK_RESOURCE),
         (old, ...),  # under the Router
         (old, pulumi.ROOT_STACK_RESOURCE),  # stacks last deployed before parenting
@@ -926,16 +896,20 @@ def test_per_route_resources_alias_their_route_position_names(
     router.route("/", Bucket("site"))
     router.route("/fn", Function("fn", handler="functions/simple.handler"))
     router.route("/ext", "https://example.com")
+    router.route("/api", _rest_api())
+    hapi = HttpApi("hapi")
+    hapi.route("GET", "/", "functions/simple.handler")
+    router.route("/h", hapi)
 
     # The mocks never see aliases, so the seam is the resource constructor.
-    aliases: dict[str, set[str]] = {}
+    aliases: dict[str, list[tuple]] = {}
     original = pulumi.CustomResource.__init__
 
     def spy(self, t, name, props=None, opts=None, *args, **kwargs):
         if opts is not None and opts.parent is router:
-            aliases[name] = {
-                a.name for a in opts.aliases if isinstance(a, pulumi.Alias) and a.name is not ...
-            }
+            aliases[name] = [
+                (a.name, a.parent) for a in opts.aliases if isinstance(a, pulumi.Alias)
+            ]
         original(self, t, name, props, opts, *args, **kwargs)
 
     monkeypatch.setattr(pulumi.CustomResource, "__init__", spy)
@@ -946,21 +920,52 @@ def test_per_route_resources_alias_their_route_position_names(
 
     deploy()
 
-    # Routes sort longest first: /ext 0, /fn 1, / 2. The url stem hashes the url.
-    url = "router-url-origin-100680ad"
+    def renamed(*old: str) -> list[tuple]:
+        # Each old name under the Router and at the stack root, for stacks last deployed
+        # before parenting; the first alias is every child's, from the Router's own opts.
+        return [(..., pulumi.ROOT_STACK_RESOURCE)] + [
+            alias for name in old for alias in ((name, ...), (name, pulumi.ROOT_STACK_RESOURCE))
+        ]
+
+    # Routes sort longest first, equal lengths as added: /ext 0, /api 1, /fn 2, /h 3, / 4.
+    # The url stem hashes the route path.
+    url = "router-url-abe5c496"
     assert aliases == {
-        f"{TP}router": set(),
-        f"{TP}router-site-oac": {f"{TP}site-oac-2"},
-        f"{TP}router-site-bucket-policy": {f"{TP}site-bucket-policy-2"},
-        f"{TP}router-fn-url": {f"{TP}fn-router-1-url", f"{TP}{TP}fn-router-1-url"},
-        f"{TP}router-fn-oac": {f"{TP}fn-oac-1"},
-        f"{TP}router-fn-uri-rewrite": {f"{TP}fn-uri-rewrite-1"},
-        f"{TP}router-fn-cloudfront-permission": {f"{TP}fn-cloudfront-permission-1"},
-        f"{TP}{url}-uri-rewrite": {f"{TP}url-origin-uri-rewrite-0"},
-        f"{TP}{url}-lambda-edge-role": {f"{TP}url-origin-lambda-edge-role-0"},
-        f"{TP}{url}-lambda-edge-policy": {f"{TP}url-origin-lambda-edge-policy-0"},
-        f"{TP}{url}-host-rewrite": {f"{TP}url-origin-host-rewrite-0"},
+        f"{TP}router": renamed(),
+        f"{TP}router-site-oac": renamed(f"{TP}site-oac-4"),
+        f"{TP}site-bucket-policy": renamed(f"{TP}site-bucket-policy-4"),
+        f"{TP}fn-router-url": renamed(f"{TP}fn-router-2-url", f"{TP}{TP}fn-router-2-url"),
+        f"{TP}router-fn-oac": renamed(f"{TP}fn-oac-2"),
+        f"{TP}router-fn-uri-rewrite": renamed(f"{TP}fn-uri-rewrite-2"),
+        f"{TP}router-fn-cloudfront-permission": renamed(f"{TP}fn-cloudfront-permission-2"),
+        f"{TP}router-api-uri-rewrite": renamed(f"{TP}api-uri-rewrite-1"),
+        f"{TP}router-hapi-uri-rewrite": renamed(f"{TP}hapi-uri-rewrite-3"),
+        f"{TP}{url}-uri-rewrite": renamed(f"{TP}url-origin-uri-rewrite-0"),
+        f"{TP}{url}-lambda-edge-role": renamed(f"{TP}url-origin-lambda-edge-role-0"),
+        f"{TP}{url}-lambda-edge-policy": renamed(f"{TP}url-origin-lambda-edge-policy-0"),
+        f"{TP}{url}-host-rewrite": renamed(f"{TP}url-origin-host-rewrite-0"),
     }
+
+
+def test_bucket_policy_and_function_url_are_named_by_their_component_only(
+    pulumi_mocks, project_cwd
+):
+    """A bucket has one policy and a function one url, so the Router's name stays out of
+    theirs: a Router rename, or the component moving to another Router, then updates them
+    in place. A replace puts the new bucket policy and deletes the old one from the same
+    bucket (403), and AWS refuses a second url on one function."""
+    router = Router("router")
+    router.route("/", Bucket("site"))
+    router.route("/fn", Function("fn", handler="functions/simple.handler"))
+
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res("site-bucket-policy", R.BUCKET_POLICY)
+    pulumi_mocks.assert_res("fn-router-url", R.FUNCTION_URL)
 
 
 def test_two_routers_route_the_same_url(pulumi_mocks):
@@ -978,7 +983,7 @@ def test_two_routers_route_the_same_url(pulumi_mocks):
     deploy()
 
     for router in ("a", "b"):
-        stem = f"{router}-url-origin-100680ad"
+        stem = f"{router}-url-abe5c496"
         pulumi_mocks.assert_res(f"{stem}-host-rewrite", R.FUNCTION)
         pulumi_mocks.assert_res(f"{stem}-lambda-edge-role", R.ROLE)
         pulumi_mocks.assert_res(f"{stem}-lambda-edge-policy", R.ROLE_POLICY_ATTACHMENT)
@@ -1016,10 +1021,29 @@ def test_long_router_and_component_names_truncate_the_per_route_names(pulumi_moc
     assert_hash_truncated(rewrite.name, 56, "-uri-rewrite")
 
 
-def test_route_rejects_a_second_url_component_with_the_same_url():
-    """Two `Url`s with one url would share every per-route resource name."""
-    router = Router("router")
-    router.route("/a", Url("u1", "https://example.com"))
+@mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
+def test_long_router_names_truncate_the_url_and_function_route_names(pulumi_mocks):
+    router = Router("a-router-with-a-very-long-name")
+    router.route("/ext", "https://example.com")
+    router.route(
+        "/fn", Function("a-function-with-a-long-name-too", handler="functions/simple.handler")
+    )
 
-    with raises(ValueError, match=r"^Route for origin .* already exists\.$"):
-        router.route("/b", Url("u2", "https://example.com"))
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
+
+    deploy()
+
+    [role] = [r for r in pulumi_mocks.created(R.ROLE) if r.name.endswith("-lambda-edge-role")]
+    assert_hash_truncated(role.name, 56, "-lambda-edge-role")
+    [edge] = [f for f in pulumi_mocks.created(R.FUNCTION) if f.name.endswith("-host-rewrite")]
+    assert_hash_truncated(edge.name, 56, "-host-rewrite")
+    [oac] = pulumi_mocks.created(R.ORIGIN_ACCESS_CONTROL)
+    assert_hash_truncated(oac.name, 56, "-oac")
+    [permission] = [
+        p
+        for p in pulumi_mocks.created(R.LAMBDA_PERMISSION)
+        if p.name.endswith("-cloudfront-permission")
+    ]
+    assert_hash_truncated(permission.name, 92, "-cloudfront-permission")

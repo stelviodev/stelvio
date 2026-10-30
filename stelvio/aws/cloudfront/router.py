@@ -58,12 +58,8 @@ def _check_route_path(route: Route) -> None:
 def _same_origin(existing: Component | str, new: Component | str) -> bool:
     # A url string is wrapped in a `Url` after the clash checks: compare it with the wrapped
     # url here, or the second route fails later on the duplicate component name instead.
-    # Two `Url`s with one url share their per-route resource names: the deploy would fail
-    # on a duplicate URN.
     if isinstance(existing, Url) and isinstance(new, str):
         return existing.url == new.strip()
-    if isinstance(existing, Url) and isinstance(new, Url):
-        return existing.url == new.url
     return existing == new
 
 
@@ -89,26 +85,20 @@ class RouterCustomizationDict(TypedDict, total=False):
 
 @final
 class Router(Component[RouterResources, RouterCustomizationDict]):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         name: str,
-        routes: list[Route] | None = None,
+        # `routes` was the second positional; a list passed there now fails at the call.
+        *,
         price_class: CloudfrontPriceClass | None = None,
         custom_domain: str | None = None,
-        *,
         tags: dict[str, str] | None = None,
         customize: RouterCustomizationDict | None = None,
     ):
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:Router", name, tags=tags, customize=customize
         )
-        # Checked like `route()` calls but not sorted: the migration aliases are built from
-        # the index a deployed stack has, which for `routes=` is the order given. Sort when
-        # the aliases go.
         self.routes: list[Route] = []
-        for route in routes or []:
-            self._add_route(route)
-        self._check_routes_reachable(order_given=True)
         self.price_class = price_class
         self.custom_domain = custom_domain
         # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
@@ -305,7 +295,10 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                     f"{route.prefix_pattern!r}."
                 )
             if _same_origin(existing_route.component, route.component):
-                raise ValueError(f"Route for origin {route.component} already exists.")
+                origin = (
+                    route.component if isinstance(route.component, str) else route.component.name
+                )
+                raise ValueError(f"Route for origin {origin} already exists.")
 
         if isinstance(route.component, str):
             url = route.component.strip()
@@ -329,10 +322,10 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             )
         self.routes.append(route)
 
-    def _check_routes_reachable(self, *, order_given: bool) -> None:
+    def _check_routes_reachable(self) -> None:
         # CloudFront takes the first ordered behavior that matches. A route under a wildcard
-        # behavior ordered before it (`/api` after `/api*`, `/api/admin` after `/api`) gets
-        # nothing. The root route is the default behavior: never ordered, never caught.
+        # behavior ordered before it (`/api` after `/api*`) gets nothing. The root route is
+        # the default behavior: never ordered, never caught.
         ordered = [r for r in self.routes if not r.is_root]
         for idx, route in enumerate(ordered):
             under = route.path_pattern.rstrip("*")
@@ -341,11 +334,11 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                 None,
             )
             if catcher is not None:
-                # Reordering fixes it when the order is the user's: always in `routes=`, after
-                # `route()`'s length sort only for equal lengths.
+                # The length sort puts a longer catcher first whatever the user does; equal
+                # lengths keep the order they were added in, so only there reordering fixes it.
                 hint = (
                     f" Add {route.path_pattern!r} before {catcher.path_pattern!r}."
-                    if order_given or len(route.path_pattern) == len(catcher.path_pattern)
+                    if len(route.path_pattern) == len(catcher.path_pattern)
                     else ""
                 )
                 raise ValueError(
@@ -372,4 +365,4 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         # Longer paths first (more specific). Stable, so equal-length routes keep the index a
         # deployed stack has, which its migration aliases are built from.
         self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
-        self._check_routes_reachable(order_given=False)
+        self._check_routes_reachable()

@@ -25,11 +25,13 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         # auth='iam' → 'AWS_IAM', auth=None → 'NONE'
         auth_type = "AWS_IAM" if url_config.auth == "iam" else "NONE"
 
-        # Named by route position before, and with the app prefix twice before that; the
-        # aliases keep deployed urls in place.
+        # Named by the function alone: a Router rename updates the url in place, where a
+        # replace would put a second url on the function, which AWS refuses. Named by route
+        # position before, and with the app prefix twice before that; the aliases keep
+        # deployed urls in place.
         old = f"{self.function.name}-router-{self.idx}"
         function_url = _create_function_url(
-            self._stem,
+            f"{self.function.name}-router",
             self.function.resources.function,
             url_config,
             pulumi.ResourceOptions.merge(

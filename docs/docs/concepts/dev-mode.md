@@ -58,6 +58,10 @@ Stelvio's dev mode will execute your local Lambda functions natively, i.e. the P
 
 Since your workstation is likely equipped with more RAM than your Lambda function, this also mean that you're less likely to run into memory limits on your workstation.
 
+### Response Time
+
+A dev request waits for your handler up to the Function's `timeout`, capped at 25 s, because API Gateway cuts a request off at 29 s. A handler that takes longer gets "Local dev server did not respond within 25.0 s" (less for a shorter `timeout`), the same message you see when `stlv dev` isn't running.
+
 ### Request/Response Size Limits
 
 Dev mode supports the same payload limits as [AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html) (internally, large payloads are chunked into multiple AppSync events and reassembled on the other end):

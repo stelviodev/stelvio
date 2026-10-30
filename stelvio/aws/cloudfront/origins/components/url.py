@@ -57,9 +57,10 @@ class Url(Component[UrlResources, Any], LinkableMixin):
 
 
 def url_origin_name(router_name: str, url: str) -> str:
-    """Stem of a url route's resources, and the name `Router` gives the `Url` it wraps a
-    url string in. The hashed url, not the `Url`'s name, so a hand-made `Url` gets the
-    same shape."""
+    """The name `Router` gives the `Url` it wraps a url string in. One per url within a
+    router: a url given twice would collide on this component name, so `_same_origin`
+    rejects it at definition. Keyed by url, not path, so a deployed stack keeps the `Url`'s
+    URN when its route moves."""
     sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
     return f"{router_name}-url-origin-{sha_url}"
 
@@ -72,7 +73,11 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
 
     @property
     def _stem(self) -> str:
-        return url_origin_name(self.router_name, self.url.resources.url)
+        # Keyed by the route's path, not the url or the `Url`'s name: a new url at the same
+        # path then updates the Lambda@Edge in place, where a replace leaves the old function
+        # undeletable for about an hour (replicated). A hand-made `Url` gets the same shape.
+        sha_path = hashlib.sha256(self.route.path_pattern.encode("utf-8")).hexdigest()[:8]
+        return f"{self.router_name}-url-{sha_path}"
 
     @property
     def _old_stem(self) -> str:

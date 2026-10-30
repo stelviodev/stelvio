@@ -732,7 +732,7 @@ def test_router_customize_reaches_origin_resources(pulumi_mocks, project_cwd, sc
         },
     )
     pulumi_mocks.assert_res(
-        "my-router-static-bucket-bucket-policy",
+        "static-bucket-bucket-policy",
         R.BUCKET_POLICY,
         {"bucket": tid(f"{TP}static-bucket"), "policy": policy},
     )

@@ -10,6 +10,8 @@ from stelvio.aws.function import Function
 from stelvio.aws.s3.s3 import Bucket
 from stelvio.dns import DnsProviderNotConfiguredError
 
+from ...conftest import TP
+
 
 def test_cloudfront_router_basic_instantiation():
     """Test that Router can be instantiated with basic parameters."""
@@ -23,19 +25,23 @@ def test_cloudfront_router_basic_instantiation():
 def test_cloudfront_router_with_custom_parameters():
     """Test that Router can be instantiated with custom parameters."""
     mock_bucket = Mock(spec=Bucket)
-    routes = [Route(path_pattern="/static", component=mock_bucket)]
 
     router = Router(
         name="custom-router",
-        routes=routes,
         price_class="PriceClass_All",
         custom_domain="example.com",
     )
+    router.route("/static", mock_bucket)
 
     assert router.name == "custom-router"
-    assert router.routes == routes
+    assert router.routes == [Route(path_pattern="/static", component=mock_bucket)]
     assert router.price_class == "PriceClass_All"
     assert router.custom_domain == "example.com"
+
+
+def test_router_takes_price_class_and_custom_domain_as_keywords_only():
+    with pytest.raises(TypeError, match="positional"):
+        Router("web", [])
 
 
 def test_cloudfront_router_resources_dataclass():
@@ -98,16 +104,12 @@ def test_add_route_private_method():
     assert router.routes[0] == route
 
 
-def test_add_route_rejects_duplicate_path_pattern():
-    """Router._add_route must reject duplicate path patterns."""
+def test_route_rejects_duplicate_path_pattern():
     router = Router(name="test-router")
-    bucket1 = Mock(spec=Bucket)
-    bucket2 = Mock(spec=Bucket)
+    router.route("/static", Mock(spec=Bucket))
 
-    router._add_route(Route(path_pattern="/static", component=bucket1))
-
-    with pytest.raises(ValueError, match="Route for path pattern /static already exists"):
-        router._add_route(Route(path_pattern="/static", component=bucket2))
+    with pytest.raises(ValueError, match=r"^Route for path pattern /static already exists\.$"):
+        router.route("/static", Mock(spec=Bucket))
 
 
 @pytest.mark.parametrize(("first", "second"), [("/", "/*"), ("/*", "/"), ("", "/")])
@@ -151,7 +153,17 @@ def test_route_rejects_a_second_root_route(first, second):
 def test_route_rejects_a_path_it_cannot_serve(path):
     router = Router(name="test-router")
 
-    with pytest.raises(ValueError, match=rf"^Invalid route path {re.escape(repr(path))}: start"):
+    with pytest.raises(
+        ValueError,
+        match="^"
+        + re.escape(
+            f"Invalid route path {path!r}: start with '/', no trailing '/', no empty, '.' or "
+            "'..' segment, '*' only at the end, other chars only letters, digits and "
+            "_ . ~ - / $ @ : +. Use '/api' to send '/api/users' to the origin as '/users', "
+            "or '/api/*' to keep '/api/users'."
+        )
+        + "$",
+    ):
         router.route(path, Mock(spec=Bucket))
 
 
@@ -201,7 +213,8 @@ def test_route_rejects_a_path_whose_prefix_pattern_exceeds_cloudfronts_255_chars
 def test_route_rejects_a_path_whose_behavior_another_route_takes(first, second):
     """`/api` needs `/api` and `/api/*`; `/api/*` needs `/api/*`: CloudFront rejects a
     distribution with one path pattern twice."""
-    router = Router(name="test-router", routes=[Route(first, Mock(spec=Bucket))])
+    router = Router(name="test-router")
+    router.route(first, Mock(spec=Bucket))
 
     with pytest.raises(
         ValueError,
@@ -245,89 +258,24 @@ def test_route_keeps_a_plain_path_added_before_a_wildcard_of_the_same_length_fir
     assert [r.path_pattern for r in router.routes] == ["/v/1", "/v/*"]
 
 
-@pytest.mark.parametrize("root", ["", "/", "/*"])
-def test_router_root_route_given_first_to_the_constructor_catches_nothing(root):
-    """The root is the default behavior, never an ordered one; `/` alone proves nothing, as its
-    prefix pattern `//*` matches no path anyway."""
-    routes = [Route(root, Mock(spec=Bucket)), Route("/api", Mock(spec=Bucket))]
+def test_route_keeps_a_path_that_only_shares_a_string_prefix_with_a_wildcard_route():
+    """`/ab/*` matches `/ab/c`, not `/abc`: the catcher check compares whole segments."""
+    router = Router(name="test-router")
+    router.route("/ab/*", Mock(spec=Bucket))
 
-    router = Router(name="test-router", routes=routes)
+    router.route("/abc", Mock(spec=Bucket))
 
-    assert [r.path_pattern for r in router.routes] == [root, "/api"]
-
-
-@pytest.mark.parametrize("paths", [["/a", "/abc"], ["/ap", "/api"]])
-def test_router_keeps_the_order_of_routes_given_to_the_constructor(paths):
-    """`/ap` is a prefix of `/api` as a string only: its behavior `/ap/*` ends in a slash."""
-    routes = [Route(path, Mock(spec=Bucket)) for path in paths]
-
-    router = Router(name="test-router", routes=routes)
-
-    assert [r.path_pattern for r in router.routes] == paths
+    assert [r.path_pattern for r in router.routes] == ["/ab/*", "/abc"]
 
 
-def test_route_leaves_the_constructor_list_as_given():
-    routes = [Route("/a", Mock(spec=Bucket)), Route("/abc", Mock(spec=Bucket))]
-    router = Router(name="test-router", routes=routes)
-
-    router.route("/ab", Mock(spec=Bucket))
-
-    assert [r.path_pattern for r in router.routes] == ["/abc", "/ab", "/a"]
-    assert [r.path_pattern for r in routes] == ["/a", "/abc"]
-
-
-def _function_with_url():
-    function = Mock(spec=Function)
-    function.name = "fn-with-url"
-    function.config.url = "public"
-    return function
-
-
-@pytest.mark.parametrize(
-    ("make_routes", "error"),
-    [
-        (
-            lambda: [Route("/a", Mock(spec=Bucket)), Route("/a", Mock(spec=Bucket))],
-            r"^Route for path pattern /a already exists\.$",
-        ),
-        (
-            lambda: [Route("/", Mock(spec=Bucket)), Route("/*", Mock(spec=Bucket))],
-            r"^Route for path pattern '/\*' clashes with '/': both are the root route\.$",
-        ),
-        (lambda: [Route("/api", _function_with_url())], r"^Function 'fn-with-url' has 'url'"),
-        (
-            lambda: [Route("api", Mock(spec=Bucket))],
-            "^"
-            + re.escape(
-                "Invalid route path 'api': start with '/', no trailing '/', no empty, '.' or "
-                "'..' segment, '*' only at the end, other chars only letters, digits and "
-                "_ . ~ - / $ @ : +. Use '/api' to send '/api/users' to the origin as '/users', "
-                "or '/api/*' to keep '/api/users'."
-            )
-            + "$",
-        ),
-        (
-            lambda: [Route("/api", Mock(spec=Bucket)), Route("/api/admin", Mock(spec=Bucket))],
-            r"^Route for path pattern '/api/admin' never gets a request: '/api' comes first "
-            r"and matches everything '/api/admin' would\. Add '/api/admin' before '/api'\.$",
-        ),
-    ],
-    ids=["duplicate-path", "two-roots", "function-with-url", "bad-path", "hidden-route"],
-)
-def test_router_checks_routes_given_to_the_constructor(make_routes, error):
-    with pytest.raises(ValueError, match=error):
-        Router(name="test-router", routes=make_routes())
-
-
-def test_add_route_rejects_duplicate_origin():
-    """Router._add_route must reject using the same origin twice."""
+def test_route_rejects_duplicate_origin():
     router = Router(name="test-router")
     bucket = Mock(spec=Bucket)
+    bucket.name = "assets"
+    router.route("/static", bucket)
 
-    router._add_route(Route(path_pattern="/static", component=bucket))
-
-    with pytest.raises(ValueError, match=r"Route for origin .* already exists"):
-        router._add_route(Route(path_pattern="/files", component=bucket))
+    with pytest.raises(ValueError, match=r"^Route for origin assets already exists\.$"):
+        router.route("/files", bucket)
 
 
 def test_add_route_rejects_non_component_or_str():
@@ -350,27 +298,27 @@ def test_route_public_method():
     assert router.routes[0].component == mock_bucket
 
 
-def test_route_converts_plain_url_to_url_component():
-    """Router.route should wrap plain URLs in a Url component."""
+def test_route_wraps_a_url_string_in_a_url_component_and_strips_it():
     from stelvio.aws.cloudfront.origins.components.url import Url
 
     router = Router(name="test-router")
 
-    router.route(path="/echo", component_or_url="https://example.com")
+    router.route("/echo", " https://example.com ")
 
-    assert len(router.routes) == 1
-    route = router.routes[0]
+    [route] = router.routes
     assert isinstance(route.component, Url)
+    assert route.component.url == "https://example.com"
+    # Keyed by the url, unlike the route's resources (by path): the `Url` has no AWS children.
+    assert route.component.name == f"{TP}test-router-url-origin-100680ad"
 
 
-def test_route_rejects_a_second_route_to_the_same_url():
+@pytest.mark.parametrize("url", ["https://example.com", " https://example.com "])
+def test_route_rejects_a_second_route_to_the_same_url(url):
     router = Router(name="test-router")
     router.route("/a", "https://example.com")
 
-    with pytest.raises(
-        ValueError, match=r"^Route for origin https://example\.com already exists\.$"
-    ):
-        router.route("/b", "https://example.com")
+    with pytest.raises(ValueError, match=rf"^Route for origin {re.escape(url)} already exists\.$"):
+        router.route("/b", url)
 
 
 def test_route_method_with_different_http_methods():
@@ -519,8 +467,8 @@ def test_create_resources_with_routes(mock_registry, mock_context):
 
     # Create a router with a route
     mock_bucket = Mock(spec=Bucket)
-    routes = [Route(path_pattern="/static", component=mock_bucket)]
-    router = Router(name="test-router", routes=routes)
+    router = Router(name="test-router")
+    router.route("/static", mock_bucket)
 
     # Mock adapter registry and adapter
     with (
@@ -674,13 +622,6 @@ def test_custom_domain_aliases(custom_domain, expected_aliases):
     # This test just verifies the property is set correctly
 
 
-def test_empty_routes_list():
-    """Test router with explicitly empty routes list."""
-    router = Router(name="test-router", routes=[])
-    assert router.routes == []
-    assert len(router.routes) == 0
-
-
 def test_router_name_validation():
     """Test that router names are properly stored."""
     test_names = ["simple", "my-router", "router_with_underscores", "router123", "CamelCaseRouter"]
@@ -697,7 +638,8 @@ def test_cloudfront_route_dto_integration():
     mock_bucket = Mock(spec=Bucket)
     route = Route(path_pattern="/test", component=mock_bucket)
 
-    router = Router(name="test-router", routes=[route])
+    router = Router(name="test-router")
+    router.route("/test", mock_bucket)
     assert len(router.routes) == 1
     assert router.routes[0] == route
     assert router.routes[0].path_pattern == "/test"

@@ -252,9 +252,9 @@ def test_ci_requires_explicit_environment_for_diff_json(cli, monkeypatch) -> Non
 @mark.parametrize(
     ("username", "env"),
     [
-        ("_José.Doe__x-", "Jose-Doe-x"),
-        ("Łukasz.Sørensen", "Lukasz-Sorensen"),
-        ("Straße", "Strasse"),
+        ("_José.Doe__x-", "jose-doe-x"),
+        ("Łukasz.Sørensen", "lukasz-sorensen"),
+        ("Straße", "strasse"),
     ],
 )
 def test_default_env_is_the_cleaned_os_username_and_is_saved(

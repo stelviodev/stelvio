@@ -139,9 +139,11 @@ def _get_or_create_passphrase(home: Home, app: str, env: str) -> str:
     return passphrase
 
 
-def _setup_app_home_storage(env: str, dev_mode: bool = False) -> tuple[Home, AppContext]:
+def _setup_app_home_storage(
+    env: str, dev_mode: bool = False, *, check_names: bool = False
+) -> tuple[Home, AppContext]:
     """Load app and initialize home storage."""
-    _load_stlv_app(env, dev_mode)
+    _load_stlv_app(env, dev_mode, check_names=check_names)
     ctx = context()
     if ctx.home == "aws":
         home: Home = AwsHome(ctx.aws.profile, ProviderStore.region())
@@ -152,8 +154,10 @@ def _setup_app_home_storage(env: str, dev_mode: bool = False) -> tuple[Home, App
 
 
 def get_environment_confirmation_info(env: str) -> tuple[str, bool]:
-    """Return app name and whether the environment is a configured shared environment."""
+    """Return app name and whether the environment is a configured shared environment.
+    Deploy and dev call it before their prompt, so it checks both names too."""
     app, config = _load_app_config(env)
+    _check_names(app._name, env)  # noqa: SLF001
     _validate_environment(config, env)
     _PRELOADED_APP_CONFIGS[env] = (app, config)
     return app._name, env in config.environments  # noqa: SLF001
@@ -208,7 +212,7 @@ def force_unlock(env: str) -> dict | None:
     return lock_info
 
 
-def _load_stlv_app(env: str, dev_mode: bool) -> None:
+def _load_stlv_app(env: str, dev_mode: bool, *, check_names: bool = False) -> None:
     preloaded = _PRELOADED_APP_CONFIGS.pop(env, None)
     app, config = preloaded if preloaded is not None else _load_app_config(env)
     project_name = app._name  # noqa: SLF001
@@ -228,6 +232,8 @@ def _load_stlv_app(env: str, dev_mode: bool) -> None:
             dev_mode=dev_mode,
         )
     )
+    if check_names:
+        _check_names(project_name, env)
     _validate_environment(config, env)
 
 
@@ -251,14 +257,35 @@ def _load_app_config(env: str) -> tuple[StelvioApp, StelvioAppConfig]:
     return app, config
 
 
-def _validate_environment(config: StelvioAppConfig, env: str) -> None:
-    username = get_user_env()
+def _check_names(app_name: str, env: str) -> None:
+    """Deploy, diff and dev only. Both names lead every AWS name, and one a service rejects
+    fails mid-deploy, after other resources exist. Destroy, refresh and the state commands
+    load a stack under any name, so one deployed before this rule can still be removed."""
+    # The name is the stack: a renamed app or env deploys a new one and leaves the old one
+    # running.
+    destroy_first = " Destroy a deployed stack under this name before you rename it."
+    # DocumentDB identifiers must start with a letter and reject `--` and a trailing `-` (the
+    # prefix adds its own `-` after the name).
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*", app_name):
+        raise StelvioValidationError(
+            f"Invalid app name '{app_name}': use only letters, digits and single '-' "
+            f"between them, starting with a letter.{destroy_first}"
+        )
     if not re.fullmatch(r"[A-Za-z0-9]+(-[A-Za-z0-9]+)*", env):
-        hint = " Your personal environment is set in .stelvio/userenv." if env == username else ""
+        hint = (
+            " Your personal environment is set in .stelvio/userenv. Destroy a deployed stack "
+            "under it before you change it."
+            if env == get_user_env()
+            else destroy_first
+        )
         raise StelvioValidationError(
             f"Invalid environment name '{env}': use only letters, digits and single '-' "
             f"between them.{hint}"
         )
+
+
+def _validate_environment(config: StelvioAppConfig, env: str) -> None:
+    username = get_user_env()
     if not config.is_valid_environment(env, username):
         raise StelvioValidationError(
             _invalid_environment_message(env, username, config.environments)
@@ -313,11 +340,13 @@ class CommandRun:
         *,
         state_only: bool = False,
         dev_mode: bool = False,
+        check_names: bool = False,
     ) -> None:
         self.env = env
         self.dev_mode = dev_mode
         self._lock_as = lock_as
         self._state_only = state_only
+        self._check_names = check_names
         self._locked = False
         self._home: Home | None = None
         self._app_name: str | None = None
@@ -332,7 +361,9 @@ class CommandRun:
 
     def __enter__(self) -> Self:
         # 1. Load app, 2. Create home, 3. Init storage
-        self._home, ctx = _setup_app_home_storage(self.env, self.dev_mode)
+        self._home, ctx = _setup_app_home_storage(
+            self.env, self.dev_mode, check_names=self._check_names
+        )
         self._app_name = ctx.name
 
         # 4. Get or create passphrase

@@ -96,7 +96,7 @@ def get_stlv_app_path() -> tuple[Path, bool]:
 
 
 def create_stlv_app_file(stlv_app_path: Path) -> None:
-    project_name = clean_name(Path.cwd().name).lower().lstrip("0123456789-") or "my-app"
+    project_name = clean_name(Path.cwd().name).lstrip("0123456789-") or "my-app"
     file_content = textwrap.dedent(TEMPLATE_CONTENT).format(project_name=project_name)
     with stlv_app_path.open("w", encoding="utf-8") as f:
         f.write(file_content)

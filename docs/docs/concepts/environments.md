@@ -17,11 +17,13 @@ environment, a DynamoDB table named "users" becomes `my-api-staging-users`.
 
 ## Default Behavior
 
-If you don't specify an environment, Stelvio uses your personal environment. By default it's your computer username reduced to letters, digits and `-`, so `John.Doe` becomes `John-Doe`:
+If you don't specify an environment, Stelvio uses your personal environment. By default it's your computer username lowercased and reduced to letters, digits and `-`, so `John.Doe` becomes `john-doe`:
 
 ```bash
 stlv deploy  # Deploys to your personal environment (e.g., "john")
 ```
+
+If nothing is left after the cleaning (a username with no Latin letters or digits, such as `Иван`), `stlv` stops and tells you to set the name in `.stelvio/userenv` (see below).
 
 This gives every developer their own isolated sandbox to work in without
 conflicts.
@@ -33,6 +35,8 @@ Stelvio stores your personal environment name in `.stelvio/userenv`. You can cus
 ```bash
 echo "myname" > .stelvio/userenv
 ```
+
+If you already deployed under the old name, `stlv destroy` first: `stlv` accepts only the saved name or a declared environment, so after the change the old stack is out of reach.
 
 This is useful when:
 

@@ -84,15 +84,16 @@ _UNSPLITTABLE = str.maketrans(
 
 
 def clean_name(raw: str) -> str:
-    """Each run of chars other than letters and digits becomes one '-'. For names the user
-    never typed. Case stays: the env names the stack, and lowercasing `John` would put that
-    user on a new, empty stack `john` from the next clone (`.stelvio/` is gitignored).
+    """Lowercase, and each run of chars other than letters and digits becomes one '-'. For
+    names the user never typed: the default env from the OS username, the app name `stlv init`
+    takes from the folder. A saved `.stelvio/userenv` is read as is, so a user who deployed
+    before the cleaning keeps their stack; a fresh clone saves the cleaned name.
 
     The app and env lead every AWS name, and S3, Lambda and DocumentDB each reject a char the
     others accept, so only letters, digits and '-' are safe everywhere. NFKD first splits an
-    accent off its letter: `José` becomes `Jose`, not `Jos`; `_UNSPLITTABLE` covers the letters
-    it can't (`Łukasz` becomes `Lukasz`). Any other char with no ASCII form is dropped.
+    accent off its letter: `José` becomes `jose`, not `jos`; `_UNSPLITTABLE` covers the letters
+    it can't (`Łukasz` becomes `lukasz`). Any other char with no ASCII form is dropped.
     """
     folded = unicodedata.normalize("NFKD", raw.translate(_UNSPLITTABLE))
     ascii_name = folded.encode("ascii", "ignore").decode()
-    return re.sub(r"[^A-Za-z0-9]+", "-", ascii_name).strip("-")
+    return re.sub(r"[^A-Za-z0-9]+", "-", ascii_name).strip("-").lower()

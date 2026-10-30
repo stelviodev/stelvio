@@ -7,6 +7,7 @@ from stelvio.aws.cloudfront.dtos import RouteOriginConfig
 from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter
 from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.aws.s3.s3 import Bucket
+from stelvio.context import context
 
 
 @register_adapter(Bucket)
@@ -90,8 +91,11 @@ class S3BucketCloudfrontAdapter(ComponentCloudfrontAdapter):
                 }
             )
         )
+        # Named by the bucket alone: a Router rename, or the bucket moving to another Router,
+        # updates the policy in place. A replace deletes the old policy from the bucket after
+        # the new one is put, and state still says it exists: 403 until a refresh and a deploy.
         return pulumi_aws.s3.BucketPolicy(
-            self._name("bucket-policy", limit=None),
+            context().prefix(f"{self.bucket.name}-bucket-policy"),
             **self.customize("access_policies", {"bucket": bucket.id}, {"policy": policy}),
             opts=self._opts("bucket-policy"),
         )

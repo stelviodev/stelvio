@@ -11,12 +11,13 @@
 ### Bug Fixes
 
 - **`stlv dev` matches the deployed Lambda.** `context.function_name` and the `AWS_LAMBDA_*` env vars are set, and a request waits for the Function's `timeout` (up to 25 s), not 16 s.
-- **Router rejects route paths it routed wrong.** `/api/`, `api`, `*`, a `?` or a `*` before the end deployed but routed wrong. Use `/api`, `/api/*` or `/*`. A route another route always catches first (`/api` next to `/api*`) is rejected too.
+- **Router rejects route paths it routed wrong.** `/api/`, `api`, a `?` or a `*` before the end deployed but routed wrong. Use `/api`, `/api/*` or `/*`. A route another route always catches first (`/api` next to `/api*`) is rejected too.
 - **Adding a Router route no longer touches the other routes' resources.** Before, a new `/static/*` could leave a bucket route at 403. Existing stacks: deploy once with routes unchanged first, nothing is replaced.
 
 ### Breaking Changes
 
-- **App and env names: letters, digits and single `-` only, the app name starting with a letter.** An app or env named otherwise no longer loads. The name is the stack, so there is no rename: destroy it with the previous version first, which deletes its data, or stay on that version. The default env from your OS username is now cleaned (`John.Doe` → `John-Doe`).
+- **App and env names: letters, digits and single `-` only, the app name starting with a letter.** An app or env named otherwise no longer deploys, including a saved `.stelvio/userenv`. The name is the stack, so there is no rename: `stlv destroy` the old name (destroy still loads it), which deletes its data, then rename and deploy. The default env from your OS username is now lowercased and cleaned (`John.Doe` → `john-doe`); a saved `.stelvio/userenv` is used as is. For a personal env, destroy before you change `.stelvio/userenv`; on a fresh clone, put the old name in `.stelvio/userenv` first.
+- **`Router(routes=...)` is removed, and `price_class` and `custom_domain` are keyword-only.** `routes=` was never documented; add routes with `route()`.
 
 ## 0.10.2b8 (2026-10-23)
 

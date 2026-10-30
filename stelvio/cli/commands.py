@@ -205,7 +205,10 @@ def _confirm_mutations(mutations: list[Mutation]) -> bool:
 def run_diff(
     env: str, show_unchanged: bool = False, compact: bool = False, *, json_output: bool = False
 ) -> None:
-    with _loading(enabled=not json_output) as status, CommandRun(env) as run:
+    with (
+        _loading(enabled=not json_output) as status,
+        CommandRun(env, check_names=True) as run,
+    ):
         status.stop()
         if not json_output:
             print_operation_header("Diff for", run.app_name, env)
@@ -243,7 +246,7 @@ def run_deploy(
 ) -> None:
     with (
         _loading(enabled=not (json_output or stream_output)) as status,
-        CommandRun(env, lock_as="deploy") as run,
+        CommandRun(env, lock_as="deploy", check_names=True) as run,
     ):
         status.stop()
         operation_str = f"Deploying {'NEW ' if not run.has_deployed else ''}app"
@@ -297,7 +300,10 @@ def run_deploy(
 
 
 def run_dev(env: str, show_unchanged: bool = False) -> None:
-    with _loading() as status, CommandRun(env, lock_as="dev-mode", dev_mode=True) as run:
+    with (
+        _loading() as status,
+        CommandRun(env, lock_as="dev-mode", dev_mode=True, check_names=True) as run,
+    ):
         status.stop()
         operation_str = f"Deploying {'' if run.has_deployed else 'NEW '}app in DEV MODE"
         print_operation_header(operation_str, run.app_name, env)
