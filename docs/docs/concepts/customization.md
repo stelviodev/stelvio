@@ -225,6 +225,8 @@ The global `customize` dictionary uses **component types** as keys (e.g., `Bucke
 
 Stelvio checks global `customize` when `@app.config` returns, before any component exists. A key that isn't a component type, a resource key the component doesn't have, or a value that isn't a dict raises an error, also for a type your app never creates.
 
+For app-wide tags, use `StelvioAppConfig(tags=...)`, not a global `customize`. See [Tags](tags.md#global-tags).
+
 ### Global Customize vs. Explicit Values
 
 A global dict is useful for environment-wide defaults, and explicit values take precedence over it:
