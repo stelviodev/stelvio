@@ -139,6 +139,7 @@ table = DynamoTable(
 
 # Link the table to a Lambda function
 fn = Function(
+   "users",
    handler="users/handler.process",
    links=[table]  # Link the table to the function
 )
@@ -170,8 +171,9 @@ API, so the function can call routes with `auth="IAM"`. See the
 You can also create standalone links with custom properties and permissions:
 
 ```python
-from stelvio.link import Link
+from stelvio.aws.function import Function
 from stelvio.aws.permission import AwsPermission
+from stelvio.link import Link
 
 # Create a custom link with specific properties
 custom_link = Link(
@@ -194,6 +196,7 @@ s3_link = Link(
 
 # Use these custom links with a function
 fn = Function(
+    "process",
     handler="functions/process.handler",
     links=[custom_link, s3_link]
 )
@@ -212,6 +215,10 @@ You can customize links using various methods which all return a new Link instan
 Example:
 
 ```python
+from stelvio.aws.function import Function
+from stelvio.aws.permission import AwsPermission
+
+# `table` is the DynamoTable from the first example
 # Create a read-only link to the table (creates a new Link object)
 read_only_link = table.link().with_permissions(
     AwsPermission(
@@ -222,6 +229,7 @@ read_only_link = table.link().with_permissions(
 
 # Link with custom properties (creates a new Link object)
 fn = Function(
+   "users",
    handler="users/handler.process",
    links=[table.link().add_properties(table_region="us-west-2")]
 )

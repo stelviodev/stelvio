@@ -114,8 +114,9 @@ The global entry for a resource key is either a dict or a callable, so only one 
     Dicts are merged shallowly at each property level. If you customize a nested object, 
     your entire object replaces the default, rather than being deep-merged.
     
-    For example, if defaults have `{"encryption": {"enabled": true, "kms_key": "key-1"}}` and you provide 
-    `{"encryption": {"enabled": false}}`, the result is `{"encryption": {"enabled": false}}`—the `kms_key` is lost.
+    For example, `RestApi` sets `{"endpoint_configuration": {"types": "REGIONAL"}}`. If you provide
+    `{"endpoint_configuration": {"ip_address_type": "dualstack"}}`, that is the whole result, and
+    `types` is lost.
 
 ### Common Pitfalls
 
@@ -124,24 +125,26 @@ The global entry for a resource key is either a dict or a callable, so only one 
 This applies to dict-based customize values (see the [Shallow Merge](#how-customization-works) note above — callables aren't merged). When customizing nested objects, the **entire nested object is replaced**, not merged:
 
 ```python
-# ❌ This replaces entire encryption config - kms_key is lost!
-bucket = Bucket(
-    "my-bucket",
-    customize={"bucket": {"encryption": {"enabled": True}}}
-)
-# Result: encryption = {"enabled": True} (kms_key removed)
+from stelvio.aws.api_gateway import RestApi
 
-# ✅ To keep existing encryption settings, include them:
-bucket = Bucket(
-    "my-bucket",
+# ❌ Replaces the whole endpoint_configuration, so types is lost
+api = RestApi(
+    "my-api",
+    customize={"rest_api": {"endpoint_configuration": {"ip_address_type": "dualstack"}}},
+)
+# Result: endpoint_configuration = {"ip_address_type": "dualstack"} (types removed)
+
+# ✅ To keep the default endpoint type, include it:
+other_api = RestApi(
+    "my-other-api",
     customize={
-        "bucket": {
-            "encryption": {
-                "enabled": True,
-                "kms_key": "arn:aws:kms:...",  # Preserved
+        "rest_api": {
+            "endpoint_configuration": {
+                "types": "REGIONAL",  # Preserved
+                "ip_address_type": "dualstack",
             }
         }
-    }
+    },
 )
 ```
 
