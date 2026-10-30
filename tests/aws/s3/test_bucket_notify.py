@@ -4,7 +4,7 @@ import json
 import re
 
 import pulumi
-import pytest
+from pytest import mark, param, raises
 
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig
@@ -12,6 +12,7 @@ from stelvio.aws.queue import Queue
 from stelvio.aws.s3 import Bucket, BucketNotifySubscription
 from stelvio.aws.s3.s3 import VALID_S3_EVENTS
 from stelvio.aws.topic import Topic
+from stelvio.link import Link
 
 from ...conftest import TP
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
@@ -20,7 +21,7 @@ from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 SIMPLE_HANDLER = "functions/simple.handler"
 UPLOAD_HANDLER = "functions/users.handler"
 DELETE_HANDLER = "functions/orders.handler"
-pytestmark = pytest.mark.usefixtures("project_cwd")
+pytestmark = mark.usefixtures("project_cwd")
 
 
 BUCKET_ID = tid(TP + "test-bucket")
@@ -60,7 +61,7 @@ def test_notify_function_requires_events():
     """notify_function() must raise ValueError when events is empty."""
     bucket = Bucket("test-bucket")
 
-    with pytest.raises(ValueError, match="events list cannot be empty"):
+    with raises(ValueError, match="events list cannot be empty"):
         bucket.notify_function(
             "test-notify",
             events=[],
@@ -72,7 +73,7 @@ def test_notify_function_validates_event_types():
     """notify_function() must raise ValueError for invalid event types."""
     bucket = Bucket("test-bucket")
 
-    with pytest.raises(ValueError, match="Invalid S3 event type"):
+    with raises(ValueError, match="Invalid S3 event type"):
         bucket.notify_function(
             "test-notify",
             events=["s3:InvalidEvent:Type"],
@@ -84,7 +85,7 @@ def test_notify_function_validates_mixed_valid_invalid_events():
     """notify_function() must raise ValueError if any event type is invalid."""
     bucket = Bucket("test-bucket")
 
-    with pytest.raises(ValueError, match="Invalid S3 event type"):
+    with raises(ValueError, match="Invalid S3 event type"):
         bucket.notify_function(
             "test-notify",
             events=["s3:ObjectCreated:*", "s3:Invalid:Event"],
@@ -115,7 +116,7 @@ def test_notify_function_rejects_duplicate_names():
         function=SIMPLE_HANDLER,
     )
 
-    with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
+    with raises(ValueError, match="Notification 'on-upload' already exists"):
         bucket.notify_function(
             "on-upload",
             events=["s3:ObjectRemoved:*"],
@@ -139,21 +140,6 @@ def test_notify_function_returns_subscription():
     assert subscription._events == ["s3:ObjectCreated:*"]
 
 
-def test_notify_function_with_empty_links():
-    """notify_function() with empty links list should work normally."""
-    bucket = Bucket("test-bucket")
-
-    subscription = bucket.notify_function(
-        "on-upload",
-        events=["s3:ObjectCreated:*"],
-        function=SIMPLE_HANDLER,
-        links=[],
-    )
-
-    assert isinstance(subscription, BucketNotifySubscription)
-    assert subscription._links == []
-
-
 def test_notify_function_rejects_after_resources_created(pulumi_mocks):
     """notify_function() must raise RuntimeError after bucket resources are created."""
     bucket = Bucket("test-bucket")
@@ -161,7 +147,7 @@ def test_notify_function_rejects_after_resources_created(pulumi_mocks):
     # Trigger resource creation
     _ = bucket.resources
 
-    with pytest.raises(RuntimeError, match="Cannot modify Bucket 'test-bucket' after resources"):
+    with raises(RuntimeError, match="Cannot modify Bucket 'test-bucket' after resources"):
         bucket.notify_function(
             "test-notify",
             events=["s3:ObjectCreated:*"],
@@ -212,7 +198,7 @@ def test_notify_function_can_link_its_own_bucket(pulumi_mocks):
     )
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("read_bucket", "counts"),
     [
         (
@@ -273,7 +259,7 @@ def test_duplicate_notification_name_across_types():
     )
 
     # Then try to add a queue notification with the same name
-    with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
+    with raises(ValueError, match="Notification 'on-upload' already exists"):
         bucket.notify_queue(
             "on-upload",
             events=["s3:ObjectRemoved:*"],
@@ -286,22 +272,34 @@ def test_duplicate_notification_name_across_types():
 # =============================================================================
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("handler", "opts", "expected_error"),
     [
-        pytest.param(
+        param(
             {"handler": SIMPLE_HANDLER},
             {"memory": 512},
             "cannot combine complete handler configuration with additional options",
             id="dict_with_opts",
         ),
-        pytest.param(
+        param(
             FunctionConfig(handler=SIMPLE_HANDLER),
             {"memory": 512},
             "cannot combine complete handler configuration with additional options",
             id="config_with_opts",
         ),
-        pytest.param(
+        param(
+            {"handler": SIMPLE_HANDLER},
+            {"links": [Link("extra", None, None)]},
+            "cannot combine complete handler configuration with additional options",
+            id="dict_with_links",
+        ),
+        param(
+            FunctionConfig(handler=SIMPLE_HANDLER),
+            {"links": [Link("extra", None, None)]},
+            "cannot combine complete handler configuration with additional options",
+            id="config_with_links",
+        ),
+        param(
             SIMPLE_HANDLER,
             {"handler": "other/handler.fn"},
             "Ambiguous handler configuration",
@@ -313,7 +311,7 @@ def test_notify_function_handler_validation(handler, opts, expected_error):
     """notify_function() must validate handler configuration properly."""
     bucket = Bucket("test-bucket")
 
-    with pytest.raises(ValueError, match=expected_error):
+    with raises(ValueError, match=expected_error):
         bucket.notify_function(
             "test-notify",
             events=["s3:ObjectCreated:*"],
@@ -322,15 +320,15 @@ def test_notify_function_handler_validation(handler, opts, expected_error):
         )
 
 
-@pytest.mark.parametrize("key", ["subscriptions", "function", "queue", "topic"])
+@mark.parametrize("key", ["subscriptions", "function", "queue", "topic"])
 def test_bucket_customize_rejects_removed_notification_keys(key):
-    with pytest.raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
+    with raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
         Bucket("uploads", customize={key: {}})
 
 
-@pytest.mark.parametrize("key", ["queue_policy", "topic_policy"])
+@mark.parametrize("key", ["queue_policy", "topic_policy"])
 def test_notify_function_customize_rejects_policy_keys(key):
-    with pytest.raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
+    with raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
         Bucket("uploads").notify_function(
             "on-upload",
             events=["s3:ObjectCreated:*"],
@@ -599,7 +597,7 @@ def test_notify_queue_requires_events():
     bucket = Bucket("test-bucket")
     queue = Queue("test-queue")
 
-    with pytest.raises(ValueError, match="events list cannot be empty"):
+    with raises(ValueError, match="events list cannot be empty"):
         bucket.notify_queue(
             "test-notify",
             events=[],
@@ -612,7 +610,7 @@ def test_notify_queue_validates_event_types():
     bucket = Bucket("test-bucket")
     queue = Queue("test-queue")
 
-    with pytest.raises(ValueError, match="Invalid S3 event type"):
+    with raises(ValueError, match="Invalid S3 event type"):
         bucket.notify_queue(
             "test-notify",
             events=["s3:InvalidEvent:Type"],
@@ -631,7 +629,7 @@ def test_notify_queue_rejects_duplicate_names():
         queue=queue,
     )
 
-    with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
+    with raises(ValueError, match="Notification 'on-upload' already exists"):
         bucket.notify_queue(
             "on-upload",
             events=["s3:ObjectRemoved:*"],
@@ -774,7 +772,7 @@ def test_bucket_and_topic_write_the_same_queue_policy(pulumi_mocks):
     )
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("notify", "target_arn"),
     [
         (
@@ -801,7 +799,7 @@ def test_notify_from_bucket_without_app_prefix_raises(pulumi_mocks, notify, targ
     def deploy():
         return bucket.resources
 
-    with pytest.raises(
+    with raises(
         ValueError,
         match=re.escape(
             f"arn:aws:s3:::old-{TP}uploads cannot send to {target_arn}: Stelvio's policy on it "
@@ -1035,7 +1033,7 @@ def test_bucket_without_notifications(pulumi_mocks):
 # =============================================================================
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("kind", "make_target", "created"),
     [
         ("function", lambda: UPLOAD_HANDLER, {"function", "permission"}),
@@ -1074,17 +1072,24 @@ def test_s3_bucket_resources_with_notification(pulumi_mocks, kind, make_target, 
 # =============================================================================
 
 
-def test_notify_function_with_links(pulumi_mocks):
-    """notify_function() with links passes links to the created function."""
+@mark.parametrize(
+    "link_args",
+    [
+        param(lambda t: {"function": UPLOAD_HANDLER, "links": [t]}, id="handler_path"),
+        param(lambda t: {"handler": UPLOAD_HANDLER, "links": [t]}, id="handler_in_opts"),
+        param(
+            lambda t: {"function": FunctionConfig(handler=UPLOAD_HANDLER, links=[t])},
+            id="config",
+        ),
+        param(lambda t: {"function": {"handler": UPLOAD_HANDLER, "links": [t]}}, id="dict"),
+    ],
+)
+def test_notify_function_with_links(pulumi_mocks, link_args):
+    """Links reach the notification function's IAM policy in every handler form."""
     table = DynamoTable("test-table", fields={"pk": "string"}, partition_key="pk")
     bucket = Bucket("test-bucket")
 
-    bucket.notify_function(
-        "on-upload",
-        events=["s3:ObjectCreated:*"],
-        function=UPLOAD_HANDLER,
-        links=[table],
-    )
+    bucket.notify_function("on-upload", events=["s3:ObjectCreated:*"], **link_args(table))
 
     @pulumi.runtime.test
     def deploy():
@@ -1095,35 +1100,19 @@ def test_notify_function_with_links(pulumi_mocks):
     pulumi_mocks.assert_res("test-bucket-on-upload", R.FUNCTION)
     policy = pulumi_mocks.assert_res("test-bucket-on-upload-p", R.POLICY)
     assert json.loads(policy.inputs["policy"]) == dynamo_link_statements("test-table")
-
-
-def test_notify_function_merges_links_with_config_links(pulumi_mocks):
-    """notify_function() merges links parameter with links from FunctionConfig."""
-    table1 = DynamoTable("table1", fields={"pk": "string"}, partition_key="pk")
-    table2 = DynamoTable("table2", fields={"pk": "string"}, partition_key="pk")
-    bucket = Bucket("test-bucket")
-
-    # Config has links to table1, notify_function() adds links to table2
-    config = FunctionConfig(handler=UPLOAD_HANDLER, links=[table1])
-    bucket.notify_function(
-        "on-upload",
-        events=["s3:ObjectCreated:*"],
-        function=config,
-        links=[table2],
+    pulumi_mocks.assert_res_counts(
+        {
+            R.DYNAMO_TABLE: 1,
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_NOTIFICATION: 1,
+            R.FUNCTION: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.ROLE: 1,
+            R.POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 2,
+        }
     )
-
-    @pulumi.runtime.test
-    def deploy():
-        return [table1.resources, table2.resources, bucket.resources]
-
-    deploy()
-
-    pulumi_mocks.assert_res("test-bucket-on-upload", R.FUNCTION)
-    policy = pulumi_mocks.assert_res("test-bucket-on-upload-p", R.POLICY)
-    # IAM ignores statement order
-    statements = json.loads(policy.inputs["policy"])
-    expected = dynamo_link_statements("table1") + dynamo_link_statements("table2")
-    assert sorted(statements, key=json.dumps) == sorted(expected, key=json.dumps)
 
 
 def test_multiple_notifications_same_queue_creates_single_policy(pulumi_mocks):
@@ -1170,7 +1159,7 @@ def test_notify_topic_requires_events():
     bucket = Bucket("test-bucket")
     topic = Topic("test-topic")
 
-    with pytest.raises(ValueError, match="events list cannot be empty"):
+    with raises(ValueError, match="events list cannot be empty"):
         bucket.notify_topic(
             "test-notify",
             events=[],
@@ -1183,7 +1172,7 @@ def test_notify_topic_validates_event_types():
     bucket = Bucket("test-bucket")
     topic = Topic("test-topic")
 
-    with pytest.raises(ValueError, match="Invalid S3 event type"):
+    with raises(ValueError, match="Invalid S3 event type"):
         bucket.notify_topic(
             "test-notify",
             events=["s3:InvalidEvent:Type"],
@@ -1202,7 +1191,7 @@ def test_notify_topic_rejects_duplicate_names():
         topic=topic,
     )
 
-    with pytest.raises(ValueError, match="Notification 'on-upload' already exists"):
+    with raises(ValueError, match="Notification 'on-upload' already exists"):
         bucket.notify_topic(
             "on-upload",
             events=["s3:ObjectRemoved:*"],
@@ -1448,7 +1437,7 @@ def test_mixed_function_queue_and_topic_notifications(pulumi_mocks):
     }
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     "notify",
     [
         lambda b: b.notify_function(

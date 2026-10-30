@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, final, get_args
 
@@ -15,12 +15,10 @@ from stelvio.aws.queue import Queue
 from stelvio.aws.send_policy import send_policy
 from stelvio.aws.topic import Topic
 from stelvio.component import Component, link_config_creator, resource_name
-from stelvio.link import Link, Linkable, LinkableMixin, LinkConfig
+from stelvio.link import LinkableMixin, LinkConfig
 from stelvio.provider import ProviderStore
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from pulumi_aws.lambda_ import PermissionArgs
     from pulumi_aws.s3 import (
         BucketArgs,
@@ -111,7 +109,6 @@ class BucketNotifySubscription(
         function_config: FunctionConfig | None,
         queue_ref: Queue | str | None,
         topic_ref: Topic | str | None,
-        links: Sequence[Link | Linkable],
         *,
         tags: dict[str, str] | None = None,
         customize: BucketNotifySubscriptionCustomizationDict | None = None,
@@ -133,7 +130,6 @@ class BucketNotifySubscription(
         self._function_config = function_config
         self._queue = queue_ref
         self._topic = topic_ref
-        self._links = links
         # This will be set by Bucket._create_notification_resources before triggering resources
         self._bucket_arn: pulumi.Output[str] | None = None
         # Set to True if another subscription already created a policy for this queue/topic
@@ -163,14 +159,10 @@ class BucketNotifySubscription(
         topic_policy: sns.TopicPolicy | None = None
 
         if self._function_config is not None:
-            # Merge links from notification with existing links from function config
-            merged_links = [*self._links, *self._function_config.links]
-            config_with_merged_links = replace(self._function_config, links=merged_links)
-
             # Create Lambda function for this notification
             function = Function(
                 self._function_name,
-                config=config_with_merged_links,
+                config=self._function_config,
                 tags=self.tags,
                 customize=self._customize.get("function"),
                 parent=self,
@@ -624,7 +616,6 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
         filter_prefix: str | None = None,
         filter_suffix: str | None = None,
         function: str | FunctionConfig | FunctionConfigDict | None = None,
-        links: Sequence[Link | Linkable] | None = None,
         customize: BucketNotifySubscriptionCustomizationDict | None = None,
         **opts: Unpack[FunctionConfigDict],
     ) -> BucketNotifySubscription:
@@ -639,11 +630,9 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 - str: Handler path (e.g., "functions/handler.process")
                 - FunctionConfig: Complete function configuration
                 - FunctionConfigDict: Function configuration dictionary
-            links: List of links to grant the notification function access to other
-                resources (e.g., DynamoDB tables, S3 buckets, queues).
             customize: Customization for the subscription's `function` and `permission`.
-            **opts: Additional function configuration options (memory, timeout, etc.)
-                when function is specified as a string.
+            **opts: Additional function configuration options (links, memory, timeout,
+                etc.) when function is specified as a string.
 
         Returns:
             BucketNotifySubscription: The created subscription component.
@@ -673,7 +662,6 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             function_config,
             None,  # queue_ref
             None,  # topic_ref
-            links or [],
             tags=self.tags,
             customize=customize,
             parent=self,
@@ -728,7 +716,6 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             None,  # function_config
             queue,
             None,  # topic_ref
-            [],  # links
             tags=self.tags,
             parent=self,
         )
@@ -782,7 +769,6 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
             None,  # function_config
             None,  # queue_ref
             topic,
-            [],  # links
             tags=self.tags,
             parent=self,
         )
