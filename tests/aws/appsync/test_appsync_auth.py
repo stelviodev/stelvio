@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pulumi
-import pytest
+from pytest import mark, raises
 
 from stelvio.aws.appsync import (
     ApiKeyAuth,
@@ -61,7 +61,7 @@ def test_api_key_auth(pulumi_mocks, project_cwd):
     assert expires_dt < now + timedelta(days=31)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("auth_config", "additional_auth", "expected_api_key"),
     [
         (ApiKeyAuth(), None, f"da2-test-api-key-{TP}myapi-api-key-test-id"),
@@ -87,7 +87,7 @@ def test_api_key_property(
     api.api_key.apply(check_key)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("auth_config", "expected_auth_type", "config_key", "expected_config"),
     [
         ("iam", AUTH_TYPE_IAM, None, None),
@@ -192,20 +192,20 @@ def test_cognito_auth_user_pool_component_with_options(pulumi_mocks, project_cwd
 
 def test_cognito_auth_empty_string_still_rejected():
     """Empty string validation still works after adding UserPool support."""
-    with pytest.raises(ValueError, match="user_pool_id cannot be empty"):
+    with raises(ValueError, match="user_pool_id cannot be empty"):
         CognitoAuth(user_pool_id="")
 
 
 def test_cognito_auth_invalid_type_rejected():
     """Non-string, non-UserPool types are rejected at construction time."""
-    with pytest.raises(TypeError, match="user_pool_id must be a UserPool or string"):
+    with raises(TypeError, match="user_pool_id must be a UserPool or string"):
         CognitoAuth(user_pool_id=123)
 
-    with pytest.raises(TypeError, match="user_pool_id must be a UserPool or string"):
+    with raises(TypeError, match="user_pool_id must be a UserPool or string"):
         CognitoAuth(user_pool_id=None)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("auth_config", "expected_fn_inputs", "expected_auth_config"),
     [
         (LambdaAuth(handler="functions/simple.handler"), {}, {}),
@@ -217,6 +217,11 @@ def test_cognito_auth_invalid_type_rejected():
         (
             LambdaAuth(handler=FunctionConfig(handler="functions/simple.handler", memory=512)),
             {"memorySize": 512},
+            {},
+        ),
+        (
+            LambdaAuth(handler={"handler": "functions/simple.handler", "memory": 384}),
+            {"handler": "simple.handler", "memorySize": 384},
             {},
         ),
         (
@@ -233,10 +238,10 @@ def test_cognito_auth_invalid_type_rejected():
             {"identityValidationExpression": r"^Bearer\\s.+$"},
         ),
     ],
-    ids=["basic", "fn-opts", "function-config", "result-ttl", "identity-validation"],
+    ids=["basic", "fn-opts", "function-config", "dict", "result-ttl", "identity-validation"],
 )
 def test_lambda_auth_creates_function(
-    auth_config, expected_auth_config, expected_fn_inputs, pulumi_mocks, project_cwd
+    auth_config, expected_fn_inputs, expected_auth_config, pulumi_mocks, project_cwd
 ):
     make_api(auth=auth_config)
 
@@ -296,7 +301,7 @@ def test_lambda_auth_with_existing_function_handler(pulumi_mocks, project_cwd):
     assert len(pulumi_mocks.created(R.FUNCTION)) == 1
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("auth_kwargs", "fn_name"),
     [
         ({"auth": LambdaAuth(handler="functions/simple.handler")}, "myapi-authorizer"),
@@ -317,7 +322,7 @@ def test_auth_functions_customize_reaches_built_authorizer(
     pulumi_mocks.assert_res(fn_name, R.FUNCTION, {"memorySize": 1024}, partial=True)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("auth", "extra", "expected_type", "providers", "api_keys", "auth_fns"),
     [
         (
@@ -402,7 +407,7 @@ def test_additional_auth_configuration(  # noqa: PLR0913
 # --- Auth config validation ---
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("constructor", "error_type", "match"),
     [
         (
@@ -455,14 +460,14 @@ def test_additional_auth_configuration(  # noqa: PLR0913
     ],
 )
 def test_auth_config_validation(constructor, error_type, match):
-    with pytest.raises(error_type, match=match):
+    with raises(error_type, match=match):
         constructor()
 
 
 # --- Duplicate auth modes ---
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("auth", "additional_auth"),
     [
         (ApiKeyAuth(), [ApiKeyAuth(expires=90)]),
@@ -472,5 +477,5 @@ def test_auth_config_validation(constructor, error_type, match):
     ids=["default-matches-additional", "duplicate-in-additional", "duplicate-iam"],
 )
 def test_duplicate_auth_mode_rejected(auth, additional_auth, project_cwd):
-    with pytest.raises(ValueError, match="Duplicate authentication mode"):
+    with raises(ValueError, match="Duplicate authentication mode"):
         AppSync("myapi", schema=INLINE_SCHEMA, auth=auth, additional_auth=additional_auth)

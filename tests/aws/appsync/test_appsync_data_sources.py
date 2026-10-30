@@ -3,8 +3,8 @@
 import json
 
 import pulumi
-import pytest
 from pulumi_aws import appsync, iam
+from pytest import mark, raises
 
 from stelvio.aws.dynamo_db import DynamoTable
 from stelvio.aws.function import Function, FunctionConfig
@@ -43,7 +43,7 @@ def service_role_arn(ds_name: str) -> str:
 # --- Data source creation (all types) ---
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("ds_type", "expected_name", "expected_config"),
     [
         (
@@ -196,7 +196,7 @@ def test_lambda_data_source_creates_function_role_and_accessible(pulumi_mocks, p
     assert isinstance(posts.resources.function, Function)
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("handler", "extra_kwargs", "expected_fn_inputs"),
     [
         (
@@ -209,8 +209,13 @@ def test_lambda_data_source_creates_function_role_and_accessible(pulumi_mocks, p
             {"memory": 256},
             {"memorySize": 256},
         ),
+        (
+            {"handler": "functions/simple.handler", "memory": 384},
+            {},
+            {"handler": "simple.handler", "memorySize": 384},
+        ),
     ],
-    ids=["function-config", "fn-opts"],
+    ids=["function-config", "fn-opts", "dict"],
 )
 def test_lambda_data_source_function_options(
     handler, extra_kwargs, expected_fn_inputs, pulumi_mocks, project_cwd
@@ -222,7 +227,17 @@ def test_lambda_data_source_function_options(
     deploy_all()
 
     pulumi_mocks.assert_res("myapi-ds-posts-fn", R.FUNCTION, expected_fn_inputs, partial=True)
-    assert len(pulumi_mocks.created(R.FUNCTION)) == 1
+    pulumi_mocks.assert_res_counts(
+        {
+            R.GRAPHQL_API: 1,
+            R.APPSYNC_DATA_SOURCE: 2,
+            R.APPSYNC_RESOLVER: 1,
+            R.ROLE: 2,
+            R.ROLE_POLICY: 1,
+            R.ROLE_POLICY_ATTACHMENT: 1,
+            R.FUNCTION: 1,
+        }
+    )
 
 
 def test_lambda_data_source_with_function_instance(pulumi_mocks, project_cwd):
@@ -279,7 +294,7 @@ def test_lambda_data_source_with_links_list(pulumi_mocks, project_cwd):
 # --- IAM policies (single-statement data sources) ---
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("ds_type", "policy_name", "expected_actions", "expected_resources"),
     [
         (
@@ -404,7 +419,7 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
 # --- Validation ---
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("setup", "match"),
     [
         (
@@ -444,30 +459,30 @@ def test_rds_data_source_creates_iam_policy(pulumi_mocks, project_cwd):
 )
 def test_data_source_validation(setup, match, project_cwd):
     api = make_api()
-    with pytest.raises(ValueError, match=match):
+    with raises(ValueError, match=match):
         setup(api)
 
 
 def test_duplicate_data_source_name(project_cwd):
     api = make_api()
     api.data_source_lambda("posts", handler="functions/simple.handler")
-    with pytest.raises(ValueError, match="Duplicate data source name 'posts'"):
+    with raises(ValueError, match="Duplicate data source name 'posts'"):
         api.data_source_lambda("posts", handler="functions/simple.handler")
 
 
 def test_lambda_data_source_handler_required(project_cwd):
     api = make_api()
-    with pytest.raises(TypeError):
+    with raises(TypeError):
         api.data_source_lambda("posts")
 
 
 def test_dynamo_data_source_requires_dynamo_table_component(project_cwd):
     api = make_api()
-    with pytest.raises(TypeError, match="table must be a DynamoTable"):
+    with raises(TypeError, match="table must be a DynamoTable"):
         api.data_source_dynamo("items", table=object())
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     "extra_kwargs",
     [{"memory": 256}, {"links": []}],
     ids=["with-fn-opts", "with-links"],
@@ -476,9 +491,7 @@ def test_lambda_data_source_function_instance_extra_opts_raises(extra_kwargs, pr
     """Passing a Function instance with extra fn_opts or links should raise ValueError."""
     api = make_api()
     fn = Function("my-fn", handler="functions/simple.handler")
-    with pytest.raises(
-        ValueError, match="Cannot combine a Function handler with function options"
-    ):
+    with raises(ValueError, match="Cannot combine a Function handler with function options"):
         api.data_source_lambda("posts", fn, **extra_kwargs)
 
 
@@ -541,7 +554,7 @@ def test_lambda_data_source_function_customize_applied(pulumi_mocks, project_cwd
 # --- Customize key validation ---
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("ds_type", "bad_key"),
     [
         ("lambda", "datasource"),
@@ -554,7 +567,7 @@ def test_lambda_data_source_function_customize_applied(pulumi_mocks, project_cwd
 )
 def test_data_source_invalid_customize_key(ds_type, bad_key, project_cwd):
     api = make_api()
-    with pytest.raises(ValueError, match="Unknown customization key"):
+    with raises(ValueError, match="Unknown customization key"):
         make_data_source(api, ds_type, customize={bad_key: {}})
 
 
@@ -562,7 +575,7 @@ def test_data_source_invalid_customize_key(ds_type, bad_key, project_cwd):
 # in the data source component's URN as the `stelvio:aws:AppSync$` parent segment.
 
 
-@pytest.mark.parametrize(
+@mark.parametrize(
     ("ds_type", "expected_name"),
     [
         ("lambda", "posts"),
