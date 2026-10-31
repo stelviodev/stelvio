@@ -478,16 +478,26 @@ def test_customized_function_code_stays_on_root_and_wildcard_routes(pulumi_mocks
 
 
 @mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
-def test_wildcard_routes_pass_the_path_through(pulumi_mocks):
+@mark.parametrize(
+    ("files_path", "fn_path", "url_path", "url_origin_id"),
+    # a URL route's origin id is the router name and a hash of the route path
+    [
+        param("/files/*", "/w/*", "/u/*", "router-url-e941f502", id="trailing"),
+        param("/files/*.txt", "/w/*/end", "/u/*.jpg", "router-url-99e46910", id="mid-path"),
+    ],
+)
+def test_wildcard_routes_pass_the_path_through(
+    pulumi_mocks, files_path, fn_path, url_path, url_origin_id
+):
     """A wildcard route gets one behavior and no prefix-strip function: the origin sees the
     full path."""
 
     @pulumi.runtime.test
     def deploy():
         router = Router("router")
-        router.route("/files/*", Bucket("files"))
-        router.route("/w/*", Function("fn", handler="functions/simple.handler"))
-        router.route("/u/*", "https://example.com")
+        router.route(files_path, Bucket("files"))
+        router.route(fn_path, Function("fn", handler="functions/simple.handler"))
+        router.route(url_path, "https://example.com")
         return router.resources
 
     deploy()
@@ -497,9 +507,9 @@ def test_wildcard_routes_pass_the_path_through(pulumi_mocks):
     assert [
         (b["pathPattern"], b["targetOriginId"], b["functionAssociations"]) for b in behaviors
     ] == [
-        ("/files/*", f"arn:aws:s3:::{tn(TP + 'files')}", []),
-        ("/w/*", tn(TP + "fn"), []),
-        ("/u/*", TP + "router-url-e941f502", []),
+        (files_path, f"arn:aws:s3:::{tn(TP + 'files')}", []),
+        (fn_path, tn(TP + "fn"), []),
+        (url_path, TP + url_origin_id, []),
     ]
     pulumi_mocks.assert_res("router-default-404", R.CLOUDFRONT_FUNCTION)
     pulumi_mocks.assert_res_counts(

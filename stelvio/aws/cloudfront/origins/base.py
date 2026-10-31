@@ -134,7 +134,7 @@ class ComponentCloudfrontAdapter(ABC):
         """`behavior` for the exact path and for everything under it: `/api/*` alone sends
         `/api` to the default behavior. Root and wildcard routes have no exact path."""
         patterns = [self.route.prefix_pattern]
-        if not (self.route.is_root or self.route.path_pattern.endswith("*")):
+        if not (self.route.is_root or self.route.is_wildcard):
             patterns.insert(0, self.route.path_pattern)
         return [{"path_pattern": pattern, **behavior} for pattern in patterns]
 
@@ -159,9 +159,8 @@ class ComponentCloudfrontAdapter(ABC):
         # function compares the `*` literally and never matches a real path. Only the
         # generated code is skipped: a customized `code` is the user's own function (a guard,
         # a redirect) and keeps its association.
-        if (self.route.is_root or self.route.path_pattern.endswith("*")) and props.get(
-            "code"
-        ) == defaults["code"]:
+        generated = props.get("code") == defaults["code"]
+        if (self.route.is_root or self.route.is_wildcard) and generated:
             return None
         return pulumi_aws.cloudfront.Function(
             self._name("uri-rewrite", limit=64),

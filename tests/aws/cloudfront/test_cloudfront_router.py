@@ -131,8 +131,8 @@ def test_route_rejects_a_second_root_route(first, second):
         "api",
         "*",
         "/api/",
-        "/a/*/b",
-        "/*.jpg",
+        "/**",
+        "/a/**/b",
         "/a?",
         "/it's",
         "/a\\b",
@@ -158,9 +158,9 @@ def test_route_rejects_a_path_it_cannot_serve(path):
         match="^"
         + re.escape(
             f"Invalid route path {path!r}: start with '/', no trailing '/', no empty, '.' or "
-            "'..' segment, '*' only at the end, other chars only letters, digits and "
-            "_ . ~ - / $ @ : +. Use '/api' to send '/api/users' to the origin as '/users', "
-            "or '/api/*' to keep '/api/users'."
+            "'..' segment, no '**', other chars only letters, digits and _ . ~ - / $ @ : + *. "
+            "Use '/api' to send '/api/users' to the origin as '/users', or '/api/*' to keep "
+            "'/api/users'."
         )
         + "$",
     ):
@@ -176,13 +176,15 @@ def test_route_rejects_a_path_it_cannot_serve(path):
         "/api",
         "/api*",
         "/api/*",
+        "/*.jpg",
+        "/a/*/b",
         "/Api/V2",
         "/v1.2/a_b~c-d",
         "/$@:+",
         "/.well-known/x",
     ],
 )
-def test_route_accepts_a_path_cloudfront_and_the_prefix_strip_both_handle(path):
+def test_route_accepts_a_path_it_can_serve(path):
     router = Router(name="test-router")
 
     router.route(path, Mock(spec=Bucket))
@@ -236,6 +238,39 @@ def test_route_rejects_a_path_a_wildcard_route_catches_first(first, second):
         r"matches everything '/api' would\.$",
     ):
         router.route(second, Mock(spec=Bucket))
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "hint"),
+    [
+        ("/v*/*", "/v1/*", " Add '/v1/*' before '/v*/*'."),
+        ("/*/api*", "/v1/api", " Add '/v1/api' before '/*/api*'."),
+        ("/*/users*", "/a/users", ""),
+    ],
+)
+def test_route_rejects_a_path_a_mid_path_wildcard_route_catches_first(first, second, hint):
+    router = Router(name="test-router")
+    router.route(first, Mock(spec=Bucket))
+
+    with pytest.raises(
+        ValueError,
+        match="^"
+        + re.escape(
+            f"Route for path pattern {second!r} never gets a request: {first!r} comes first "
+            f"and matches everything {second!r} would.{hint}"
+        )
+        + "$",
+    ):
+        router.route(second, Mock(spec=Bucket))
+
+
+def test_route_keeps_a_path_a_wildcard_not_ending_in_a_star_catches_only_in_part():
+    """`/a/*/b` takes `/a/x/b`, but `/a/x/b/c` still reaches the later route's `/*`."""
+    router = Router(name="test-router")
+    router.route("/a/*/b", Mock(spec=Bucket))
+    router.route("/a/x/b", Mock(spec=Bucket))
+
+    assert [r.path_pattern for r in router.routes] == ["/a/*/b", "/a/x/b"]
 
 
 def test_route_rejects_a_plain_path_added_after_a_wildcard_of_the_same_length():

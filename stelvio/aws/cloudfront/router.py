@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi
@@ -33,18 +34,21 @@ _CLOUDFRONT_PATH_PATTERN_MAX_LEN = 255
 
 def _check_route_path(route: Route) -> None:
     # The prefix-strip function compares the path literally against `request.uri`: a path
-    # without the leading '/', with a trailing '/' or a wildcard before the end never
-    # matches it. `'` and `\` break its JS string; `"`, space and non-ASCII arrive
-    # percent-encoded and never match. CloudFront drops empty, `.` and `..` segments from
-    # the request path before matching, so a path with one never matches either.
+    # without the leading '/' or with a trailing '/' never matches it. A path with a `*`
+    # gets no strip function. `'` and `\` break its JS string; `"`, space and non-ASCII
+    # arrive percent-encoded and never match. CloudFront drops empty, `.` and `..` segments
+    # from the request path before matching, so a path with one never matches either. One
+    # `*` already matches `/`, and `/**` would be a second catch-all ahead of the root route.
     path = route.path_pattern
-    if not re.fullmatch(r"(/[A-Za-z0-9_.~$@:+/-]*\*?)?", path) or (
-        path != "/" and re.search(r"/\.{0,2}(?:/|$)", path)
+    if (
+        not re.fullmatch(r"(/[A-Za-z0-9_.~$@:+/*-]*)?", path)
+        or "**" in path
+        or (path != "/" and re.search(r"/\.{0,2}(?:/|$)", path))
     ):
         raise ValueError(
             f"Invalid route path {path!r}: start with '/', no trailing '/', no empty, '.' "
-            "or '..' segment, '*' only at the end, other chars only letters, digits and "
-            "_ . ~ - / $ @ : +. Use '/api' to send '/api/users' to the origin as '/users', "
+            "or '..' segment, no '**', other chars only letters, digits and "
+            "_ . ~ - / $ @ : + *. Use '/api' to send '/api/users' to the origin as '/users', "
             "or '/api/*' to keep '/api/users'."
         )
     if len(route.prefix_pattern) > _CLOUDFRONT_PATH_PATTERN_MAX_LEN:
@@ -325,12 +329,19 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
     def _check_routes_reachable(self) -> None:
         # CloudFront takes the first ordered behavior that matches. A route under a wildcard
         # behavior ordered before it (`/api` after `/api*`) gets nothing. The root route is
-        # the default behavior: never ordered, never caught.
+        # the default behavior: never ordered, never caught. A catcher ending in `*` that
+        # matches the route's text up to its first `*` matches every request the route gets
+        # (`fnmatch`'s `*` crosses `/` like CloudFront's). One with a `*` only mid-path
+        # (`/a/*/b`) leaves the later route's `/*` behavior its requests.
         ordered = [r for r in self.routes if not r.is_root]
         for idx, route in enumerate(ordered):
-            under = route.path_pattern.rstrip("*")
+            under = route.path_pattern.split("*")[0]
             catcher = next(
-                (r for r in ordered[:idx] if under.startswith(r.prefix_pattern.rstrip("*"))),
+                (
+                    r
+                    for r in ordered[:idx]
+                    if r.prefix_pattern.endswith("*") and fnmatchcase(under, r.prefix_pattern)
+                ),
                 None,
             )
             if catcher is not None:

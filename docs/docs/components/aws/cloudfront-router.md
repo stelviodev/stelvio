@@ -70,12 +70,12 @@ router.route("/api/admin", admin)   # More specific
 In this case, requests to `/api/admin/users` will hit the `admin` origin, while `/api/users` will hit the `api` origin—regardless of which route was added first.
 
 !!! note "Path matching rules"
-    - A path starts with `/`, has no trailing `/`, no empty, `.` or `..` segment, no `?`, and `*` only at the end. Other characters: letters, digits and `_ . ~ - $ @ : +`. CloudFront caps a path pattern at 255 characters, and a plain path also gets a `/*` pattern, so it may have 253. The Router rejects any other path
-    - A route another route always catches first (`/api` next to `/api*`) is rejected
+    - A path starts with `/`, has no trailing `/`, no empty, `.` or `..` segment, no `?` and no `**`. Other characters: letters, digits and `_ . ~ - $ @ : + *`. CloudFront caps a path pattern at 255 characters, and a plain path also gets a `/*` pattern, so it may have 253. The Router rejects any other path
+    - A route that an earlier route ending in `*` always catches (`/api` next to `/api*`) is rejected
     - Longer, more specific paths take priority over shorter ones
     - The root path `/` acts as a catch-all for unmatched requests. `/*` is the same route, so a Router accepts only one of them
     - If no root path is defined, unmatched requests return a 404 response
-    - A wildcard path like `/files/*` keeps its prefix: `/files/a.txt` reaches the origin as `/files/a.txt`
+    - A path with a `*` (`/files/*`, `/images/*.jpg`) keeps its prefix: `/files/a.txt` reaches the origin as `/files/a.txt`. CloudFront's `*` also matches `/`, so `/images/*.jpg` matches `/images/a/b.jpg`. The length sort counts each `*`, so `/*.jpg` comes before `/api` and takes `/api/logo.jpg`
     - A Bucket on the root path serves its `index.html` for `/` only. A folder in it (`/docs/`) or a bucket route on another path (`/files/`) returns 403
 
 !!! warning "Routes must be defined before resource creation"
