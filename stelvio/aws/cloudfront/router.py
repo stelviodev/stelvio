@@ -17,7 +17,7 @@ from stelvio.aws.cloudfront.origins.components.url import Url, url_origin_name
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.aws.s3.s3 import Bucket
-from stelvio.component import Component
+from stelvio.component import Component, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.provider import ProviderStore
 
@@ -144,7 +144,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             default_404_function_code = default_404_function_js()
 
             default_404_function = pulumi_aws.cloudfront.Function(
-                context().prefix(f"{self.name}-default-404"),
+                resource_name(self.name, limit=64, suffix="-default-404"),
                 **self._customizer(
                     "cloudfront_functions",
                     {},

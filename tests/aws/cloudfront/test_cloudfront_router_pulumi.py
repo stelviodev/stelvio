@@ -1031,6 +1031,33 @@ def test_long_router_and_component_names_truncate_the_per_route_names(pulumi_moc
     assert_hash_truncated(rewrite.name, 56, "-uri-rewrite")
 
 
+def test_long_router_name_truncates_the_default_404_function_name(pulumi_mocks):
+    # Over 34 chars (64 cap - 10 prefix - 12 suffix - 8 Pulumi chars) the name needs a hash.
+    router = Router("a-router-with-a-name-longer-than-34-chars")
+    router.route("/static", Bucket("files"))
+
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
+
+    deploy()
+
+    [not_found] = [
+        f for f in pulumi_mocks.created(R.CLOUDFRONT_FUNCTION) if f.name.endswith("-default-404")
+    ]
+    assert_hash_truncated(not_found.name, 56, "-default-404")
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_POLICY: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.CLOUDFRONT_FUNCTION: 2,  # /static's prefix strip + the default 404
+            R.DISTRIBUTION: 1,
+        }
+    )
+
+
 @mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
 def test_long_router_names_truncate_the_url_and_function_route_names(pulumi_mocks):
     router = Router("a-router-with-a-very-long-name")
