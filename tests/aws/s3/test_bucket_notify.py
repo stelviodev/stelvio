@@ -320,6 +320,13 @@ def test_notify_function_handler_validation(handler, opts, expected_error):
         )
 
 
+def test_notify_function_rejects_links_none():
+    with raises(TypeError, match=r"^links takes a list of links or components, got NoneType\."):
+        Bucket("test-bucket").notify_function(
+            "on-upload", events=["s3:ObjectCreated:*"], function=SIMPLE_HANDLER, links=None
+        )
+
+
 @mark.parametrize("key", ["subscriptions", "function", "queue", "topic"])
 def test_bucket_customize_rejects_removed_notification_keys(key):
     with raises(ValueError, match=rf"Unknown customization key\(s\) \['{key}'\]"):
@@ -342,7 +349,8 @@ def test_notify_function_customize_rejects_policy_keys(key):
 # =============================================================================
 
 
-def test_notify_function_creates_resources(pulumi_mocks):
+@mark.parametrize("opts", [param({}, id="no_links"), param({"links": []}, id="empty_links")])
+def test_notify_function_creates_resources(pulumi_mocks, opts):
     """notify_function() creates Lambda function, permission, and notification."""
     bucket = Bucket("test-bucket")
 
@@ -350,6 +358,7 @@ def test_notify_function_creates_resources(pulumi_mocks):
         "on-upload",
         events=["s3:ObjectCreated:*"],
         function=UPLOAD_HANDLER,
+        **opts,
     )
 
     @pulumi.runtime.test
