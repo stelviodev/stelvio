@@ -22,6 +22,15 @@ ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 # (customize key, computed props, default props) -> props: the owning Router's `_customizer`
 type Customizer = Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]]
 
+# Short kinds leave room for long app and env names; the old words live on in the aliases.
+_OLD_KINDS = {
+    "rw": "uri-rewrite",
+    "r": "lambda-edge-role",
+    "p": "lambda-edge-policy",
+    "edge": "host-rewrite",
+    "perm": "cloudfront-permission",
+}
+
 
 def _as_is(_key: str, props: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
     return defaults | {k: v for k, v in props.items() if v is not None}
@@ -63,7 +72,7 @@ class ComponentCloudfrontAdapter(ABC):
 
     def _old_name(self, kind: str) -> str:
         # The name a deployed stack has from before the rename; `idx` lives only for this.
-        return context().prefix(f"{self._old_stem}-{kind}-{self.idx}")
+        return context().prefix(f"{self._old_stem}-{_OLD_KINDS.get(kind, kind)}-{self.idx}")
 
     def _opts(
         self,
@@ -158,7 +167,7 @@ class ComponentCloudfrontAdapter(ABC):
         if (self.route.is_root or self.route.is_wildcard) and generated:
             return None
         return pulumi_aws.cloudfront.Function(
-            self._name("uri-rewrite", limit=64),
+            self._name("rw", limit=64),
             **props,
-            opts=self._opts("uri-rewrite", depends_on=depends_on),
+            opts=self._opts("rw", depends_on=depends_on),
         )

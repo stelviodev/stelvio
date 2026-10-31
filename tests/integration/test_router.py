@@ -181,10 +181,7 @@ def test_router_url_origin_tags(stelvio_env):
 
     resources = stelvio_env.export_resources()
     url_lambda_resources = [
-        resource
-        for resource in resources
-        if resource["type"] == "aws:lambda/function:Function"
-        and "-host-rewrite" in resource["urn"]
+        resource for resource in resources if resource["type"] == "aws:lambda/function:Function"
     ]
     assert len(url_lambda_resources) == 1, (
         f"Expected exactly one URL origin Lambda@Edge function, got {len(url_lambda_resources)}"

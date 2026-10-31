@@ -138,6 +138,13 @@ All AWS resources follow the `{app}-{env}-{name}` pattern. Some resources have a
 |----------|---------|
 | IAM Roles | `{app}-{env}-{name}-r` |
 | IAM Policies | `{app}-{env}-{name}-p`|
+| Router origin access control | `{app}-{env}-{router}-{component}-oac` |
+| Router CloudFront Function that strips the route path | `{app}-{env}-{router}-{component}-rw` |
+| Router permission to call a Function URL | `{app}-{env}-{router}-{component}-perm` |
+| Router Lambda@Edge for a URL route | `{app}-{env}-{router}-{component}-edge` |
+| Router CloudFront Function that returns 404 (no `/` route) | `{app}-{env}-{router}-default-404` |
+
+In Router names, `{component}` is the routed component's name. For a URL route it is `url-` and a hash of the route path, and the Lambda@Edge's IAM role ends in `-r`.
 
 ### Automatic Truncation
 

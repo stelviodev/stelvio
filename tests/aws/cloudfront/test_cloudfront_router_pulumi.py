@@ -14,6 +14,7 @@ from ..conftest import (
     assert_hash_truncated,
     assert_urn,
     create_app_context_with_global_customize,
+    set_app_and_env_names,
 )
 from ..pulumi_mocks import ACCOUNT_ID, DEFAULT_REGION, R, tid, tn
 
@@ -33,7 +34,7 @@ def test_create_resources_with_s3_bucket(pulumi_mocks):
     origin_id = f"arn:aws:s3:::{tn(TP + 'test-bucket')}"
     functions_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function"
     not_found_arn = f"{functions_arn}/{tn(TP + 'test-router-default-404')}"
-    rewrite_arn = f"{functions_arn}/{tn(TP + 'test-router-test-bucket-uri-rewrite')}"
+    rewrite_arn = f"{functions_arn}/{tn(TP + 'test-router-test-bucket-rw')}"
     pulumi_mocks.assert_res(
         "test-router",
         R.DISTRIBUTION,
@@ -330,7 +331,7 @@ def test_root_route_next_to_other_routes(pulumi_mocks):
         ("/api/*", tid(TP + "api")),
     ]
     pulumi_mocks.assert_res(
-        "router-api-uri-rewrite",
+        "router-api-rw",
         R.CLOUDFRONT_FUNCTION,
         {"code": strip_path_pattern_function_js("/api")},
         partial=True,
@@ -444,25 +445,21 @@ def test_customized_function_code_stays_on_root_and_wildcard_routes(pulumi_mocks
 
     deploy()
 
-    pulumi_mocks.assert_res(
-        "router-files-uri-rewrite", R.CLOUDFRONT_FUNCTION, {"code": code}, partial=True
-    )
-    pulumi_mocks.assert_res(
-        "router-site-uri-rewrite", R.CLOUDFRONT_FUNCTION, {"code": code}, partial=True
-    )
+    pulumi_mocks.assert_res("router-files-rw", R.CLOUDFRONT_FUNCTION, {"code": code}, partial=True)
+    pulumi_mocks.assert_res("router-site-rw", R.CLOUDFRONT_FUNCTION, {"code": code}, partial=True)
     functions_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function"
     distribution = pulumi_mocks.assert_res("router", R.DISTRIBUTION)
     assert distribution.inputs["defaultCacheBehavior"]["functionAssociations"] == [
         {
             "eventType": "viewer-request",
-            "functionArn": f"{functions_arn}/{tn(TP + 'router-site-uri-rewrite')}",
+            "functionArn": f"{functions_arn}/{tn(TP + 'router-site-rw')}",
         }
     ]
     [files] = distribution.inputs["orderedCacheBehaviors"]
     assert files["functionAssociations"] == [
         {
             "eventType": "viewer-request",
-            "functionArn": f"{functions_arn}/{tn(TP + 'router-files-uri-rewrite')}",
+            "functionArn": f"{functions_arn}/{tn(TP + 'router-files-rw')}",
         }
     ]
     pulumi_mocks.assert_res_counts(
@@ -802,7 +799,7 @@ def test_router_function_and_url_routes(pulumi_mocks, project_cwd):
         },
     )
     pulumi_mocks.assert_res(
-        "my-router-api-fn-cloudfront-permission",
+        "my-router-api-fn-perm",
         R.LAMBDA_PERMISSION,
         {
             "action": "lambda:InvokeFunctionUrl",
@@ -817,9 +814,9 @@ def test_router_function_and_url_routes(pulumi_mocks, project_cwd):
     assert origins[api_fn]["originAccessControlId"] == tid(f"{TP}my-router-api-fn-oac")
     assert "originAccessControlId" not in origins[tn(f"{TP}open-fn")]
     for function in (
-        "my-router-open-fn-uri-rewrite",
-        "my-router-api-fn-uri-rewrite",
-        "my-router-url-abe5c496-uri-rewrite",
+        "my-router-open-fn-rw",
+        "my-router-api-fn-rw",
+        "my-router-url-abe5c496-rw",
         "my-router-default-404",
     ):
         pulumi_mocks.assert_res(
@@ -892,8 +889,18 @@ def test_uri_rewrite_function_comment_fits_the_cloudfront_limit(pulumi_mocks):
 
     deploy()
 
-    [fn] = [f for f in pulumi_mocks.created(R.CLOUDFRONT_FUNCTION) if "uri-rewrite" in f.name]
+    fn = pulumi_mocks.assert_res("r-b-rw", R.CLOUDFRONT_FUNCTION)
     assert len(fn.inputs["comment"]) == 128
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_POLICY: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.CLOUDFRONT_FUNCTION: 2,  # the prefix strip + the default 404
+            R.DISTRIBUTION: 1,
+        }
+    )
 
 
 def test_per_route_resources_alias_their_route_position_names(
@@ -946,14 +953,14 @@ def test_per_route_resources_alias_their_route_position_names(
         f"{TP}site-bucket-policy": renamed(f"{TP}site-bucket-policy-4"),
         f"{TP}fn-router-url": renamed(f"{TP}fn-router-2-url", f"{TP}{TP}fn-router-2-url"),
         f"{TP}router-fn-oac": renamed(f"{TP}fn-oac-2"),
-        f"{TP}router-fn-uri-rewrite": renamed(f"{TP}fn-uri-rewrite-2"),
-        f"{TP}router-fn-cloudfront-permission": renamed(f"{TP}fn-cloudfront-permission-2"),
-        f"{TP}router-api-uri-rewrite": renamed(f"{TP}api-uri-rewrite-1"),
-        f"{TP}router-hapi-uri-rewrite": renamed(f"{TP}hapi-uri-rewrite-3"),
-        f"{TP}{url}-uri-rewrite": renamed(f"{TP}url-origin-uri-rewrite-0"),
-        f"{TP}{url}-lambda-edge-role": renamed(f"{TP}url-origin-lambda-edge-role-0"),
-        f"{TP}{url}-lambda-edge-policy": renamed(f"{TP}url-origin-lambda-edge-policy-0"),
-        f"{TP}{url}-host-rewrite": renamed(f"{TP}url-origin-host-rewrite-0"),
+        f"{TP}router-fn-rw": renamed(f"{TP}fn-uri-rewrite-2"),
+        f"{TP}router-fn-perm": renamed(f"{TP}fn-cloudfront-permission-2"),
+        f"{TP}router-api-rw": renamed(f"{TP}api-uri-rewrite-1"),
+        f"{TP}router-hapi-rw": renamed(f"{TP}hapi-uri-rewrite-3"),
+        f"{TP}{url}-rw": renamed(f"{TP}url-origin-uri-rewrite-0"),
+        f"{TP}{url}-r": renamed(f"{TP}url-origin-lambda-edge-role-0"),
+        f"{TP}{url}-p": renamed(f"{TP}url-origin-lambda-edge-policy-0"),
+        f"{TP}{url}-edge": renamed(f"{TP}url-origin-host-rewrite-0"),
     }
 
 
@@ -994,10 +1001,10 @@ def test_two_routers_route_the_same_url(pulumi_mocks):
 
     for router in ("a", "b"):
         stem = f"{router}-url-abe5c496"
-        pulumi_mocks.assert_res(f"{stem}-host-rewrite", R.FUNCTION)
-        pulumi_mocks.assert_res(f"{stem}-lambda-edge-role", R.ROLE)
-        pulumi_mocks.assert_res(f"{stem}-lambda-edge-policy", R.ROLE_POLICY_ATTACHMENT)
-        pulumi_mocks.assert_res(f"{stem}-uri-rewrite", R.CLOUDFRONT_FUNCTION)
+        pulumi_mocks.assert_res(f"{stem}-edge", R.FUNCTION)
+        pulumi_mocks.assert_res(f"{stem}-r", R.ROLE)
+        pulumi_mocks.assert_res(f"{stem}-p", R.ROLE_POLICY_ATTACHMENT)
+        pulumi_mocks.assert_res(f"{stem}-rw", R.CLOUDFRONT_FUNCTION)
         [origin] = pulumi_mocks.assert_res(router, R.DISTRIBUTION).inputs["origins"]
         assert origin["originId"] == f"{TP}{stem}"
     pulumi_mocks.assert_res_counts(
@@ -1025,10 +1032,18 @@ def test_long_router_and_component_names_truncate_the_per_route_names(pulumi_moc
 
     [oac] = pulumi_mocks.created(R.ORIGIN_ACCESS_CONTROL)
     assert_hash_truncated(oac.name, 56, "-oac")
-    [rewrite] = [
-        f for f in pulumi_mocks.created(R.CLOUDFRONT_FUNCTION) if f.name.endswith("-uri-rewrite")
-    ]
-    assert_hash_truncated(rewrite.name, 56, "-uri-rewrite")
+    [rewrite] = [f for f in pulumi_mocks.created(R.CLOUDFRONT_FUNCTION) if f.name.endswith("-rw")]
+    assert_hash_truncated(rewrite.name, 56, "-rw")
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_POLICY: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.CLOUDFRONT_FUNCTION: 2,  # the prefix strip + the default 404
+            R.DISTRIBUTION: 1,
+        }
+    )
 
 
 def test_long_router_name_truncates_the_default_404_function_name(pulumi_mocks):
@@ -1058,12 +1073,64 @@ def test_long_router_name_truncates_the_default_404_function_name(pulumi_mocks):
     )
 
 
+def test_long_app_and_env_names_keep_the_full_per_route_names(pulumi_mocks):
+    # Prefix 41 chars: 64 cap - 41 - `-rw` - 8 Pulumi chars leaves 12 for `web-b`. The 404
+    # function's `web` fills the 3 its suffix leaves.
+    app, env = "a" * 29, "production"
+    set_app_and_env_names(app, env)
+    prefix = f"{app}-{env}-"
+    router = Router("web")
+    router.route("/files", Bucket("b"))
+
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(f"{prefix}web-b-rw", R.CLOUDFRONT_FUNCTION, prefixed=False)
+    pulumi_mocks.assert_res(f"{prefix}web-default-404", R.CLOUDFRONT_FUNCTION, prefixed=False)
+    pulumi_mocks.assert_res(f"{prefix}web-b-oac", R.ORIGIN_ACCESS_CONTROL, prefixed=False)
+    pulumi_mocks.assert_res_counts(
+        {
+            R.BUCKET: 1,
+            R.BUCKET_PUBLIC_ACCESS_BLOCK: 1,
+            R.BUCKET_POLICY: 1,
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.CLOUDFRONT_FUNCTION: 2,  # /files's prefix strip + the default 404
+            R.DISTRIBUTION: 1,
+        }
+    )
+
+
+def test_long_app_and_env_names_that_leave_2_chars_raise(pulumi_mocks):
+    # Prefix 42 chars leaves 2 for the default 404 function's name, below the 4-char hash.
+    set_app_and_env_names("a" * 30, "production")
+    router = Router("web")
+    router.route("/files", Bucket("b"))
+
+    @pulumi.runtime.test
+    def deploy():
+        return router.resources
+
+    with raises(
+        ValueError, match=r"'-default-404' .* leave 2 of 64 chars for the name\. Use a shorter app"
+    ):
+        deploy()
+
+
 @mark.usefixtures("mock_get_or_install_dependencies_function", "project_cwd")
 def test_long_router_names_truncate_the_url_and_function_route_names(pulumi_mocks):
-    router = Router("a-router-with-a-very-long-name")
+    # Router name over 31 chars overflows the role (64 cap - 10 prefix - `-url-{8 hex}` -
+    # `-r` - 8 Pulumi chars); router and function names over 76 together, the permission
+    # (100 cap).
+    router = Router("a-router-with-a-very-very-long-name")
     router.route("/ext", "https://example.com")
     router.route(
-        "/fn", Function("a-function-with-a-long-name-too", handler="functions/simple.handler")
+        "/fn",
+        Function(
+            "a-function-with-a-really-very-long-name-too", handler="functions/simple.handler"
+        ),
     )
 
     @pulumi.runtime.test
@@ -1072,15 +1139,29 @@ def test_long_router_names_truncate_the_url_and_function_route_names(pulumi_mock
 
     deploy()
 
-    [role] = [r for r in pulumi_mocks.created(R.ROLE) if r.name.endswith("-lambda-edge-role")]
-    assert_hash_truncated(role.name, 56, "-lambda-edge-role")
-    [edge] = [f for f in pulumi_mocks.created(R.FUNCTION) if f.name.endswith("-host-rewrite")]
-    assert_hash_truncated(edge.name, 56, "-host-rewrite")
+    [role] = [r for r in pulumi_mocks.created(R.ROLE) if r.name.startswith(f"{TP}a-router")]
+    assert_hash_truncated(role.name, 56, "-r")
+    [edge] = [f for f in pulumi_mocks.created(R.FUNCTION) if f.name.endswith("-edge")]
+    assert_hash_truncated(edge.name, 56, "-edge")
     [oac] = pulumi_mocks.created(R.ORIGIN_ACCESS_CONTROL)
     assert_hash_truncated(oac.name, 56, "-oac")
     [permission] = [
-        p
-        for p in pulumi_mocks.created(R.LAMBDA_PERMISSION)
-        if p.name.endswith("-cloudfront-permission")
+        p for p in pulumi_mocks.created(R.LAMBDA_PERMISSION) if p.name.endswith("-perm")
     ]
-    assert_hash_truncated(permission.name, 92, "-cloudfront-permission")
+    assert_hash_truncated(permission.name, 92, "-perm")
+    # No AWS name behind it, so the attachment keeps its full logical name.
+    pulumi_mocks.assert_res(
+        "a-router-with-a-very-very-long-name-url-abe5c496-p", R.ROLE_POLICY_ATTACHMENT
+    )
+    pulumi_mocks.assert_res_counts(
+        {
+            R.ROLE: 2,  # the Function's + the Lambda@Edge's
+            R.ROLE_POLICY_ATTACHMENT: 2,
+            R.FUNCTION: 2,  # the Function + the Lambda@Edge
+            R.CLOUDFRONT_FUNCTION: 3,  # two prefix strips + the default 404
+            R.ORIGIN_ACCESS_CONTROL: 1,
+            R.FUNCTION_URL: 1,
+            R.LAMBDA_PERMISSION: 1,
+            R.DISTRIBUTION: 1,
+        }
+    )

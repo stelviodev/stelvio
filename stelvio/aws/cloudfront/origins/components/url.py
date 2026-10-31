@@ -114,7 +114,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
         # Lambda@Edge for Host header rewriting (origin-request)
         # Create IAM role for Lambda@Edge
         lambda_role = pulumi_aws.iam.Role(
-            self._name("lambda-edge-role", limit=64),
+            self._name("r", limit=64),
             assume_role_policy=pulumi.Output.json_dumps(
                 {
                     "Version": "2012-10-17",
@@ -130,21 +130,21 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
                 }
             ),
             tags=tags,
-            opts=self._opts("lambda-edge-role"),
+            opts=self._opts("r"),
         )
 
         # Attach basic execution policy
         pulumi_aws.iam.RolePolicyAttachment(
-            self._name("lambda-edge-policy", limit=None),
+            self._name("p", limit=None),
             role=lambda_role.name,
             policy_arn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-            opts=self._opts("lambda-edge-policy"),
+            opts=self._opts("p"),
         )
 
         # Create Lambda@Edge function
         lambda_edge_code = set_custom_host_header(parsed.netloc)
         lambda_edge = pulumi_aws.lambda_.Function(
-            self._name("host-rewrite", limit=64),
+            self._name("edge", limit=64),
             runtime="nodejs22.x",
             role=lambda_role.arn,
             handler="index.handler",
@@ -152,7 +152,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             publish=True,  # Required for Lambda@Edge
             tags=tags,
             # Lambda@Edge must be in us-east-1
-            opts=self._opts("host-rewrite", provider=ProviderStore.aws_for_region("us-east-1")),
+            opts=self._opts("edge", provider=ProviderStore.aws_for_region("us-east-1")),
         )
 
         cache_behaviors = self._cache_behaviors(

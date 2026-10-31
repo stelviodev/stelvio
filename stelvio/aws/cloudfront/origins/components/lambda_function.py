@@ -119,13 +119,13 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
 
         # Grant cloudfront.amazonaws.com permission to invoke via Function URL
         return pulumi_aws.lambda_.Permission(
-            self._name("cloudfront-permission", limit=100),
+            self._name("perm", limit=100),
             action="lambda:InvokeFunctionUrl",
             function=self.function.resources.function.name,
             principal="cloudfront.amazonaws.com",
             source_arn=distribution.arn,
             function_url_auth_type="AWS_IAM",
-            opts=self._opts("cloudfront-permission"),
+            opts=self._opts("perm"),
         )
 
 

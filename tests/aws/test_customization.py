@@ -736,7 +736,7 @@ def test_router_customize_reaches_origin_resources(pulumi_mocks, project_cwd, sc
         R.BUCKET_POLICY,
         {"bucket": tid(f"{TP}static-bucket"), "policy": policy},
     )
-    for function in ("my-router-static-bucket-uri-rewrite", "my-router-default-404"):
+    for function in ("my-router-static-bucket-rw", "my-router-default-404"):
         pulumi_mocks.assert_res(
             function,
             R.CLOUDFRONT_FUNCTION,
