@@ -31,7 +31,9 @@ def handler(event, context):
 
 
 # In your infrastructure code
-fn = Function(handler="functions/simple.handler")
+from stelvio.aws.function import Function
+
+fn = Function("simple", handler="functions/simple.handler")
 ```
 
 Key characteristics of single-file functions:
@@ -54,6 +56,8 @@ files, use folder-based functions:
 #     └── validation.py      # Input validation
 
 # In your infrastructure code
+from stelvio.aws.function import Function
+
 fn = Function(
     name="my-user-processor",
     folder="functions/users",  # folder of the function
@@ -97,8 +101,65 @@ handler:
 ```python
 from stelvio.aws.function import Function
 
-fn = Function(handler="simple.handler")
+fn = Function("simple", handler="functions/simple.handler")
 ```
+
+## Handler forms
+
+Components that run your code take a handler: API Gateway routes and authorizers, `Cron`,
+`subscribe` on `Queue`, `Topic` and `DynamoTable`, `Bucket.notify_function`, AppSync Lambda
+data sources and `LambdaAuth`, and `UserPool` triggers. A handler takes one of these forms:
+
+```python
+from stelvio.aws.cron import Cron
+from stelvio.aws.function import Function, FunctionConfig
+
+# A handler path
+Cron("cleanup", "rate(1 day)", "functions/cleanup.handler")
+
+# A handler path with Function options
+Cron("report", "rate(1 day)", "functions/report.handler", memory=512, timeout=60)
+
+# A FunctionConfig
+Cron("sync", "rate(1 hour)", FunctionConfig(handler="functions/sync.handler", memory=512))
+
+# A dict with the same keys, typed as FunctionConfigDict
+Cron("backup", "rate(1 day)", {"handler": "functions/backup.handler", "memory": 512})
+
+# A Function you created
+audit_fn = Function("audit-fn", handler="functions/audit.handler", memory=512)
+Cron("audit", "rate(1 day)", audit_fn)
+```
+
+The options are the fields of `FunctionConfig`, such as `links`, `memory`, `timeout`,
+`environment` and `vpc`. Keyword options go with a handler path only: with a
+`FunctionConfig`, a dict or a `Function`, set them there, or Stelvio raises an error.
+
+Two exceptions:
+
+- `subscribe` on `Queue`, `Topic` and `DynamoTable`, and `Bucket.notify_function`, don't
+  take a `Function`.
+- `UserPool` triggers take no keyword options. Each trigger name maps to one handler.
+
+To customize the function a component creates from your handler, see
+[Keys That Configure Another Component](../../concepts/customization.md#keys-that-configure-another-component).
+API Gateway routes and authorizers have no such key. Pass them a `Function` you created with its
+own `customize`, or use a global `{Function: ...}` customize, which reaches every function.
+In [dev mode](../../concepts/dev-mode.md), all of these handlers run on your machine.
+
+### Folder-based handlers
+
+Any handler can point at a [folder-based function](#folder-based-lambda-functions) with `::`.
+The part before `::` is the folder, the part after it is the file and function inside it:
+
+```python
+from stelvio.aws.cron import Cron
+
+Cron("reports", "rate(1 day)", "functions/reports::handler.run")
+```
+
+This is the same as `FunctionConfig(folder="functions/reports", handler="handler.run")`.
+Using `::` and `folder` together raises an error.
 
 ## Linking and Environment Variables
 
@@ -125,6 +186,7 @@ table = DynamoTable(
 
 # Link to Lambda
 fn = Function(
+    "process-users",
     handler="users/handler.process",
     links=[table]  # Link the table to the function
 )
@@ -628,12 +690,14 @@ from stelvio.aws.function import Function
 
 # Public: CORS enabled, no authentication
 webhook = Function(
+    "webhook",
     handler="functions/webhook.handler",
     url="public"
 )
 
 # Private: IAM authentication, no CORS
 internal = Function(
+    "internal",
     handler="functions/internal.handler",
     url="private"
 )
@@ -652,6 +716,7 @@ from stelvio.aws.cors import CorsConfig
 
 # Using FunctionUrlConfig
 fn = Function(
+    "api",
     handler="functions/api.handler",
     url=FunctionUrlConfig(
         auth=None,
@@ -664,6 +729,7 @@ fn = Function(
 
 # Or use a dict
 fn = Function(
+    "api-dict",
     handler="functions/api.handler",
     url={
         "auth": None,

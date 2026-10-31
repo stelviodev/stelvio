@@ -70,51 +70,12 @@ Cron expression format: `cron(minutes hours day-of-month month day-of-week year)
 
 ## Function configuration
 
-### Handler with options
-
-Pass function options alongside the handler:
+The handler takes every [handler form](lambda.md#handler-forms):
 
 ```python
-Cron("heavy-task",
-    "rate(1 hour)",
-    "tasks/process.handler",
-    memory=1024,
-    timeout=300
-)
-```
+from stelvio.aws.cron import Cron
 
-### Using FunctionConfig
-
-For complete control, use `FunctionConfig`:
-
-```python
-from stelvio.aws.function import FunctionConfig
-
-config = FunctionConfig(
-    handler="tasks/process.handler",
-    memory=2048,
-    timeout=600,
-    environment={"BATCH_SIZE": "1000"}
-)
-
-Cron("batch-job", "rate(6 hours)", config)
-```
-
-### Using an existing Function
-
-Reuse a Function across multiple cron jobs:
-
-```python
-from stelvio.aws.function import Function
-
-processor = Function("data-processor",
-    handler="tasks/process.handler",
-    memory=2048
-)
-
-# Different schedules, same function
-Cron("hourly-process", "rate(1 hour)", processor)
-Cron("daily-full-process", "rate(1 day)", processor)
+Cron("heavy-task", "rate(1 hour)", "tasks/process.handler", memory=1024, timeout=300)
 ```
 
 ## Options

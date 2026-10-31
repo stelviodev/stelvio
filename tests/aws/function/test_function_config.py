@@ -410,6 +410,28 @@ def test_function_config_url_with_dict():
 
 
 @pytest.mark.parametrize(
+    ("links", "type_name"),
+    [
+        pytest.param(None, "NoneType", id="none"),
+        pytest.param(Link("orders", {"a": "1"}, None), "Link", id="bare-link"),
+    ],
+)
+def test_function_config_rejects_links_that_are_not_a_list(links, type_name):
+    with pytest.raises(
+        TypeError,
+        match=rf"^links takes a list of links or components, got {type_name}\. "
+        r"Wrap one link in a list, or leave links out for none\.$",
+    ):
+        FunctionConfig(handler="functions/simple.handler", links=links)
+
+
+@pytest.mark.parametrize("container", [tuple, set])
+def test_function_config_accepts_links_in_a_tuple_or_set(pulumi_mocks, container):
+    links = container([Queue("orders")])
+    assert FunctionConfig(handler="functions/simple.handler", links=links).links == links
+
+
+@pytest.mark.parametrize(
     ("first", "second", "key"),
     [
         pytest.param("test-link", "test_link", "STLV_TEST_LINK_*", id="same-env-prefix"),

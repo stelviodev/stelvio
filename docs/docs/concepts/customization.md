@@ -10,7 +10,7 @@ Use the `customize` parameter when you need to:
 
 - Set Pulumi properties not exposed by Stelvio's API (e.g., `force_destroy` on S3 buckets)
 - Override default values that Stelvio sets internally
-- Add tags, encryption settings, or other resource-specific configurations
+- Add encryption settings or other resource-specific configurations
 - Configure advanced features like VPC settings or custom IAM policies
 
 !!! warning "Customize doesn't change what Stelvio itself reads"
@@ -114,8 +114,9 @@ The global entry for a resource key is either a dict or a callable, so only one 
     Dicts are merged shallowly at each property level. If you customize a nested object, 
     your entire object replaces the default, rather than being deep-merged.
     
-    For example, if defaults have `{"encryption": {"enabled": true, "kms_key": "key-1"}}` and you provide 
-    `{"encryption": {"enabled": false}}`, the result is `{"encryption": {"enabled": false}}`—the `kms_key` is lost.
+    For example, `RestApi` sets `{"endpoint_configuration": {"types": "REGIONAL"}}`. If you provide
+    `{"endpoint_configuration": {"ip_address_type": "dualstack"}}`, that is the whole result, and
+    `types` is lost.
 
 ### Common Pitfalls
 
@@ -124,24 +125,27 @@ The global entry for a resource key is either a dict or a callable, so only one 
 This applies to dict-based customize values (see the [Shallow Merge](#how-customization-works) note above — callables aren't merged). When customizing nested objects, the **entire nested object is replaced**, not merged:
 
 ```python
-# ❌ This replaces entire encryption config - kms_key is lost!
-bucket = Bucket(
-    "my-bucket",
-    customize={"bucket": {"encryption": {"enabled": True}}}
-)
-# Result: encryption = {"enabled": True} (kms_key removed)
+from stelvio.aws.api_gateway import RestApi
 
-# ✅ To keep existing encryption settings, include them:
-bucket = Bucket(
-    "my-bucket",
+# ❌ Replaces the whole endpoint_configuration, so types is lost
+api = RestApi(
+    "my-api",
+    customize={"rest_api": {"endpoint_configuration": {"ip_address_type": "dualstack"}}},
+)
+# Result: endpoint_configuration = {"ip_address_type": "dualstack"}, types is missing
+# and the deploy fails: "endpoint_configuration.0.types" is required
+
+# ✅ To keep the default endpoint type, include it:
+other_api = RestApi(
+    "my-other-api",
     customize={
-        "bucket": {
-            "encryption": {
-                "enabled": True,
-                "kms_key": "arn:aws:kms:...",  # Preserved
+        "rest_api": {
+            "endpoint_configuration": {
+                "types": "REGIONAL",  # must match endpoint_type, "regional" by default
+                "ip_address_type": "dualstack",
             }
         }
-    }
+    },
 )
 ```
 
@@ -224,6 +228,8 @@ def run() -> None:
 The global `customize` dictionary uses **component types** as keys (e.g., `Bucket`, `Function`) and the same resource customization dictionaries as values, except the keys listed in [Keys That Configure Another Component](#keys-that-configure-another-component).
 
 Stelvio checks global `customize` when `@app.config` returns, before any component exists. A key that isn't a component type, a resource key the component doesn't have, or a value that isn't a dict raises an error, also for a type your app never creates.
+
+For app-wide tags, use `StelvioAppConfig(tags=...)`, not a global `customize`. See [Tags](tags.md#global-tags).
 
 ### Global Customize vs. Explicit Values
 

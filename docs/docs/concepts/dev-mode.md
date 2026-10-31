@@ -17,6 +17,8 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 - The stub forwards each invocation over an AppSync Events channel.
 - The `stlv dev` process runs a local dev server, executes your real handler, then sends the result back to AWS.
 
+This covers every Lambda function that runs your code: each `Function` you create and each one a component creates from a [handler](../components/aws/lambda.md#handler-forms), such as API routes and authorizers, `Cron`, queue, topic and table subscriptions, bucket notifications, AppSync data sources and authorizers, and `UserPool` triggers.
+
 Your public entrypoint (API Gateway URL / Function URL) stays the same — you hit it like normal.
 
 ## Using it

@@ -126,16 +126,8 @@ api.route("ANY", "$default", "functions/fallback.handler")
 
 ### Connecting Lambda Functions
 
-The handler accepts the same forms as other Stelvio Lambda integrations — a path
-string, a `FunctionConfig`, a dictionary, or an existing `Function` instance. See
-the [REST API guide](rest-api.md#lambda-function-integration) for the full set of
-options; everything there works the same way for HTTP API.
-
-Routes that point to the same handler share a single Lambda function and
-integration, and a shared function must be configured on only one of its routes —
-the same rules as for [REST API routes](rest-api.md#organizing-code).
-
-You can pass Lambda options directly when the handler is a string:
+A route's handler takes every [handler form](lambda.md#handler-forms). With a handler
+path, pass the function options as keyword arguments:
 
 ```python
 api.route(
@@ -147,6 +139,10 @@ api.route(
     links=[users],
 )
 ```
+
+Routes that point to the same handler share a single Lambda function and
+integration, and a shared function must be configured on only one of its routes,
+the same rules as for [REST API routes](rest-api.md#organizing-code).
 
 !!! important "30 second timeout"
     HTTP APIs cap Lambda integrations at 30 seconds. A route Lambda can have a
@@ -255,7 +251,7 @@ If you'd rather return an IAM policy response, set `simple_response=False`.
 **Configuration options:**
 
 - `name`: Unique authorizer name within the API
-- `handler`: Lambda function path, config, or `Function` instance
+- `handler`: any [handler form](lambda.md#handler-forms)
 - `identity_sources`: List of selection expressions to extract identity from (required)
 - `ttl`: Cache TTL in seconds, from `0` to `3600` (default: 300). Set to `0` to disable authorizer caching.
 - `simple_response`: Return format — simple response when `True` (default), IAM policy when `False`

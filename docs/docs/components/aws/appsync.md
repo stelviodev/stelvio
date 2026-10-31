@@ -216,11 +216,10 @@ api = AppSync("myapi", schema="schema.graphql",
 
 | Option                            | Default | Description                                      |
 |-----------------------------------|---------|--------------------------------------------------|
-| `handler`                         | —       | Handler as string, `FunctionConfig`, or `Function` (required) |
+| `handler`                         | —       | Every [handler form](lambda.md#handler-forms) (required) |
 | `result_ttl`                      | `None`  | Authorization result cache TTL in seconds        |
 | `identity_validation_expression`  | `None`  | Regex to validate the authorization token        |
-
-For additional function options like `memory`, `timeout`, `links`, and `environment`, see [Lambda Functions](lambda.md). These are convenience options — if you pass a `FunctionConfig` or `Function` instance, configure them on the handler directly.
+| `**fn_opts`                       | —       | Function options such as `links`, `memory` and `timeout`, with a handler path only |
 
 ### Multi-Auth
 
@@ -280,17 +279,8 @@ posts = api.data_source_lambda("posts",
 
 | Param        | Description                                             |
 |--------------|---------------------------------------------------------|
-| `handler`    | Handler as string, `FunctionConfig`, or `Function`      |
-| `**fn_opts`  | Function options — `links`, `memory`, `timeout`, etc. See [Lambda Functions](lambda.md) |
-
-You can also pass a pre-built `Function` instance:
-
-```python
-from stelvio.aws.function import Function
-
-posts_fn = Function("posts-fn", handler="resolvers/posts.handler", memory=512)
-posts = api.data_source_lambda("posts", posts_fn)
-```
+| `handler`    | Every [handler form](lambda.md#handler-forms)           |
+| `**fn_opts`  | Function options such as `links`, `memory` and `timeout`, with a handler path only. See [handler forms](lambda.md#handler-forms). |
 
 ### DynamoDB
 

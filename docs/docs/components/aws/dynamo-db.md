@@ -222,35 +222,13 @@ orders_table.subscribe("update-inventory", "functions/inventory.update_stock")
 
 ### Lambda Configuration
 
-For custom Lambda settings, you can pass options directly:
+The handler takes every [handler form](lambda.md#handler-forms) except a `Function`:
 
 ```python
-# Direct options
-orders_table.subscribe(
-    "custom-handler", 
-    "functions/orders.handler",
-    timeout=60,
-    memory=512
-)
+from stelvio.aws.dynamo_db import DynamoTable
 
-# With FunctionConfig
-from stelvio.aws.function import FunctionConfig
-
-orders_table.subscribe(
-    "config-handler",
-    FunctionConfig(
-        handler="functions/orders.handler",
-        timeout=60,
-        memory=512
-    )
-)
-
-# With dictionary
-orders_table.subscribe("dict-handler", {
-    "handler": "functions/orders.handler", 
-    "timeout": 30,
-    "memory": 256
-})
+orders_table = DynamoTable("orders", fields={"id": "string"}, partition_key="id", stream="new-image")
+orders_table.subscribe("custom-handler", "functions/orders.handler", timeout=60, memory=512)
 ```
 
 ### Stream Configuration

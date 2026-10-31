@@ -128,8 +128,7 @@ api.route("sendMessage", "functions/chat.send")
 
 ### Connecting Lambda Functions
 
-The handler accepts the same forms as other Stelvio Lambda integrations: a path
-string, a `FunctionConfig`, a dictionary, or an existing `Function` instance.
+A route's handler takes every [handler form](lambda.md#handler-forms).
 
 Routes that point to the same handler share a single Lambda function and
 integration. Configure a shared function on only one of its routes:
@@ -137,17 +136,6 @@ integration. Configure a shared function on only one of its routes:
 ```python
 api.route("$connect", "functions/chat.lifecycle", memory=512)
 api.route("$disconnect", "functions/chat.lifecycle")
-```
-
-You can pass Lambda options directly when the handler is a string:
-
-```python
-api.route(
-    "sendMessage",
-    "functions/chat.send",
-    memory=512,
-    timeout=20,
-)
 ```
 
 ### Lambda Event Format
@@ -221,7 +209,7 @@ def authorize(event, context):
 `add_lambda_authorizer` accepts:
 
 - `name`: Unique authorizer name within the API
-- `handler`: Lambda function path, config, or `Function` instance
+- `handler`: any [handler form](lambda.md#handler-forms)
 - `identity_sources`: Non-empty list of selection expressions (required)
 - `**function_config`: Additional Lambda configuration (memory, timeout, etc.), with a handler path only
 
