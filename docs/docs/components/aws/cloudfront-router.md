@@ -174,6 +174,17 @@ This means that all requests to `/echo` on the `Router`'s domain will be proxied
 
 **Note**: The `Host` header is rewritten, so that every request to this external URL is sent with the `Host` header of the origin domain (`example.com` in the example).
 
+### Upgrading an existing Router
+
+Deploy 0.11 once with your routes unchanged. The Router's per-route resources move to new names in state, and nothing is replaced.
+
+If a route must change in that deploy (a path 0.11 rejects, or `routes=` turned into `route()` calls), other routes' resources can be replaced once, as in 0.10:
+
+- A bucket route answers 403. Run `stlv refresh`, then deploy.
+- A Function route's deploy fails, because AWS allows one URL per function. Delete the function's URL in the Lambda console, then deploy.
+- A URL route's deploy ends with an error deleting its old Lambda@Edge function: CloudFront removes the function's replicas first, which can take a few hours. Deploy again later.
+
+A bucket route already at 403 from an earlier deploy needs the same `stlv refresh` and deploy.
 
 ## Why you need it
 
