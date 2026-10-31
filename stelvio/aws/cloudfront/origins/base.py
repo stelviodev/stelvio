@@ -131,12 +131,7 @@ class ComponentCloudfrontAdapter(ABC):
         )
 
     def _cache_behaviors(self, behavior: dict) -> list[dict]:
-        """`behavior` for the exact path and for everything under it: `/api/*` alone sends
-        `/api` to the default behavior. Root and wildcard routes have no exact path."""
-        patterns = [self.route.prefix_pattern]
-        if not (self.route.is_root or self.route.is_wildcard):
-            patterns.insert(0, self.route.path_pattern)
-        return [{"path_pattern": pattern, **behavior} for pattern in patterns]
+        return [{"path_pattern": pattern, **behavior} for pattern in self.route.behavior_patterns]
 
     @staticmethod
     def _function_associations(cf_function: pulumi_aws.cloudfront.Function | None) -> list[dict]:

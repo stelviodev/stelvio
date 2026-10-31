@@ -71,7 +71,7 @@ In this case, requests to `/api/admin/users` will hit the `admin` origin, while 
 
 !!! note "Path matching rules"
     - A path starts with `/`, has no trailing `/`, no empty, `.` or `..` segment, no `?` and no `**`. Other characters: letters, digits and `_ . ~ - $ @ : + *`. CloudFront caps a path pattern at 255 characters, and a plain path also gets a `/*` pattern, so it may have 253. The Router rejects any other path
-    - A route that an earlier route ending in `*` always catches (`/api` next to `/api*`) is rejected
+    - A route that an earlier route always catches (`/api` next to `/api*`) is rejected
     - Longer, more specific paths take priority over shorter ones
     - The root path `/` acts as a catch-all for unmatched requests. `/*` is the same route, so a Router accepts only one of them
     - If no root path is defined, unmatched requests return a 404 response

@@ -327,36 +327,26 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         self.routes.append(route)
 
     def _check_routes_reachable(self) -> None:
-        # CloudFront takes the first ordered behavior that matches. A route under a wildcard
-        # behavior ordered before it (`/api` after `/api*`) gets nothing. The root route is
-        # the default behavior: never ordered, never caught. A catcher ending in `*` that
-        # matches the route's text up to its first `*` matches every request the route gets
-        # (`fnmatch`'s `*` crosses `/` like CloudFront's). One with a `*` only mid-path
-        # (`/a/*/b`) leaves the later route's `/*` behavior its requests.
+        # CloudFront takes the first behavior that matches: a route is dead when an earlier
+        # route's pattern matches all of its patterns (`/api` after `/api*`). Paths hold no
+        # `?` or `[`, so `fnmatchcase` sees `*` as its only wildcard. Catches the usual
+        # mistakes, not every one. The root route is the default behavior, never ordered.
         ordered = [r for r in self.routes if not r.is_root]
         for idx, route in enumerate(ordered):
-            under = route.path_pattern.split("*")[0]
-            catcher = next(
-                (
-                    r
-                    for r in ordered[:idx]
-                    if r.prefix_pattern.endswith("*") and fnmatchcase(under, r.prefix_pattern)
-                ),
-                None,
-            )
-            if catcher is not None:
-                # The length sort puts a longer catcher first whatever the user does; equal
-                # lengths keep the order they were added in, so only there reordering fixes it.
-                hint = (
-                    f" Add {route.path_pattern!r} before {catcher.path_pattern!r}."
-                    if len(route.path_pattern) == len(catcher.path_pattern)
-                    else ""
-                )
-                raise ValueError(
-                    f"Route for path pattern {route.path_pattern!r} never gets a request: "
-                    f"{catcher.path_pattern!r} comes first and matches everything "
-                    f"{route.path_pattern!r} would.{hint}"
-                )
+            for catcher in ordered[:idx]:
+                if all(fnmatchcase(p, catcher.prefix_pattern) for p in route.behavior_patterns):
+                    # The length sort puts a longer catcher first whatever the user does; equal
+                    # lengths keep the order they were added in, so only there reordering fixes it.
+                    hint = (
+                        f" Add {route.path_pattern!r} before {catcher.path_pattern!r}."
+                        if len(route.path_pattern) == len(catcher.path_pattern)
+                        else ""
+                    )
+                    raise ValueError(
+                        f"Route for path pattern {route.path_pattern!r} never gets a request: "
+                        f"{catcher.path_pattern!r} comes first and matches everything "
+                        f"{route.path_pattern!r} would.{hint}"
+                    )
 
     def route(
         self,
