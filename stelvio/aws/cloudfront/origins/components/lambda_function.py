@@ -1,12 +1,8 @@
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
-from stelvio.aws.cloudfront.origins.base import (
-    ComponentCloudfrontAdapter,
-    Customizer,
-    _as_is,
-)
+from stelvio.aws.cloudfront.dtos import RouteOriginConfig
+from stelvio.aws.cloudfront.origins.base import ComponentCloudfrontAdapter, _as_is
 from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.aws.function import Function, FunctionUrlConfig
 from stelvio.aws.function.config import FunctionUrlConfigDict
@@ -17,15 +13,9 @@ from stelvio.context import context
 
 @register_adapter(Function)
 class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
-    def __init__(
-        self,
-        idx: int,
-        route: Route,
-        resource_opts: pulumi.ResourceOptions | None = None,
-        customize: Customizer = _as_is,
-    ) -> None:
-        super().__init__(idx, route, resource_opts, customize)
-        self.function = route.component
+    @property
+    def function(self) -> Function:
+        return self.route.component
 
     def get_origin_config(self) -> RouteOriginConfig:
         # Normalize function URL configuration
@@ -35,15 +25,23 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         # auth='iam' → 'AWS_IAM', auth=None → 'NONE'
         auth_type = "AWS_IAM" if url_config.auth == "iam" else "NONE"
 
-        name = f"{self.function.name}-router-{self.idx}"
-        # This name used to carry the app prefix twice; the aliases keep deployed urls in place.
-        old_name = resource_name(context().prefix(name), limit=64, suffix="-url")
+        # Named by the function alone: a Router rename updates the url in place, where a
+        # replace would put a second url on the function, which AWS refuses. Named by route
+        # position before, and with the app prefix twice before that; the aliases keep
+        # deployed urls in place.
+        old = f"{self.function.name}-router-{self.idx}"
         function_url = _create_function_url(
-            name,
+            f"{self.function.name}-router",
             self.function.resources.function,
             url_config,
             pulumi.ResourceOptions.merge(
-                self.resource_opts, pulumi.ResourceOptions(aliases=old_name_aliases(old_name))
+                self.resource_opts,
+                pulumi.ResourceOptions(
+                    aliases=old_name_aliases(resource_name(old, limit=64, suffix="-url"))
+                    + old_name_aliases(
+                        resource_name(context().prefix(old), limit=64, suffix="-url")
+                    )
+                ),
             ),
             _as_is,
         )
@@ -52,23 +50,18 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         oac = None
         if auth_type == "AWS_IAM":
             oac = pulumi_aws.cloudfront.OriginAccessControl(
-                context().prefix(f"{self.function.name}-oac-{self.idx}"),
+                self._name("oac", limit=64),
                 **self.customize(
                     "origin_access_controls",
                     {},
                     {
-                        "description": (
-                            f"OAC for Lambda Function {self.function.name} route {self.idx}"
-                        ),
+                        "description": f"OAC for Lambda Function {self.function.name}",
                         "origin_access_control_origin_type": "lambda",
                         "signing_behavior": "always",
                         "signing_protocol": "sigv4",
                     },
                 ),
-                opts=pulumi.ResourceOptions.merge(
-                    self.resource_opts,
-                    pulumi.ResourceOptions(depends_on=[self.function.resources.function]),
-                ),
+                opts=self._opts("oac", depends_on=[self.function.resources.function]),
             )
 
         # Extract domain from function URL (remove https:// and trailing /)
@@ -98,9 +91,7 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
         if oac is not None:
             origin_dict["origin_access_control_id"] = oac.id
 
-        cf_function = self._uri_rewrite_function(
-            component_name=self.function.name, depends_on=[self.function.resources.function]
-        )
+        cf_function = self._uri_rewrite_function(depends_on=[self.function.resources.function])
 
         cache_behaviors = self._api_cache_behaviors(
             origin_id=origin_dict["origin_id"], cf_function=cf_function
@@ -128,13 +119,13 @@ class LambdaFunctionCloudfrontAdapter(ComponentCloudfrontAdapter):
 
         # Grant cloudfront.amazonaws.com permission to invoke via Function URL
         return pulumi_aws.lambda_.Permission(
-            context().prefix(f"{self.function.name}-cloudfront-permission-{self.idx}"),
+            self._name("perm", limit=100),
             action="lambda:InvokeFunctionUrl",
             function=self.function.resources.function.name,
             principal="cloudfront.amazonaws.com",
             source_arn=distribution.arn,
             function_url_auth_type="AWS_IAM",
-            opts=self.resource_opts,
+            opts=self._opts("perm"),
         )
 
 

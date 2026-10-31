@@ -14,6 +14,7 @@ from stelvio.command_run import (
 )
 from stelvio.config import AwsConfig, StelvioAppConfig
 from stelvio.context import AppContext, _ContextStore
+from stelvio.exceptions import StelvioValidationError
 
 
 def test_invalid_environment_message_without_shared_environments() -> None:
@@ -61,6 +62,89 @@ def test_environment_confirmation_preloads_config_for_following_load(monkeypatch
     assert validate_mock.call_count == 2
     assert not _PRELOADED_APP_CONFIGS
     context_set_mock.assert_called_once()
+
+
+def _confirm_env(
+    monkeypatch, env: str, *, user_env: str, app_name: str = "app"
+) -> tuple[str, bool]:
+    config = StelvioAppConfig(environments=[env])
+    monkeypatch.setattr(
+        "stelvio.command_run._load_app_config",
+        lambda _: (SimpleNamespace(_name=app_name), config),
+    )
+    monkeypatch.setattr("stelvio.command_run.get_user_env", lambda: user_env)
+    return get_environment_confirmation_info(env)
+
+
+@pytest.mark.parametrize(
+    "name", ["my_app", "my.app", "my app", "1app", "-app", "app-", "a--b", "", "app\n"]
+)
+def test_app_name_outside_letters_digits_and_hyphen_is_rejected(monkeypatch, name) -> None:
+    with pytest.raises(StelvioValidationError) as exc:
+        _confirm_env(monkeypatch, "dev", user_env="michal", app_name=name)
+
+    assert str(exc.value) == (
+        f"Invalid app name '{name}': use only letters, digits and single '-' between them, "
+        "starting with a letter. Destroy a deployed stack under this name before you rename it."
+    )
+
+
+@pytest.mark.parametrize("name", ["a", "My-App-2", "a1-b2-c3"])
+def test_app_name_allows_letters_digits_and_hyphens(monkeypatch, name) -> None:
+    assert _confirm_env(monkeypatch, "dev", user_env="michal", app_name=name) == (name, True)
+
+
+def _load(monkeypatch, env: str, *, app_name: str, check_names: bool) -> Mock:
+    config = StelvioAppConfig(environments=[env])
+    monkeypatch.setattr(
+        "stelvio.command_run._load_app_config",
+        lambda _: (SimpleNamespace(_name=app_name), config),
+    )
+    monkeypatch.setattr("stelvio.command_run.get_user_env", lambda: "michal")
+    monkeypatch.setattr("stelvio.command_run.ProviderStore.reset", Mock())
+    context_set = Mock()
+    monkeypatch.setattr("stelvio.command_run._ContextStore.set", context_set)
+    _load_stlv_app(env, dev_mode=False, check_names=check_names)
+    return context_set
+
+
+def test_load_without_the_name_check_takes_names_deploy_rejects(monkeypatch) -> None:
+    """Destroy, refresh and the state commands: a stack deployed before the name rule must
+    still load, or its resources can only be removed by hand."""
+    context_set = _load(monkeypatch, "john.doe", app_name="my_app", check_names=False)
+
+    context_set.assert_called_once()
+
+
+def test_load_with_the_name_check_rejects_the_app_name(monkeypatch) -> None:
+    with pytest.raises(StelvioValidationError, match=r"^Invalid app name 'my_app'"):
+        _load(monkeypatch, "john.doe", app_name="my_app", check_names=True)
+
+
+@pytest.mark.parametrize("env", ["my_env", "john.doe", "a b", "-dev", "dev-", "a--b", "dev\n"])
+def test_env_name_outside_letters_digits_and_hyphen_is_rejected(monkeypatch, env) -> None:
+    with pytest.raises(StelvioValidationError) as exc:
+        _confirm_env(monkeypatch, env, user_env="michal")
+
+    assert str(exc.value) == (
+        f"Invalid environment name '{env}': use only letters, digits and single '-' between them. "
+        "Destroy a deployed stack under this name before you rename it."
+    )
+
+
+def test_invalid_personal_env_name_points_at_userenv(monkeypatch) -> None:
+    with pytest.raises(StelvioValidationError) as exc:
+        _confirm_env(monkeypatch, "john.doe", user_env="john.doe")
+
+    assert str(exc.value) == (
+        "Invalid environment name 'john.doe': use only letters, digits and single '-' between "
+        "them. Your personal environment is set in .stelvio/userenv. Destroy a deployed stack "
+        "under it before you change it."
+    )
+
+
+def test_env_name_allows_uppercase_digits_and_hyphens(monkeypatch) -> None:
+    assert _confirm_env(monkeypatch, "Staging-2", user_env="michal") == ("app", True)
 
 
 @pytest.fixture

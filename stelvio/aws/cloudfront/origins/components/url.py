@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import dataclass
 from typing import Any, final
 from urllib.parse import urlparse
@@ -5,14 +6,12 @@ from urllib.parse import urlparse
 import pulumi
 import pulumi_aws
 
-from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
+from stelvio.aws.cloudfront.dtos import RouteOriginConfig
 from stelvio.aws.cloudfront.js import set_custom_host_header
 from stelvio.aws.cloudfront.origins.base import (
     API_ALLOWED_METHODS,
     API_CACHED_METHODS,
     ComponentCloudfrontAdapter,
-    Customizer,
-    _as_is,
 )
 from stelvio.aws.cloudfront.origins.registry import register_adapter
 from stelvio.component import Component
@@ -57,23 +56,38 @@ class Url(Component[UrlResources, Any], LinkableMixin):
         )
 
 
+def url_origin_name(router_name: str, url: str) -> str:
+    """The name `Router` gives the `Url` it wraps a url string in. One per url within a
+    router: a url given twice would collide on this component name, so `_same_origin`
+    rejects it at definition. Keyed by url, not path, so a deployed stack keeps the `Url`'s
+    URN when its route moves."""
+    sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+    return f"{router_name}-url-origin-{sha_url}"
+
+
 @register_adapter(Url)
 class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
-    def __init__(
-        self,
-        idx: int,
-        route: Route,
-        resource_opts: pulumi.ResourceOptions | None = None,
-        customize: Customizer = _as_is,
-    ) -> None:
-        super().__init__(idx, route, resource_opts, customize)
-        self.url = route.component
+    @property
+    def url(self) -> Url:
+        return self.route.component
+
+    @property
+    def _stem(self) -> str:
+        # Keyed by the route's path, not the url or the `Url`'s name: a new url at the same
+        # path then updates the Lambda@Edge in place, where a replace leaves the old function
+        # undeletable for about an hour (replicated). A hand-made `Url` gets the same shape.
+        sha_path = hashlib.sha256(self.route.path_pattern.encode("utf-8")).hexdigest()[:8]
+        return f"{self.router_name}-url-{sha_path}"
+
+    @property
+    def _old_stem(self) -> str:
+        return "url-origin"
 
     def get_origin_config(self) -> RouteOriginConfig:
         parsed = urlparse(self.url.resources.url)
         tags = self.url.tags or None
 
-        origin_id = context().prefix(f"url-origin-{self.idx}")
+        origin_id = context().prefix(self._stem)
 
         origin_args = pulumi_aws.cloudfront.DistributionOriginArgs(
             origin_id=origin_id,
@@ -95,13 +109,12 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             },
         }
 
-        # Not `self.url.name`: that would rename every deployed URL route's function.
-        cf_function = self._uri_rewrite_function(component_name="url-origin", depends_on=[])
+        cf_function = self._uri_rewrite_function(depends_on=[])
 
         # Lambda@Edge for Host header rewriting (origin-request)
         # Create IAM role for Lambda@Edge
         lambda_role = pulumi_aws.iam.Role(
-            context().prefix(f"url-origin-lambda-edge-role-{self.idx}"),
+            self._name("r", limit=64),
             assume_role_policy=pulumi.Output.json_dumps(
                 {
                     "Version": "2012-10-17",
@@ -117,21 +130,21 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
                 }
             ),
             tags=tags,
-            opts=self.resource_opts,
+            opts=self._opts("r"),
         )
 
         # Attach basic execution policy
         pulumi_aws.iam.RolePolicyAttachment(
-            context().prefix(f"url-origin-lambda-edge-policy-{self.idx}"),
+            self._name("p", limit=None),
             role=lambda_role.name,
             policy_arn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-            opts=self.resource_opts,
+            opts=self._opts("p"),
         )
 
         # Create Lambda@Edge function
         lambda_edge_code = set_custom_host_header(parsed.netloc)
         lambda_edge = pulumi_aws.lambda_.Function(
-            context().prefix(f"url-origin-host-rewrite-{self.idx}"),
+            self._name("edge", limit=64),
             runtime="nodejs22.x",
             role=lambda_role.arn,
             handler="index.handler",
@@ -139,10 +152,7 @@ class UrlCloudfrontAdapter(ComponentCloudfrontAdapter):
             publish=True,  # Required for Lambda@Edge
             tags=tags,
             # Lambda@Edge must be in us-east-1
-            opts=pulumi.ResourceOptions.merge(
-                self.resource_opts,
-                pulumi.ResourceOptions(provider=ProviderStore.aws_for_region("us-east-1")),
-            ),
+            opts=self._opts("edge", provider=ProviderStore.aws_for_region("us-east-1")),
         )
 
         cache_behaviors = self._cache_behaviors(

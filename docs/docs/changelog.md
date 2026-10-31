@@ -8,9 +8,17 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Bug Fixes
+
+- **`stlv dev` matches the deployed Lambda.** `context.function_name` and the `AWS_LAMBDA_*` env vars are set, and a request waits for the Function's `timeout` (up to 25 s), not 16 s.
+- **Router rejects route paths it routed wrong.** `/api/`, `api` or a `?` deployed but routed wrong. Use `/api`, `/api/*` or `/*`. A route that an earlier route always catches (`/api` next to `/api*`) is rejected too. A `*` mid-path (`/images/*.jpg`) now works for a Bucket too.
+- **Adding a Router route no longer touches the other routes' resources.** Before, a new `/static/*` could leave a bucket route at 403. Existing stacks: deploy once with routes unchanged first. If a route must change in that deploy, see [Upgrading](components/aws/cloudfront-router.md#upgrading-an-existing-router).
+
 ### Breaking Changes
 
 - **Code to change:** `Bucket.notify_function` takes `links=` as a function option, like `Queue.subscribe`. With a `FunctionConfig` or dict handler it now raises instead of merging; put the links in the config: `function=FunctionConfig(handler=..., links=[table])`. To keep a `FunctionConfig` you already have, `function=replace(config, links=[*config.links, table])` with `from dataclasses import replace`. `links=None` raises too; leave it out.
+- **App and env names: letters, digits and single `-` only, the app name starting with a letter.** An app or env named otherwise no longer deploys, including a saved `.stelvio/userenv`. The name is the stack, so there is no rename: `stlv destroy` the old name (destroy still loads it), which deletes its data, then rename and deploy. The default env from your OS username is now lowercased and cleaned (`John.Doe` → `john-doe`); a saved `.stelvio/userenv` is used as is. For a personal env, destroy before you change `.stelvio/userenv`; on a fresh clone, put the old name in `.stelvio/userenv` first.
+- **`Router(routes=...)` is removed, and `price_class` and `custom_domain` are keyword-only.** `routes=` was never documented; add routes with `route()`.
 
 ## 0.10.2b8 (2026-10-23)
 

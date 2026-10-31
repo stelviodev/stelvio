@@ -7,7 +7,7 @@ import pulumi_aws
 
 from stelvio.aws.cloudfront.dtos import Route, RouteOriginConfig
 from stelvio.aws.cloudfront.js import strip_path_pattern_function_js
-from stelvio.component import Component
+from stelvio.component import Component, old_name_aliases, resource_name
 from stelvio.context import context
 
 API_ALLOWED_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
@@ -21,6 +21,15 @@ ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 
 # (customize key, computed props, default props) -> props: the owning Router's `_customizer`
 type Customizer = Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]]
+
+# Short kinds leave room for long app and env names; the old words live on in the aliases.
+_OLD_KINDS = {
+    "rw": "uri-rewrite",
+    "r": "lambda-edge-role",
+    "p": "lambda-edge-policy",
+    "edge": "host-rewrite",
+    "perm": "cloudfront-permission",
+}
 
 
 def _as_is(_key: str, props: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
@@ -36,11 +45,50 @@ class ComponentCloudfrontAdapter(ABC):
         route: Route,
         resource_opts: pulumi.ResourceOptions | None = None,
         customize: Customizer = _as_is,
+        *,
+        router_name: str,
     ) -> None:
         self.idx = idx
         self.route = route
         self.resource_opts = resource_opts
         self.customize = customize
+        self.router_name = router_name
+
+    @property
+    def _stem(self) -> str:
+        """Start of every per-route resource name. Keyed by component, not route position:
+        adding or removing a route would otherwise rename, and replace, every shorter
+        route's resources."""
+        return f"{self.router_name}-{self.route.component.name}"
+
+    @property
+    def _old_stem(self) -> str:
+        return self.route.component.name
+
+    def _name(self, kind: str, *, limit: int | None) -> str:
+        if limit is None:
+            return context().prefix(f"{self._stem}-{kind}")
+        return resource_name(self._stem, limit=limit, suffix=f"-{kind}")
+
+    def _old_name(self, kind: str) -> str:
+        # The name a deployed stack has from before the rename; `idx` lives only for this.
+        return context().prefix(f"{self._old_stem}-{_OLD_KINDS.get(kind, kind)}-{self.idx}")
+
+    def _opts(
+        self,
+        kind: str,
+        *,
+        depends_on: list[pulumi.Resource] | None = None,
+        provider: pulumi.ProviderResource | None = None,
+    ) -> pulumi.ResourceOptions:
+        return pulumi.ResourceOptions.merge(
+            self.resource_opts,
+            pulumi.ResourceOptions(
+                aliases=old_name_aliases(self._old_name(kind)),
+                depends_on=depends_on,
+                provider=provider,
+            ),
+        )
 
     @classmethod
     def match(cls, stlv_component: Component) -> bool:
@@ -92,12 +140,7 @@ class ComponentCloudfrontAdapter(ABC):
         )
 
     def _cache_behaviors(self, behavior: dict) -> list[dict]:
-        """`behavior` for the exact path and for everything under it: `/api/*` alone sends
-        `/api` to the default behavior. Root and wildcard routes have no exact path."""
-        patterns = [self._path_pattern()]
-        if not (self.route.is_root or self.route.path_pattern.endswith("*")):
-            patterns.insert(0, self.route.path_pattern)
-        return [{"path_pattern": pattern, **behavior} for pattern in patterns]
+        return [{"path_pattern": pattern, **behavior} for pattern in self.route.behavior_patterns]
 
     @staticmethod
     def _function_associations(cf_function: pulumi_aws.cloudfront.Function | None) -> list[dict]:
@@ -106,15 +149,13 @@ class ComponentCloudfrontAdapter(ABC):
         return [{"event_type": "viewer-request", "function_arn": cf_function.arn}]
 
     def _uri_rewrite_function(
-        self,
-        *,
-        component_name: str,
-        depends_on: list[pulumi.Resource],
+        self, *, depends_on: list[pulumi.Resource]
     ) -> pulumi_aws.cloudfront.Function | None:
         defaults = {
             "runtime": "cloudfront-js-2.0",
             "code": strip_path_pattern_function_js(self.route.path_pattern),
-            "comment": f"Strip {self.route.path_pattern} prefix for route {self.idx}",
+            # AWS caps a CloudFront Function comment at 128 chars
+            "comment": f"Strip {self.route.path_pattern} prefix"[:128],
         }
         props = self.customize("cloudfront_functions", {}, defaults)
         # The root route has no prefix to strip, and its function would run on every request
@@ -122,20 +163,11 @@ class ComponentCloudfrontAdapter(ABC):
         # function compares the `*` literally and never matches a real path. Only the
         # generated code is skipped: a customized `code` is the user's own function (a guard,
         # a redirect) and keeps its association.
-        if (self.route.is_root or self.route.path_pattern.endswith("*")) and props.get(
-            "code"
-        ) == defaults["code"]:
+        generated = props.get("code") == defaults["code"]
+        if (self.route.is_root or self.route.is_wildcard) and generated:
             return None
         return pulumi_aws.cloudfront.Function(
-            context().prefix(f"{component_name}-uri-rewrite-{self.idx}"),
+            self._name("rw", limit=64),
             **props,
-            opts=pulumi.ResourceOptions.merge(
-                self.resource_opts,
-                pulumi.ResourceOptions(depends_on=depends_on),
-            ),
+            opts=self._opts("rw", depends_on=depends_on),
         )
-
-    def _path_pattern(self) -> str:
-        if self.route.path_pattern.endswith("*"):
-            return self.route.path_pattern
-        return f"{self.route.path_pattern}/*"

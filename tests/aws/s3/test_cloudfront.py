@@ -5,7 +5,6 @@ import pulumi
 import pytest
 
 from stelvio.aws.cloudfront import CloudFrontDistribution, Router
-from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.s3 import Bucket, S3StaticWebsite
 from stelvio.dns import DnsProviderNotConfiguredError
 
@@ -310,19 +309,18 @@ def test_cloudfront_distribution_raises_without_dns(mock_s3_bucket_no_dns):
         _ = distribution.resources
 
 
+def _router(domain: str) -> Router:
+    router = Router("router", custom_domain=domain)
+    router.route("/", Bucket("rb"))
+    return router
+
+
 _CUSTOM_DOMAIN_COMPONENTS = [
     pytest.param(
         lambda domain: CloudFrontDistribution("cdn", Bucket("b"), custom_domain=domain),
         id="cloudfront",
     ),
-    pytest.param(
-        lambda domain: Router(
-            "router",
-            routes=[Route(path_pattern="/", component=Bucket("rb"))],
-            custom_domain=domain,
-        ),
-        id="router",
-    ),
+    pytest.param(_router, id="router"),
     pytest.param(
         lambda domain: S3StaticWebsite("site", custom_domain=domain), id="static-website"
     ),

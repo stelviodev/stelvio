@@ -49,6 +49,7 @@ from stelvio.aws.permission import AwsPermission
 from stelvio.aws.types import DEFAULT_ARCHITECTURE, DEFAULT_RUNTIME
 from stelvio.aws.vpc import VpcAttachment
 from stelvio.aws.vpc.vpc import normalize_vpc_attachment
+from stelvio.bridge._chunking import STUB_LAMBDA_ENV_KEYS
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.local.lambda_context import LambdaContext
@@ -369,7 +370,6 @@ class Function(
 
         event = data.get("event", "null")
         event = json.loads(event) if isinstance(event, str) else event
-        lambda_context = LambdaContext(**event["context"])
 
         path = event.get("event", {}).get("path")
         raw_path = event.get("event", {}).get("rawPath")
@@ -393,6 +393,14 @@ class Function(
             )
 
         new_environ = await self._get_environment_for_bridge_event()
+        # Absent when the stub was deployed by an older Stelvio; not a dict only in a message
+        # somebody else published. Only the stub's keys: nothing else in a bridge message may
+        # reach the handler's env.
+        lambda_env = event.get("lambdaEnv")
+        if isinstance(lambda_env, dict):
+            new_environ.update(
+                {k: str(lambda_env[k]) for k in STUB_LAMBDA_ENV_KEYS if k in lambda_env}
+            )
         # Lambda puts the zip root on sys.path: the folder for folder mode, nothing a
         # single-file handler could import a sibling from
         folder = self.config.folder_path
@@ -415,6 +423,8 @@ class Function(
                     )
                 )
 
+            # Inside the env: LambdaContext reads the AWS_LAMBDA_* values when built
+            lambda_context = LambdaContext(**event["context"])
             start_time = time.perf_counter()
             success = None
             error = None
@@ -443,6 +453,9 @@ class Function(
         region = aws_region_of(self)
         new_environ["AWS_REGION"] = region
         new_environ["AWS_DEFAULT_REGION"] = region
+        # The stub runs at DEFAULT_MEMORY; report the config value (a `customize` memory_size
+        # isn't visible here)
+        new_environ["AWS_LAMBDA_FUNCTION_MEMORY_SIZE"] = str(self.config.memory or DEFAULT_MEMORY)
 
         if context().aws.profile:
             new_environ["AWS_PROFILE"] = context().aws.profile

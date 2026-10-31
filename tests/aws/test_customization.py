@@ -722,7 +722,7 @@ def test_router_customize_reaches_origin_resources(pulumi_mocks, project_cwd, sc
     deploy()
 
     pulumi_mocks.assert_res(
-        "static-bucket-oac-0",
+        "my-router-static-bucket-oac",
         R.ORIGIN_ACCESS_CONTROL,
         {
             "description": "custom oac",
@@ -732,11 +732,11 @@ def test_router_customize_reaches_origin_resources(pulumi_mocks, project_cwd, sc
         },
     )
     pulumi_mocks.assert_res(
-        "static-bucket-bucket-policy-0",
+        "static-bucket-bucket-policy",
         R.BUCKET_POLICY,
         {"bucket": tid(f"{TP}static-bucket"), "policy": policy},
     )
-    for function in ("static-bucket-uri-rewrite-0", "my-router-default-404"):
+    for function in ("my-router-static-bucket-rw", "my-router-default-404"):
         pulumi_mocks.assert_res(
             function,
             R.CLOUDFRONT_FUNCTION,

@@ -7,6 +7,8 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
+from stelvio.project import clean_name
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_GITIGNORE = """\
@@ -94,7 +96,8 @@ def get_stlv_app_path() -> tuple[Path, bool]:
 
 
 def create_stlv_app_file(stlv_app_path: Path) -> None:
-    file_content = textwrap.dedent(TEMPLATE_CONTENT).format(project_name=Path.cwd().name)
+    project_name = clean_name(Path.cwd().name).lstrip("0123456789-") or "my-app"
+    file_content = textwrap.dedent(TEMPLATE_CONTENT).format(project_name=project_name)
     with stlv_app_path.open("w", encoding="utf-8") as f:
         f.write(file_content)
 

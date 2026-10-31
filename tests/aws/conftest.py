@@ -1,16 +1,24 @@
 """AWS-specific test fixtures shared across aws test modules."""
 
 import re
+from dataclasses import replace
 
 import pulumi
 import pytest
 
 from stelvio.component import ComponentRegistry, check_app_wide_customize
 from stelvio.config import AwsConfig
-from stelvio.context import AppContext, _ContextStore
+from stelvio.context import AppContext, _ContextStore, context
 from stelvio.provider import ProviderStore
 
 from .pulumi_mocks import TP, MockDns
+
+
+def set_app_and_env_names(name: str, env: str) -> None:
+    """Swap the app and env names of the current AppContext, the rest unchanged."""
+    ctx = context()
+    _ContextStore.clear()
+    _ContextStore.set(replace(ctx, name=name, env=env))
 
 
 def create_app_context_with_global_customize(customize: dict) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -9,7 +10,36 @@ from unittest.mock import MagicMock
 import pytest
 from click.testing import CliRunner
 
-from stelvio.cli.init_command import DEFAULT_GITIGNORE, create_default_gitignore
+from stelvio.cli.init_command import (
+    DEFAULT_GITIGNORE,
+    create_default_gitignore,
+    create_stlv_app_file,
+)
+
+# --- create_stlv_app_file ---
+
+
+@pytest.mark.parametrize(
+    ("folder", "app_name"),
+    [
+        ("stelvio-app", "stelvio-app"),
+        ("My_Project", "my-project"),
+        ("2024.shop", "shop"),
+        ("123", "my-app"),
+    ],
+)
+def test_stlv_app_file_names_the_app_after_the_cleaned_folder(
+    tmp_path, monkeypatch, folder, app_name
+):
+    project = tmp_path / folder
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    create_stlv_app_file(project / "stlv_app.py")
+
+    text = (project / "stlv_app.py").read_text()
+    assert re.findall(r'StelvioApp\("([^"]*)"\)', text) == [app_name]
+
 
 # --- create_default_gitignore ---
 

@@ -5,6 +5,7 @@ import getpass
 import json
 import logging
 import os
+import shlex
 import sys
 import traceback
 from datetime import datetime
@@ -48,7 +49,7 @@ from stelvio.git import (
     is_git_repo,
     is_git_submodule,
 )
-from stelvio.project import get_user_env, save_user_env
+from stelvio.project import clean_name, get_dot_stelvio_dir, get_user_env, save_user_env
 from stelvio.pulumi import ensure_pulumi
 
 console = Console()
@@ -564,7 +565,15 @@ def determine_env(
 
     user_env = get_user_env()
     if not user_env:
-        user_env = getpass.getuser()
+        username = getpass.getuser()
+        user_env = clean_name(username)
+        if not user_env:
+            stelvio_dir = get_dot_stelvio_dir()
+            raise StelvioValidationError(
+                f"Can't make an environment name from the OS username '{username}'. "
+                f"Set one with: mkdir -p {shlex.quote(str(stelvio_dir))} && "
+                f'echo "<name>" > {shlex.quote(str(stelvio_dir / "userenv"))}'
+            )
         save_user_env(user_env)
     return user_env
 

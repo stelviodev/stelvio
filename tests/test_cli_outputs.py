@@ -159,6 +159,30 @@ def test_run_json_prints_summary_without_human_header(cli_commands, command, kwa
     cli_commands.console.print_json.assert_called_once_with(data=summary)
 
 
+@mark.parametrize(
+    ("command", "kwargs", "checks"),
+    [
+        ("run_diff", {}, True),
+        ("run_deploy", {}, True),
+        ("run_dev", {}, True),
+        ("run_refresh", {}, False),
+        ("run_outputs", {}, False),
+        ("run_destroy", {"skip_confirm": True}, False),
+    ],
+)
+def test_only_diff_deploy_and_dev_check_the_names(
+    cli_commands, monkeypatch, command, kwargs, checks
+) -> None:
+    """A name AWS rejects fails mid-deploy, so the deploying commands check it first; the
+    others load a stack under any name, so one deployed before the rule can be destroyed."""
+    # run_dev starts the bridge after the deploy and reads the context for it.
+    for name in ("run_bridge_server", "context", "ProviderStore"):
+        monkeypatch.setattr(cli_commands, name, Mock())
+    getattr(cli_commands, command)("dev", **kwargs)
+
+    assert cli_commands.CommandRun.call_args.kwargs.get("check_names", False) is checks
+
+
 def test_run_deploy_stream_prints_jsonl_start_and_summary_only(cli_commands, capsys) -> None:
     cli_commands.RichDeploymentHandler.return_value.build_json_summary.return_value = {
         "operation": "deploy",

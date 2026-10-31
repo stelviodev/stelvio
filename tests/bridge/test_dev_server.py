@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from stelvio.bridge.local import listener
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.listener import (
     connect_to_appsync,
@@ -12,6 +13,7 @@ from stelvio.bridge.local.listener import (
     publish_to_channel,
     subscribe_to_channel,
 )
+from stelvio.bridge.remote.infrastructure import AppSyncResource
 from stelvio.component import BridgeableMixin
 
 
@@ -380,3 +382,36 @@ def test_handle_bridge_event_with_empty_event_string():
     # Should not call handler since event has no endpointId
     assert component._handle_bridge_event_called is False
     assert result is None
+
+
+def test_main_keeps_listening_after_a_message_the_handler_cannot_process(monkeypatch, capsys):
+    """Anyone with the AppSync key can publish on the channel; one bad message must not end
+    `stlv dev`."""
+
+    class FakeWs:
+        def __init__(self, messages):
+            self._messages = iter(messages)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._messages)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+    config = AppSyncResource(api_id="id", http_endpoint="h", realtime_endpoint="r", api_key="k")
+    data_message = json.dumps({"type": "data", "event": "{}"})
+    handle = AsyncMock(side_effect=[KeyError("context"), None])
+    monkeypatch.setattr(listener, "discover_or_create_appsync", lambda *_: config)
+    monkeypatch.setattr(
+        listener, "connect_to_appsync", AsyncMock(return_value=FakeWs([data_message] * 2))
+    )
+    monkeypatch.setattr(listener, "subscribe_to_channel", AsyncMock())
+    monkeypatch.setattr(listener, "_handle_data_message", handle)
+
+    _run(listener.main("us-east-1", "default", "app", "dev"))
+
+    assert handle.await_count == 2
+    assert "KeyError: 'context'" in capsys.readouterr().out

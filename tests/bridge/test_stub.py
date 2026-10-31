@@ -27,6 +27,7 @@ def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
         invoked_function_arn="arn:aws:lambda:us-east-1:123456789:function:test",
         _epoch_deadline_time_in_ms=0,
         tenant_id=None,
+        get_remaining_time_in_millis=lambda: 30_000,
     )
 
 
@@ -574,7 +575,7 @@ def test_timeout_returns_helpful_error(
 
     assert result["statusCode"] == 500
     body = json.loads(result["body"])
-    assert "Local dev server not responding" in body["error"]
+    assert body["error"] == "Local dev server did not respond within 25.0 s"
     assert "Is 'stlv dev' running?" in body["hint"]
 
 
@@ -627,6 +628,12 @@ def test_publishes_correct_request_message(
 ):
     """Should publish invocation with correct message format."""
     stub = reset_global_state
+    lambda_env = {
+        "AWS_LAMBDA_FUNCTION_NAME": "test-app-dev-test-function",
+        "AWS_LAMBDA_FUNCTION_VERSION": "$LATEST",
+        "AWS_LAMBDA_LOG_GROUP_NAME": "/aws/lambda/test-app-dev-test-function",
+        "AWS_LAMBDA_LOG_STREAM_NAME": "2026/10/27/[$LATEST]abc",
+    }
 
     mock_ws = AsyncMock()
     mock_get_connection.return_value = (mock_ws, True)
@@ -642,7 +649,8 @@ def test_publishes_correct_request_message(
     context.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789:function:test"
     context.tenant_id = None
 
-    _run(stub.async_handler(event, context))
+    with patch.dict("os.environ", lambda_env):
+        _run(stub.async_handler(event, context))
 
     # Verify publish was called with correct channel and message
     mock_publish.assert_called_once()
@@ -658,6 +666,7 @@ def test_publishes_correct_request_message(
         "invoke_id": "req-123",
         "endpointId": "test_endpoint_id",
         "functionName": "test_function",
+        "lambdaEnv": lambda_env,
         "event": event,
         "context": {
             "invoke_id": "req-123",
@@ -669,6 +678,26 @@ def test_publishes_correct_request_message(
         },
     }
     assert message == expected_message
+
+
+@pytest.mark.parametrize(("remaining_ms", "expected"), [(30_000, 25), (10_000, 9.5), (900, 0.4)])
+def test_waits_for_the_functions_remaining_time_up_to_the_cap(
+    reset_global_state, remaining_ms, expected
+):
+    stub = reset_global_state
+    mock_ws = AsyncMock()
+    context = make_lambda_context()
+    context.get_remaining_time_in_millis = lambda: remaining_ms
+
+    with (
+        patch.object(stub, "get_or_create_connection", AsyncMock(return_value=(mock_ws, True))),
+        patch.object(stub, "ensure_subscribed", AsyncMock()),
+        patch.object(stub, "publish_to_appsync", AsyncMock()),
+        patch.object(stub, "wait_for_response", AsyncMock(return_value=None)) as mock_wait,
+    ):
+        _run(stub.async_handler({}, context))
+
+    mock_wait.assert_called_once_with(mock_ws, "req-123", timeout=pytest.approx(expected))
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)
