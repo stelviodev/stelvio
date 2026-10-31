@@ -5762,3 +5762,9 @@ def test_stream_apigw_managed_resource_events(command, op, emitted_op):
                 },
             },
         ]
+
+
+def test_short_resource_name_strips_the_lowercased_prefix_the_resources_get():
+    handler = RichDeploymentHandler("My-App", "Staging", "deploy", live_enabled=False)
+
+    assert handler._short_resource_name("my-app-staging-orders") == "orders"

@@ -18,6 +18,15 @@ MAX_CHUNK_SIZE = 200_000
 # Timeout for incomplete chunk transfers (30 seconds)
 CHUNK_TIMEOUT = 30
 
+# The deployed function's own values the dev stub sends and the local side copies into the
+# handler's env. Here because this module ships next to the stub as stlv_chunking.
+STUB_LAMBDA_ENV_KEYS = (
+    "AWS_LAMBDA_FUNCTION_NAME",
+    "AWS_LAMBDA_FUNCTION_VERSION",
+    "AWS_LAMBDA_LOG_GROUP_NAME",
+    "AWS_LAMBDA_LOG_STREAM_NAME",
+)
+
 
 def channel_segment(name: str) -> str:
     """Sanitize a string for use as an AppSync Events channel segment.

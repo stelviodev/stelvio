@@ -14,7 +14,7 @@ import uuid
 
 import stlv_chunking
 import websockets
-from stlv_chunking import channel_segment
+from stlv_chunking import STUB_LAMBDA_ENV_KEYS, channel_segment
 
 # Environment variables (set by deployment)
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
@@ -29,6 +29,7 @@ APP_SEGMENT = channel_segment(APP_NAME)
 STAGE_SEGMENT = channel_segment(STAGE)
 
 WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
+RESPONSE_WAIT_MAX = 25  # under API Gateway's 29 s integration timeout
 
 # Global state for connection reuse (survives across warm container invocations)
 _event_loop = None
@@ -159,7 +160,7 @@ async def publish_with_chunking(
 
 
 async def wait_for_response(
-    ws: websockets.WebSocketClientProtocol, request_id: str, timeout: int = 16
+    ws: websockets.WebSocketClientProtocol, request_id: str, timeout: float
 ) -> dict | None:
     """Wait for response from local dev server."""
     global _response_chunk_buffers  # noqa: PLW0602
@@ -252,6 +253,8 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         "invoke_id": getattr(context, "aws_request_id", None),
         "endpointId": ENDPOINT_ID,
         "functionName": FUNCTION_NAME,
+        # The local handler sees the deployed function's values, as in a real invocation
+        "lambdaEnv": {key: os.environ[key] for key in STUB_LAMBDA_ENV_KEYS if key in os.environ},
         "event": event,
         "context": {
             "invoke_id": getattr(context, "aws_request_id", None),
@@ -282,7 +285,11 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
     # Wait for response
     t_wait_start = time.time()
     try:
-        response = await wait_for_response(ws, context.aws_request_id, timeout=16)
+        # The stub runs with the Function's timeout, capped: with `stlv dev` stopped the hint
+        # below must beat API Gateway's 29 s, and a cron/queue stub must not burn a long
+        # timeout per call. The 0.5 s left over returns the hint, not Lambda's "Task timed out".
+        timeout = min(context.get_remaining_time_in_millis() / 1000 - 0.5, RESPONSE_WAIT_MAX)
+        response = await wait_for_response(ws, context.aws_request_id, timeout=timeout)
         timings["wait"] = int((time.time() - t_wait_start) * 1000)
     except Exception as e:
         return {
@@ -296,8 +303,9 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
             "statusCode": 500,
             "body": json.dumps(
                 {
-                    "error": "Local dev server not responding",
-                    "hint": "Is 'stlv dev' running?",
+                    "error": f"Local dev server did not respond within {timeout:.1f} s",
+                    "hint": "Is 'stlv dev' running? If it is, the handler took longer than "
+                    f"the Function's timeout or the {RESPONSE_WAIT_MAX} s dev cap.",
                     "timings": timings,
                     "env": {
                         "APP_NAME": APP_NAME,

@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 from functools import cache
 from pathlib import Path
 
@@ -61,3 +63,37 @@ def get_user_env() -> str | None:
 
 def save_user_env(env: str) -> None:
     _write_metadata_file("userenv", env)
+
+
+# Letters NFKD can't split into base + accent: the common European ones, mapped by hand.
+_UNSPLITTABLE = str.maketrans(
+    {
+        "Ł": "L",
+        "ł": "l",
+        "Ø": "O",
+        "ø": "o",
+        "Đ": "D",
+        "đ": "d",
+        "Æ": "AE",
+        "æ": "ae",
+        "Œ": "OE",
+        "œ": "oe",
+        "ß": "ss",
+    }
+)
+
+
+def clean_name(raw: str) -> str:
+    """Lowercase, and each run of chars other than letters and digits becomes one '-'. For
+    names the user never typed: the default env from the OS username, the app name `stlv init`
+    takes from the folder. A saved `.stelvio/userenv` is read as is, so a user who deployed
+    before the cleaning keeps their stack; a fresh clone saves the cleaned name.
+
+    The app and env lead every AWS name, and S3, Lambda and DocumentDB each reject a char the
+    others accept, so only letters, digits and '-' are safe everywhere. NFKD first splits an
+    accent off its letter: `José` becomes `jose`, not `jos`; `_UNSPLITTABLE` covers the letters
+    it can't (`Łukasz` becomes `lukasz`). Any other char with no ASCII form is dropped.
+    """
+    folded = unicodedata.normalize("NFKD", raw.translate(_UNSPLITTABLE))
+    ascii_name = folded.encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Za-z0-9]+", "-", ascii_name).strip("-").lower()

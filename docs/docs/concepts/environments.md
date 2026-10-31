@@ -17,11 +17,13 @@ environment, a DynamoDB table named "users" becomes `my-api-staging-users`.
 
 ## Default Behavior
 
-If you don't specify an environment, Stelvio uses your personal environment (computer username by default):
+If you don't specify an environment, Stelvio uses your personal environment. By default it's your computer username lowercased and reduced to letters, digits and `-`, so `John.Doe` becomes `john-doe`:
 
 ```bash
 stlv deploy  # Deploys to your personal environment (e.g., "john")
 ```
+
+If nothing is left after the cleaning (a username with no Latin letters or digits, such as `Иван`), `stlv` stops and tells you to set the name in `.stelvio/userenv` (see below).
 
 This gives every developer their own isolated sandbox to work in without
 conflicts.
@@ -34,11 +36,12 @@ Stelvio stores your personal environment name in `.stelvio/userenv`. You can cus
 echo "myname" > .stelvio/userenv
 ```
 
+If you already deployed under the old name, `stlv destroy` first: `stlv` accepts only the saved name or a declared environment, so after the change the old stack is out of reach.
+
 This is useful when:
 
 - Multiple developers on the team have the same computer username
 - You want a consistent name across different machines
-- Your computer username contains special characters
 - You want to use something other than your computer username
 
 !!! info
@@ -122,7 +125,7 @@ def run() -> None:
 ## Tips
 
 - Keep environment names short: `dev`, `staging`, `prod`
-- Avoid special characters - stick to letters and numbers
+- App and environment names use only letters, digits and single `-` between them, and the app name starts with a letter. `stlv` stops before deploying anything otherwise.
 - Consider using different AWS accounts for production
 
 ## Resource Naming
@@ -135,6 +138,13 @@ All AWS resources follow the `{app}-{env}-{name}` pattern. Some resources have a
 |----------|---------|
 | IAM Roles | `{app}-{env}-{name}-r` |
 | IAM Policies | `{app}-{env}-{name}-p`|
+| Router origin access control | `{app}-{env}-{router}-{component}-oac` |
+| Router CloudFront Function that strips the route path | `{app}-{env}-{router}-{component}-rw` |
+| Router permission to call a Function URL | `{app}-{env}-{router}-{component}-perm` |
+| Router Lambda@Edge for a URL route | `{app}-{env}-{router}-{component}-edge` |
+| Router CloudFront Function that returns 404 (no `/` route) | `{app}-{env}-{router}-default-404` |
+
+In Router names, `{component}` is the routed component's name. For a URL route it is `url-` and a hash of the route path, and the Lambda@Edge's IAM role ends in `-r`.
 
 ### Automatic Truncation
 

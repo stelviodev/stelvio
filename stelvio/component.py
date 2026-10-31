@@ -520,32 +520,33 @@ def resource_name(
 
     `limit` is the AWS cap for the resource type, or the provider's autoname cap when
     that is lower. `pulumi_suffix_length` reserves room for Pulumi's random suffix; 0 when
-    the string is passed as the AWS name. `suffix` survives truncation.
+    the string is passed as the AWS name. `suffix` and the prefix survive truncation.
     """
     # Prefix can't be forgotten and the guard can't be skipped (#122, #230 did);
     # any AWS-facing name not built here is greppable-wrong. A plain function, not
     # a Component method: module-level helpers build names too.
     prefix = context().prefix()
-    available = limit - len(prefix) - len(suffix) - pulumi_suffix_length
-    if available <= 0:
-        raise ValueError(
-            f"Cannot build resource name: prefix '{prefix}' ({len(prefix)} chars), "
-            f"suffix '{suffix}' ({len(suffix)} chars) and Pulumi suffix "
-            f"({pulumi_suffix_length} chars) exceed limit ({limit})"
-        )
     if not base.strip():
         raise ValueError("Name cannot be empty or whitespace-only")
+    available = limit - len(prefix) - len(suffix) - pulumi_suffix_length
     if len(base) <= available:
         return f"{prefix}{base}{suffix}"
 
     hash_with_separator = 8  # 7 chars + 1 dash
-    if available <= hash_with_separator:
+    if available > hash_with_separator:
+        name_hash = sha256(base.encode()).hexdigest()[:7]
+        return f"{prefix}{base[: available - hash_with_separator]}-{name_hash}{suffix}"
+    # Long app and env names leave no room for the base: the name is the prefix and a shorter
+    # hash. The prefix stays whole, since policies scope by it (send_policy.py). With fewer
+    # hex chars, two names in one stack would clash too easily.
+    min_hash_chars = 4
+    if available < min_hash_chars:
         raise ValueError(
-            f"Not enough space for name truncation: available={available}, "
-            f"need at least {hash_with_separator} chars for hash"
+            f"Cannot build resource name: prefix '{prefix}' ({len(prefix)} chars), suffix "
+            f"'{suffix}' and Pulumi's {pulumi_suffix_length}-char suffix leave "
+            f"{max(available, 0)} of {limit} chars for the name. Use a shorter app or env name."
         )
-    name_hash = sha256(base.encode()).hexdigest()[:7]
-    return f"{prefix}{base[: available - hash_with_separator]}-{name_hash}{suffix}"
+    return f"{prefix}{sha256(base.encode()).hexdigest()[:available]}{suffix}"
 
 
 def parse_config[C](

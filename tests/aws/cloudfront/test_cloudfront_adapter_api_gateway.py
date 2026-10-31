@@ -19,7 +19,7 @@ def test_router_creates_cloudfront_origin_for_rest_api(
     router = Router("rest-router")
     router.route("/api", api)
 
-    rewrite_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function/{tn(TP + 'edge-api-uri-rewrite-0')}"
+    rewrite_arn = f"arn:aws:cloudfront::{ACCOUNT_ID}:function/{tn(TP + 'rest-router-edge-api-rw')}"
 
     @pulumi.runtime.test
     def deploy():
@@ -59,7 +59,7 @@ def test_router_creates_cloudfront_origin_for_rest_api(
     ]
 
     pulumi_mocks.assert_res(
-        "edge-api-uri-rewrite-0",
+        "rest-router-edge-api-rw",
         R.CLOUDFRONT_FUNCTION,
         {"code": strip_path_pattern_function_js("/api")},
         partial=True,

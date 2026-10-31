@@ -1108,8 +1108,8 @@ def test_resource_name_uses_context_prefix():
 
 @pytest.mark.parametrize(
     ("limit", "suffix", "fits"),
-    [(30, "-r", 10), (40, ".fifo", 17), (64, "-r", 44)],
-    ids=["role", "fifo", "policy"],
+    [(30, "-r", 10), (40, ".fifo", 17), (64, "-r", 44), (29, "-r", 9)],
+    ids=["role", "fifo", "policy", "one_char_kept"],
 )
 def test_resource_name_truncates_only_past_the_available_space(limit, suffix, fits):
     # fits = limit - 10 prefix - len(suffix) - 8 Pulumi chars
@@ -1127,14 +1127,36 @@ def test_resource_name_without_pulumi_reservation_fills_the_limit():
 
 
 @pytest.mark.parametrize(
+    ("limit", "chars"),
+    [(28, 8), (25, 5), (24, 4)],
+    ids=["prefix_leaves_8", "prefix_leaves_5", "prefix_leaves_4"],
+)
+def test_resource_name_is_prefix_and_short_hash_when_the_prefix_leaves_no_room(limit, chars):
+    # limit = 10 prefix + 2 suffix + 8 Pulumi chars + chars; the base is one char too long
+    base = "a" * (chars + 1)
+
+    name = resource_name(base, limit=limit, suffix="-r")
+
+    assert name == f"test-test-{sha256(base.encode()).hexdigest()[:chars]}-r"
+
+
+@pytest.mark.parametrize(
     ("base", "kwargs", "match"),
     [
-        ("name", {"limit": 10, "suffix": "-suffix"}, "Cannot build resource name"),
-        ("a" * 6, {"limit": 25, "suffix": "-r"}, "Not enough space for name truncation"),
+        (
+            "name",
+            {"limit": 10, "suffix": "-suffix"},
+            "leave 0 of 10 chars for the name. Use a shorter app or env name.",
+        ),
+        (
+            "a" * 4,
+            {"limit": 23, "suffix": "-r"},
+            "leave 3 of 23 chars for the name. Use a shorter app or env name.",
+        ),
         ("", {"limit": 40}, "Name cannot be empty"),
         ("   ", {"limit": 40}, "Name cannot be empty"),
     ],
-    ids=["limit_below_reserved_space", "no_room_for_hash", "empty", "whitespace"],
+    ids=["limit_below_reserved_space", "prefix_leaves_3", "empty", "whitespace"],
 )
 def test_resource_name_rejects(base, kwargs, match):
     with pytest.raises(ValueError, match=match):

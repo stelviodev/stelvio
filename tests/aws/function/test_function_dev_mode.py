@@ -36,17 +36,18 @@ def write_files(project: Path, files: dict[str, str]) -> None:
         path.write_text(source)
 
 
-async def invoke(function: Function) -> object:
+async def invoke(function: Function, **message: object) -> object:
     event = {
         "endpointId": function._dev_endpoint_id,
         "event": {"path": "/", "httpMethod": "GET"},
         "context": LAMBDA_CONTEXT,
+        **message,
     }
     return await function.handle_bridge_event({"type": "data", "event": json.dumps(event)})
 
 
-async def invoke_ok(function: Function) -> dict:
-    result = await invoke(function)
+async def invoke_ok(function: Function, **message: object) -> dict:
+    result = await invoke(function, **message)
     assert result.error_result is None
     return result.success_result
 
@@ -76,6 +77,121 @@ def test_dev_mode_handler_receives_lambda_context(project_cwd):
 
     async def check():
         assert await invoke_ok(fn) == {"id": "invoke-1", "remaining": 0, "identity": None}
+
+    return check()
+
+
+HANDLER_LAMBDA_VALUES = (
+    "import os\n"
+    "def main(event, context):\n"
+    "    return {\n"
+    "        'name': context.function_name,\n"
+    "        'version': context.function_version,\n"
+    "        'memory': context.memory_limit_in_mb,\n"
+    "        'log_group': context.log_group_name,\n"
+    "        'log_stream': context.log_stream_name,\n"
+    "        'env_name': os.environ.get('AWS_LAMBDA_FUNCTION_NAME'),\n"
+    "    }\n"
+)
+
+
+@pulumi.runtime.test
+def test_dev_mode_handler_sees_the_deployed_functions_lambda_values(project_cwd):
+    write_files(project_cwd, {"functions/values.py": HANDLER_LAMBDA_VALUES})
+    fn = Function("fn", handler="functions/values.main", memory=512)
+    _ = fn.resources
+    lambda_env = {
+        "AWS_LAMBDA_FUNCTION_NAME": "app-env-fn-1a2b",
+        "AWS_LAMBDA_FUNCTION_VERSION": "$LATEST",
+        "AWS_LAMBDA_LOG_GROUP_NAME": "/aws/lambda/app-env-fn-1a2b",
+        "AWS_LAMBDA_LOG_STREAM_NAME": "2026/10/27/[$LATEST]abc",
+    }
+
+    async def check():
+        assert await invoke_ok(fn, lambdaEnv=lambda_env) == {
+            "name": "app-env-fn-1a2b",
+            "version": "$LATEST",
+            "memory": "512",
+            "log_group": "/aws/lambda/app-env-fn-1a2b",
+            "log_stream": "2026/10/27/[$LATEST]abc",
+            "env_name": "app-env-fn-1a2b",
+        }
+
+    return check()
+
+
+@pulumi.runtime.test
+def test_dev_mode_takes_only_the_stub_keys_from_a_bridge_message(project_cwd, monkeypatch):
+    """Anyone with the AppSync key can publish a message; it must not point the handler,
+    which runs with the developer's credentials, at another profile or endpoint."""
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    write_files(
+        project_cwd,
+        {
+            "functions/env.py": (
+                "import os\n"
+                "def main(event, context):\n"
+                "    return {k: os.environ.get(k) for k in ('AWS_LAMBDA_FUNCTION_NAME',"
+                " 'AWS_LAMBDA_FUNCTION_VERSION', 'AWS_PROFILE', 'AWS_ENDPOINT_URL')}\n"
+            )
+        },
+    )
+    fn = Function("fn", handler="functions/env.main")
+    _ = fn.resources
+    lambda_env = {
+        "AWS_LAMBDA_FUNCTION_NAME": "app-env-fn-1a2b",
+        "AWS_LAMBDA_FUNCTION_VERSION": 7,
+        "AWS_PROFILE": "attacker",
+        "AWS_ENDPOINT_URL": "https://attacker.example",
+    }
+
+    async def check():
+        assert await invoke_ok(fn, lambdaEnv=lambda_env) == {
+            "AWS_LAMBDA_FUNCTION_NAME": "app-env-fn-1a2b",
+            "AWS_LAMBDA_FUNCTION_VERSION": "7",
+            "AWS_PROFILE": "default",
+            "AWS_ENDPOINT_URL": None,
+        }
+
+    return check()
+
+
+@pulumi.runtime.test
+def test_dev_mode_message_from_an_older_stub_leaves_lambda_names_unset(project_cwd, monkeypatch):
+    for key in (
+        "AWS_LAMBDA_FUNCTION_NAME",
+        "AWS_LAMBDA_FUNCTION_VERSION",
+        "AWS_LAMBDA_LOG_GROUP_NAME",
+        "AWS_LAMBDA_LOG_STREAM_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    write_files(project_cwd, {"functions/values.py": HANDLER_LAMBDA_VALUES})
+    fn = Function("fn", handler="functions/values.main")
+    _ = fn.resources
+
+    async def check():
+        assert await invoke_ok(fn) == {
+            "name": None,
+            "version": None,
+            "memory": "128",
+            "log_group": None,
+            "log_stream": None,
+            "env_name": None,
+        }
+
+    return check()
+
+
+@mark.parametrize("lambda_env", [7, "AWS_LAMBDA_FUNCTION_NAME", ["AWS_LAMBDA_FUNCTION_NAME"]])
+@pulumi.runtime.test
+def test_dev_mode_ignores_a_lambda_env_that_is_not_a_dict(project_cwd, lambda_env):
+    """Only a message somebody else published has one; it must not stop the request."""
+    write_files(project_cwd, {"functions/ok.py": HANDLER_OK})
+    fn = Function("fn", handler="functions/ok.main")
+    _ = fn.resources
+
+    async def check():
+        assert await invoke_ok(fn, lambdaEnv=lambda_env) == {}
 
     return check()
 

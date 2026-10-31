@@ -70,10 +70,12 @@ router.route("/api/admin", admin)   # More specific
 In this case, requests to `/api/admin/users` will hit the `admin` origin, while `/api/users` will hit the `api` origin—regardless of which route was added first.
 
 !!! note "Path matching rules"
+    - A path starts with `/`, has no trailing `/`, no empty, `.` or `..` segment, no `?` and no `**`. Other characters: letters, digits and `_ . ~ - $ @ : + *`. CloudFront caps a path pattern at 255 characters, and a plain path also gets a `/*` pattern, so it may have 253. The Router rejects any other path
+    - A route that an earlier route always catches (`/api` next to `/api*`) is rejected
     - Longer, more specific paths take priority over shorter ones
     - The root path `/` acts as a catch-all for unmatched requests. `/*` is the same route, so a Router accepts only one of them
     - If no root path is defined, unmatched requests return a 404 response
-    - A wildcard path like `/files/*` keeps its prefix: `/files/a.txt` reaches the origin as `/files/a.txt`
+    - A path with a `*` (`/files/*`, `/images/*.jpg`) keeps its prefix: `/files/a.txt` reaches the origin as `/files/a.txt`. CloudFront's `*` also matches `/`, so `/images/*.jpg` matches `/images/a/b.jpg`. The length sort counts each `*`, so `/*.jpg` comes before `/api` and takes `/api/logo.jpg`
     - A Bucket on the root path serves its `index.html` for `/` only. A folder in it (`/docs/`) or a bucket route on another path (`/files/`) returns 403
 
 !!! warning "Routes must be defined before resource creation"
@@ -172,6 +174,17 @@ This means that all requests to `/echo` on the `Router`'s domain will be proxied
 
 **Note**: The `Host` header is rewritten, so that every request to this external URL is sent with the `Host` header of the origin domain (`example.com` in the example).
 
+### Upgrading an existing Router
+
+Deploy 0.11 once with your routes unchanged. The Router's per-route resources move to new names in state, and nothing is replaced.
+
+If a route must change in that deploy (a path 0.11 rejects, or `routes=` turned into `route()` calls), other routes' resources can be replaced once, as in 0.10:
+
+- A bucket route answers 403. Run `stlv refresh`, then deploy.
+- A Function route's deploy fails, because AWS allows one URL per function. Delete the function's URL in the Lambda console, then deploy.
+- A URL route's deploy ends with an error deleting its old Lambda@Edge function: CloudFront removes the function's replicas first, which can take a few hours. Deploy again later.
+
+A bucket route already at 403 from an earlier deploy needs the same `stlv refresh` and deploy.
 
 ## Why you need it
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, TypedDict, final
 
 import pulumi
@@ -12,11 +13,11 @@ from stelvio.aws.acm import AcmValidatedDomain, AcmValidatedDomainCustomizationD
 from stelvio.aws.api_gateway.validators import url_domain, validate_domain_name
 from stelvio.aws.cloudfront.dtos import Route
 from stelvio.aws.cloudfront.js import default_404_function_js
-from stelvio.aws.cloudfront.origins.components.url import Url
+from stelvio.aws.cloudfront.origins.components.url import Url, url_origin_name
 from stelvio.aws.cloudfront.origins.registry import CloudfrontAdapterRegistry
 from stelvio.aws.function import Function, FunctionUrlConfig, FunctionUrlConfigDict
 from stelvio.aws.s3.s3 import Bucket
-from stelvio.component import Component
+from stelvio.component import Component, resource_name
 from stelvio.dns import DnsProviderNotConfiguredError, Record
 from stelvio.provider import ProviderStore
 
@@ -26,6 +27,44 @@ if TYPE_CHECKING:
 
     from stelvio.aws.cloudfront.cloudfront import CloudfrontPriceClass
     from stelvio.customize import ChildCustomization, Customization, CustomizationNoArgs
+
+# CloudFront rejects a cache behavior whose path pattern is longer than this.
+_CLOUDFRONT_PATH_PATTERN_MAX_LEN = 255
+
+
+def _check_route_path(route: Route) -> None:
+    # The prefix-strip function compares the path literally against `request.uri`: a path
+    # without the leading '/' or with a trailing '/' never matches it. A path with a `*`
+    # gets no strip function. `'` and `\` break its JS string; `"`, space and non-ASCII
+    # arrive percent-encoded and never match. CloudFront drops empty, `.` and `..` segments
+    # from the request path before matching, so a path with one never matches either. One
+    # `*` already matches `/`, and `/**` would be a second catch-all ahead of the root route.
+    path = route.path_pattern
+    if (
+        not re.fullmatch(r"(/[A-Za-z0-9_.~$@:+/*-]*)?", path)
+        or "**" in path
+        or (path != "/" and re.search(r"/\.{0,2}(?:/|$)", path))
+    ):
+        raise ValueError(
+            f"Invalid route path {path!r}: start with '/', no trailing '/', no empty, '.' "
+            "or '..' segment, no '**', other chars only letters, digits and "
+            "_ . ~ - / $ @ : + *. Use '/api' to send '/api/users' to the origin as '/users', "
+            "or '/api/*' to keep '/api/users'."
+        )
+    if len(route.prefix_pattern) > _CLOUDFRONT_PATH_PATTERN_MAX_LEN:
+        raise ValueError(
+            f"Invalid route path {path!r}: CloudFront caps a path pattern at "
+            f"{_CLOUDFRONT_PATH_PATTERN_MAX_LEN} chars and {route.prefix_pattern!r} has "
+            f"{len(route.prefix_pattern)}."
+        )
+
+
+def _same_origin(existing: Component | str, new: Component | str) -> bool:
+    # A url string is wrapped in a `Url` after the clash checks: compare it with the wrapped
+    # url here, or the second route fails later on the duplicate component name instead.
+    if isinstance(existing, Url) and isinstance(new, str):
+        return existing.url == new.strip()
+    return existing == new
 
 
 @final
@@ -50,24 +89,20 @@ class RouterCustomizationDict(TypedDict, total=False):
 
 @final
 class Router(Component[RouterResources, RouterCustomizationDict]):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         name: str,
-        routes: list[Route] | None = None,
+        # `routes` was the second positional; a list passed there now fails at the call.
+        *,
         price_class: CloudfrontPriceClass | None = None,
         custom_domain: str | None = None,
-        *,
         tags: dict[str, str] | None = None,
         customize: RouterCustomizationDict | None = None,
     ):
         super().__init__(
             ProviderStore.aws(), "stelvio:aws:Router", name, tags=tags, customize=customize
         )
-        # Checked like `route()` calls but not sorted: a new order would rename every resource
-        # named by route index on a stack deployed with this one.
         self.routes: list[Route] = []
-        for route in routes or []:
-            self._add_route(route)
         self.price_class = price_class
         self.custom_domain = custom_domain
         # Truthy check: "" keeps meaning "no domain", e.g. `os.getenv("DOMAIN", "")`.
@@ -95,7 +130,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
 
         adapters = [
             CloudfrontAdapterRegistry.get_adapter_for_component(route.component)(
-                idx, route, self._resource_opts(), self._customizer
+                idx, route, self._resource_opts(), self._customizer, router_name=self.name
             )
             for idx, route in enumerate(self.routes)
         ]
@@ -109,7 +144,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             default_404_function_code = default_404_function_js()
 
             default_404_function = pulumi_aws.cloudfront.Function(
-                context().prefix(f"{self.name}-default-404"),
+                resource_name(self.name, limit=64, suffix="-default-404"),
                 **self._customizer(
                     "cloudfront_functions",
                     {},
@@ -248,6 +283,7 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
         )
 
     def _add_route(self, route: Route) -> None:
+        _check_route_path(route)
         for existing_route in self.routes:
             if existing_route.path_pattern == route.path_pattern:
                 raise ValueError(f"Route for path pattern {route.path_pattern} already exists.")
@@ -256,10 +292,25 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
                     f"Route for path pattern {route.path_pattern!r} clashes with "
                     f"{existing_route.path_pattern!r}: both are the root route."
                 )
-            if existing_route.component == route.component:
-                raise ValueError(f"Route for origin {route.component} already exists.")
+            if existing_route.prefix_pattern == route.prefix_pattern:
+                raise ValueError(
+                    f"Route for path pattern {route.path_pattern!r} clashes with "
+                    f"{existing_route.path_pattern!r}: both need the CloudFront behavior "
+                    f"{route.prefix_pattern!r}."
+                )
+            if _same_origin(existing_route.component, route.component):
+                origin = (
+                    route.component if isinstance(route.component, str) else route.component.name
+                )
+                raise ValueError(f"Route for origin {origin} already exists.")
 
-        if not isinstance(route.component, Component | str):
+        if isinstance(route.component, str):
+            url = route.component.strip()
+            url_origin = Url(
+                context().prefix(url_origin_name(self.name, url)), url=url, tags=self.tags
+            )
+            route = replace(route, component=url_origin)
+        elif not isinstance(route.component, Component):
             raise TypeError(
                 f"component_or_url must be a Component or str, got "
                 f"{type(route.component).__name__}."
@@ -275,6 +326,28 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             )
         self.routes.append(route)
 
+    def _check_routes_reachable(self) -> None:
+        # CloudFront takes the first behavior that matches: a route is dead when an earlier
+        # route's pattern matches all of its patterns (`/api` after `/api*`). Paths hold no
+        # `?` or `[`, so `fnmatchcase` sees `*` as its only wildcard. Catches the usual
+        # mistakes, not every one. The root route is the default behavior, never ordered.
+        ordered = [r for r in self.routes if not r.is_root]
+        for idx, route in enumerate(ordered):
+            for catcher in ordered[:idx]:
+                if all(fnmatchcase(p, catcher.prefix_pattern) for p in route.behavior_patterns):
+                    # The length sort puts a longer catcher first whatever the user does; equal
+                    # lengths keep the order they were added in, so only there reordering fixes it.
+                    hint = (
+                        f" Add {route.path_pattern!r} before {catcher.path_pattern!r}."
+                        if len(route.path_pattern) == len(catcher.path_pattern)
+                        else ""
+                    )
+                    raise ValueError(
+                        f"Route for path pattern {route.path_pattern!r} never gets a request: "
+                        f"{catcher.path_pattern!r} comes first and matches everything "
+                        f"{route.path_pattern!r} would.{hint}"
+                    )
+
     def route(
         self,
         path: str,
@@ -289,14 +362,8 @@ class Router(Component[RouterResources, RouterCustomizationDict]):
             function_url: Function URL config (only used if component_or_url is a Function).
         """
         self._check_not_created("routes")
-        if isinstance(component_or_url, str):
-            url = component_or_url.strip()
-            sha_url = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
-            component_or_url = Url(
-                context().prefix(f"{self.name}-url-origin-{sha_url}"),
-                url=url,
-                tags=self.tags,
-            )
         self._add_route(Route(path, component_or_url, function_url))
-        # Sort routes by path pattern length in descending order (more specific first)
+        # Longer paths first (more specific). Stable, so equal-length routes keep the index a
+        # deployed stack has, which its migration aliases are built from.
         self.routes.sort(key=lambda r: len(r.path_pattern), reverse=True)
+        self._check_routes_reachable()
