@@ -10,7 +10,7 @@
 
 ### Breaking Changes
 
-- **Code to change:** `Bucket.notify_function` takes `links=` as a function option, like `Queue.subscribe`. With a `FunctionConfig` or dict handler it now raises instead of merging; put the links in the config: `function=FunctionConfig(handler=..., links=[table])`. `links=None` raises too; leave it out.
+- **Code to change:** `Bucket.notify_function` takes `links=` as a function option, like `Queue.subscribe`. With a `FunctionConfig` or dict handler it now raises instead of merging; put the links in the config: `function=FunctionConfig(handler=..., links=[table])`. To keep a `FunctionConfig` you already have, `function=replace(config, links=[*config.links, table])` with `from dataclasses import replace`. `links=None` raises too; leave it out.
 
 ## 0.10.2b8 (2026-10-23)
 

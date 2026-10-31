@@ -280,7 +280,7 @@ posts = api.data_source_lambda("posts",
 | Param        | Description                                             |
 |--------------|---------------------------------------------------------|
 | `handler`    | Every [handler form](lambda.md#handler-forms)           |
-| `**fn_opts`  | Function options — `links`, `memory`, `timeout`, etc. See [Lambda Functions](lambda.md) |
+| `**fn_opts`  | Function options such as `links`, `memory` and `timeout`, with a handler path only. See [handler forms](lambda.md#handler-forms). |
 
 ### DynamoDB
 

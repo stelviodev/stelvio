@@ -106,7 +106,7 @@ fn = Function("simple", handler="functions/simple.handler")
 
 ## Handler forms
 
-Components that run your code take a handler: API routes and authorizers, `Cron`,
+Components that run your code take a handler: API Gateway routes and authorizers, `Cron`,
 `subscribe` on `Queue`, `Topic` and `DynamoTable`, `Bucket.notify_function`, AppSync Lambda
 data sources and `LambdaAuth`, and `UserPool` triggers. A handler takes one of these forms:
 
@@ -143,8 +143,8 @@ Two exceptions:
 
 To customize the function a component creates from your handler, see
 [Keys That Configure Another Component](../../concepts/customization.md#keys-that-configure-another-component).
-API routes and authorizers have no such key. Pass them a `Function` you created with its own
-`customize`, or use a global `{Function: ...}` customize, which reaches every function.
+API Gateway routes and authorizers have no such key. Pass them a `Function` you created with its
+own `customize`, or use a global `{Function: ...}` customize, which reaches every function.
 In [dev mode](../../concepts/dev-mode.md), all of these handlers run on your machine.
 
 ### Folder-based handlers

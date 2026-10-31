@@ -632,7 +632,8 @@ class Bucket(Component[BucketResources, BucketCustomizationDict], LinkableMixin)
                 - FunctionConfigDict: Function configuration dictionary
             customize: Customization for the subscription's `function` and `permission`.
             **opts: Additional function configuration options (links, memory, timeout,
-                etc.) when function is specified as a string.
+                etc.) when function is a string or left out. With function left out,
+                opts must hold the handler.
 
         Returns:
             BucketNotifySubscription: The created subscription component.
