@@ -16,6 +16,7 @@
 
 ### Breaking Changes
 
+- **Code to change:** `Bucket.notify_function` takes `links=` as a function option, like `Queue.subscribe`. With a `FunctionConfig` or dict handler it now raises instead of merging; put the links in the config: `function=FunctionConfig(handler=..., links=[table])`. To keep a `FunctionConfig` you already have, `function=replace(config, links=[*config.links, table])` with `from dataclasses import replace`. `links=None` raises too; leave it out.
 - **App and env names: letters, digits and single `-` only, the app name starting with a letter.** An app or env named otherwise no longer deploys, including a saved `.stelvio/userenv`. The name is the stack, so there is no rename: `stlv destroy` the old name (destroy still loads it), which deletes its data, then rename and deploy. The default env from your OS username is now lowercased and cleaned (`John.Doe` → `john-doe`); a saved `.stelvio/userenv` is used as is. For a personal env, destroy before you change `.stelvio/userenv`; on a fresh clone, put the old name in `.stelvio/userenv` first.
 - **`Router(routes=...)` is removed, and `price_class` and `custom_domain` are keyword-only.** `routes=` was never documented; add routes with `route()`.
 

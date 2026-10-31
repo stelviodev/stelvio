@@ -130,10 +130,6 @@ class OidcAuth:
 class LambdaAuth:
     """Lambda authorizer authentication for AppSync.
 
-    Accepts handler as str, FunctionConfig, or Function. When handler is a string,
-    additional function options can be provided via ``**fn_opts`` and are parsed
-    into a FunctionConfig when creating the authorizer Function.
-
     Attributes:
         handler: Lambda handler specification.
         result_ttl: Authorization result cache TTL in seconds.
@@ -141,7 +137,7 @@ class LambdaAuth:
         fn_opts: Optional Function config overrides used only when handler is a string.
     """
 
-    handler: str | FunctionConfig | Function
+    handler: str | FunctionConfig | FunctionConfigDict | Function
     result_ttl: int | None = None
     identity_validation_expression: str | None = None
     fn_opts: FunctionConfigDict = field(default_factory=dict)
@@ -149,7 +145,7 @@ class LambdaAuth:
     def __init__(
         self,
         *,
-        handler: str | FunctionConfig | Function,
+        handler: str | FunctionConfig | FunctionConfigDict | Function,
         result_ttl: int | None = None,
         identity_validation_expression: str | None = None,
         **fn_opts: Unpack[FunctionConfigDict],

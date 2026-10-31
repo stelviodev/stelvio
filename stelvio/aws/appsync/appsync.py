@@ -147,7 +147,7 @@ class AppSync(Component[AppSyncResources, AppSyncCustomizationDict], LinkableMix
     def data_source_lambda(
         self,
         name: str,
-        handler: str | FunctionConfig | Function,
+        handler: str | FunctionConfig | FunctionConfigDict | Function,
         *,
         customize: AppSyncDataSourceCustomizationDict | None = None,
         **fn_opts: Unpack[FunctionConfigDict],

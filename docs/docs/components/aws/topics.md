@@ -52,34 +52,13 @@ Each subscription creates a separate Lambda function that receives messages publ
 
 ### Lambda Configuration
 
-Customize the Lambda function for your subscription:
+The handler takes every [handler form](lambda.md#handler-forms) except a `Function`:
 
 ```python
-# With direct options
-notifications.subscribe(
-    "processor",
-    "functions/notify.process",
-    memory=512,
-    timeout=60,
-)
+from stelvio.aws.topic import Topic
 
-# With FunctionConfig
-from stelvio.aws.function import FunctionConfig
-
-notifications.subscribe(
-    "processor",
-    FunctionConfig(
-        handler="functions/notify.process",
-        memory=512,
-        timeout=60,
-    )
-)
-
-# With dictionary
-notifications.subscribe(
-    "processor",
-    {"handler": "functions/notify.process", "memory": 256}
-)
+notifications = Topic("notifications")
+notifications.subscribe("processor", "functions/notify.process", memory=512, timeout=60)
 ```
 
 ### Filter Policies

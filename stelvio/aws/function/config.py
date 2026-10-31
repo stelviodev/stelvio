@@ -1,4 +1,5 @@
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import MISSING, Field, dataclass, field, fields
 from typing import Literal, TypedDict, final
 
@@ -134,6 +135,11 @@ class FunctionConfig:
             function_architecture=self.architecture or DEFAULT_ARCHITECTURE,
         )
         self._validate_url()
+        if not isinstance(self.links, Iterable):
+            raise TypeError(
+                f"links takes a list of links or components, got {type(self.links).__name__}. "
+                "Wrap one link in a list, or leave links out for none."
+            )
         self._validate_link_names()
         # Like url: validated here (VpcAttachment checks itself), normalized where used.
         normalize_vpc_attachment(self.vpc)
