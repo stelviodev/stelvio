@@ -1,31 +1,48 @@
-import asyncio
-from unittest.mock import MagicMock
-
 import pytest
-from websockets.asyncio.connection import Connection
-from websockets.client import ClientProtocol
-from websockets.protocol import OPEN
-from websockets.uri import parse_uri
 
 
 @pytest.fixture
-def unresponsive_websocket():
-    """Real websocket close logic with a transport whose peer never acknowledges close."""
-    connections = []
+def stub_env_vars(monkeypatch):
+    """Set required environment variables for the stub module."""
+    monkeypatch.setenv("STLV_APPSYNC_REALTIME", "realtime.example.com")
+    monkeypatch.setenv("STLV_APPSYNC_HTTP", "https://example.com")
+    monkeypatch.setenv("STLV_APPSYNC_API_KEY", "test_api_key")
+    monkeypatch.setenv("STLV_APP_NAME", "test_app")
+    monkeypatch.setenv("STLV_STAGE", "dev")
+    monkeypatch.setenv("STLV_FUNCTION_NAME", "test_function")
+    monkeypatch.setenv("STLV_DEV_ENDPOINT_ID", "test_endpoint_id")
 
-    def create():
-        loop = asyncio.get_running_loop()
-        protocol = ClientProtocol(parse_uri("wss://example.com"), state=OPEN)
-        websocket = Connection(protocol, ping_interval=None)
-        transport = MagicMock(spec=asyncio.Transport)
-        transport.is_closing.return_value = False
-        transport.abort.side_effect = lambda: loop.call_soon(websocket.connection_lost, None)
-        websocket.connection_made(transport)
-        connections.append(websocket)
-        return websocket
 
-    yield create
+@pytest.fixture(scope="session")
+def mock_stlv_chunking():
+    """Alias stlv_chunking to _chunking - stlv_chunking only exists when deployed to Lambda."""
+    import sys
 
-    for websocket in connections:
-        if not websocket.connection_lost_waiter.done():
-            websocket.connection_lost(None)
+    from stelvio.bridge import _chunking
+
+    sys.modules["stlv_chunking"] = _chunking
+    yield
+    del sys.modules["stlv_chunking"]
+
+
+@pytest.fixture
+def reset_global_state(stub_env_vars, mock_stlv_chunking):
+    """Reset global state before and after each test."""
+    # Import here to ensure env vars are set
+    from stelvio.bridge.remote.stub import function_stub
+
+    # Reset before test
+    function_stub._event_loop = None
+    function_stub._ws_connection = None
+    function_stub._last_connected = None
+    function_stub._subscribed = False
+    function_stub._response_chunk_buffers = {}
+
+    yield function_stub
+
+    # Reset after test
+    function_stub._event_loop = None
+    function_stub._ws_connection = None
+    function_stub._last_connected = None
+    function_stub._subscribed = False
+    function_stub._response_chunk_buffers = {}

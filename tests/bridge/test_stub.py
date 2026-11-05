@@ -31,54 +31,6 @@ def make_lambda_context(request_id: str = "req-123") -> SimpleNamespace:
     )
 
 
-# We need to set up environment variables before importing the module
-@pytest.fixture(autouse=True)
-def stub_env_vars(monkeypatch):
-    """Set required environment variables for the stub module."""
-    monkeypatch.setenv("STLV_APPSYNC_REALTIME", "realtime.example.com")
-    monkeypatch.setenv("STLV_APPSYNC_HTTP", "https://example.com")
-    monkeypatch.setenv("STLV_APPSYNC_API_KEY", "test_api_key")
-    monkeypatch.setenv("STLV_APP_NAME", "test_app")
-    monkeypatch.setenv("STLV_STAGE", "dev")
-    monkeypatch.setenv("STLV_FUNCTION_NAME", "test_function")
-    monkeypatch.setenv("STLV_DEV_ENDPOINT_ID", "test_endpoint_id")
-
-
-@pytest.fixture(scope="session")
-def mock_stlv_chunking():
-    """Alias stlv_chunking to _chunking - stlv_chunking only exists when deployed to Lambda."""
-    import sys
-
-    from stelvio.bridge import _chunking
-
-    sys.modules["stlv_chunking"] = _chunking
-    yield
-    del sys.modules["stlv_chunking"]
-
-
-@pytest.fixture
-def reset_global_state(mock_stlv_chunking):
-    """Reset global state before and after each test."""
-    # Import here to ensure env vars are set
-    from stelvio.bridge.remote.stub import function_stub
-
-    # Reset before test
-    function_stub._event_loop = None
-    function_stub._ws_connection = None
-    function_stub._last_connected = None
-    function_stub._subscribed = False
-    function_stub._response_chunk_buffers = {}
-
-    yield function_stub
-
-    # Reset after test
-    function_stub._event_loop = None
-    function_stub._ws_connection = None
-    function_stub._last_connected = None
-    function_stub._subscribed = False
-    function_stub._response_chunk_buffers = {}
-
-
 def test_creates_new_loop_when_none_exists(reset_global_state):
     """Should create a new event loop when none exists."""
     stub = reset_global_state
@@ -156,47 +108,6 @@ def test_connect_with_correct_uri_and_subprotocols(mock_connect, reset_global_st
     assert result == mock_ws
 
 
-@patch("stelvio.bridge.remote.stub.function_stub.websockets.connect", new_callable=AsyncMock)
-def test_waits_for_connection_ack(mock_connect, reset_global_state):
-    """Should wait for connection_ack after sending connection_init."""
-    stub = reset_global_state
-
-    mock_ws = AsyncMock()
-    mock_connect.return_value = mock_ws
-    mock_ws.recv = AsyncMock(return_value='{"type":"connection_ack"}')
-
-    _run(stub.connect_to_appsync())
-
-    # Verify recv was called to wait for ack
-    mock_ws.recv.assert_called_once()
-
-
-@patch("stelvio.bridge.remote.stub.function_stub.websockets.connect", new_callable=AsyncMock)
-def test_connection_ack_skips_keepalive(mock_connect, reset_global_state):
-    stub = reset_global_state
-    mock_ws = AsyncMock()
-    mock_connect.return_value = mock_ws
-    mock_ws.recv = AsyncMock(side_effect=['{"type":"ka"}', '{"type":"connection_ack"}'])
-
-    _run(stub.connect_to_appsync())
-
-    assert mock_ws.recv.await_count == 2
-
-
-@patch("stelvio.bridge.remote.stub.function_stub.websockets.connect", new_callable=AsyncMock)
-def test_connection_rejects_unexpected_ack_after_keepalive(mock_connect, reset_global_state):
-    stub = reset_global_state
-    mock_ws = AsyncMock()
-    mock_connect.return_value = mock_ws
-    mock_ws.recv = AsyncMock(
-        side_effect=['{"type":"ka"}', '{"type":"subscribe_success","id":"wrong"}']
-    )
-
-    with pytest.raises(ConnectionError, match="Expected AppSync connection_ack"):
-        _run(stub.connect_to_appsync())
-    mock_ws.close.assert_awaited_once()
-
-
 def test_sends_subscribe_message(reset_global_state):
     """Should send correct subscribe message to response channel."""
     stub = reset_global_state
@@ -213,115 +124,6 @@ def test_sends_subscribe_message(reset_global_state):
     assert sent_data["id"] == "response-sub"
     assert sent_data["channel"] == "/stelvio/test-app/dev/out"
     assert sent_data["authorization"]["x-api-key"] == "test_api_key"
-
-
-def test_waits_for_subscribe_success(reset_global_state):
-    """Should wait for subscribe_success response."""
-    stub = reset_global_state
-    mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"response-sub"}')
-
-    _run(stub.subscribe_to_channel(mock_ws))
-
-    mock_ws.recv.assert_called_once()
-
-
-def test_subscribe_ack_skips_keepalive_and_checks_operation_id(reset_global_state):
-    stub = reset_global_state
-    mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(
-        side_effect=['{"type":"ka"}', '{"type":"subscribe_success","id":"response-sub"}']
-    )
-
-    _run(stub.subscribe_to_channel(mock_ws))
-
-    assert mock_ws.recv.await_count == 2
-
-
-def test_subscribe_rejects_ack_for_different_operation(reset_global_state):
-    stub = reset_global_state
-    mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"other-sub"}')
-
-    with pytest.raises(ConnectionError, match="unexpected operation ID"):
-        _run(stub.subscribe_to_channel(mock_ws))
-
-
-def test_subscribe_propagates_protocol_error(reset_global_state):
-    stub = reset_global_state
-    mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(
-        return_value='{"type":"subscribe_error","errors":[{"message":"denied"}]}'
-    )
-
-    with pytest.raises(ConnectionError, match="denied"):
-        _run(stub.subscribe_to_channel(mock_ws))
-
-
-def test_acknowledgement_wait_has_one_deadline_across_keepalives(reset_global_state, monkeypatch):
-    stub = reset_global_state
-    monkeypatch.setattr(stub, "APPSYNC_ACK_TIMEOUT", 0.01)
-    mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"ka"}')
-
-    with pytest.raises(TimeoutError, match="Timed out waiting for AppSync subscribe_success"):
-        _run(stub.subscribe_to_channel(mock_ws))
-
-
-@pytest.mark.parametrize("expected_type", ["connection_ack", "subscribe_success"])
-def test_silent_socket_has_descriptive_ack_timeout(reset_global_state, monkeypatch, expected_type):
-    stub = reset_global_state
-
-    async def silent_recv():
-        await asyncio.Future()
-
-    monkeypatch.setattr(stub, "APPSYNC_ACK_TIMEOUT", 0.01)
-    mock_ws = AsyncMock()
-    mock_ws.recv.side_effect = silent_recv
-
-    with pytest.raises(TimeoutError, match=f"Timed out waiting for AppSync {expected_type}"):
-        _run(stub.wait_for_appsync_ack(mock_ws, expected_type))
-
-
-def test_failed_close_aborts_transport(reset_global_state, monkeypatch, unresponsive_websocket):
-    stub = reset_global_state
-    monkeypatch.setattr(stub, "APPSYNC_CLOSE_TIMEOUT", 0.01)
-
-    async def check():
-        websocket = unresponsive_websocket()
-        await stub._close_failed_connection(websocket)
-        websocket.transport.abort.assert_called_once_with()
-        await asyncio.sleep(0)
-        assert websocket.close_code is not None
-
-    _run(check())
-
-
-@pytest.mark.parametrize("error_type", [OSError, asyncio.CancelledError])
-def test_close_failure_is_suppressed_and_aborts_transport(reset_global_state, error_type):
-    websocket = AsyncMock()
-    websocket.transport = MagicMock(spec=asyncio.Transport)
-    websocket.close.side_effect = error_type("close failed")
-
-    _run(reset_global_state._close_failed_connection(websocket))
-
-    websocket.transport.abort.assert_called_once_with()
-
-
-@patch("stelvio.bridge.remote.stub.function_stub.websockets.connect", new_callable=AsyncMock)
-def test_connection_ack_timeout_closes_partial_connection(
-    mock_connect, reset_global_state, monkeypatch
-):
-    stub = reset_global_state
-    monkeypatch.setattr(stub, "APPSYNC_ACK_TIMEOUT", 0.01)
-    mock_ws = AsyncMock()
-    mock_connect.return_value = mock_ws
-    mock_ws.recv = AsyncMock(return_value='{"type":"ka"}')
-
-    with pytest.raises(TimeoutError, match="Timed out waiting for AppSync connection_ack"):
-        _run(stub.connect_to_appsync())
-
-    mock_ws.close.assert_awaited_once()
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.connect_to_appsync", new_callable=AsyncMock)
@@ -629,6 +431,7 @@ def test_subscription_failure_resets_state(
     stub = reset_global_state
 
     mock_ws = AsyncMock()
+    mock_ws.transport = MagicMock(spec=asyncio.Transport)
     mock_get_connection.return_value = (mock_ws, False)
     mock_ensure_subscribed.side_effect = Exception("Subscribe failed")
 
@@ -645,7 +448,7 @@ def test_subscription_failure_resets_state(
     assert "Failed to subscribe" in result["body"]
     assert stub._ws_connection is None
     assert stub._subscribed is False
-    mock_ws.close.assert_awaited_once()
+    mock_ws.transport.abort.assert_called_once_with()
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)

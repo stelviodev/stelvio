@@ -156,7 +156,9 @@ rm -rf .stelvio/lambda_dependencies
 
 ### Dev mode bridge does not connect
 
-The bridge waits up to 10 seconds for each AppSync connection or subscription acknowledgement. If it times out, check network access and the AppSync API key, then restart `stlv dev`.
+`Timed out waiting for AppSync connection_ack` or `Timed out waiting for AppSync subscribe_success` means AppSync did not acknowledge the operation within 10 seconds. Check network access, then restart `stlv dev`.
+
+`Expected AppSync connection_ack, received 'connection_error'` is followed by AppSync's error details. The connection was rejected immediately. If the errors include `UnauthorizedException`, check the AppSync API key.
 
 ## Getting Help
 

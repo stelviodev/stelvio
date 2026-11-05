@@ -10,7 +10,7 @@
 
 ### Bug Fixes
 
-- **Dev mode handles AppSync acknowledgements and interruption safely.** It ignores keepalives during acknowledgement waits, rejects mismatched subscription responses, and closes the local connection on shutdown. The Lambda stub disables background WebSocket pings so a warm connection can survive runtime freeze and thaw.
+- `Ctrl+C` **stops** `stlv dev` **even while a handler is running.** Before, it could hang for up to 5 minutes.
 - **`stlv dev` matches the deployed Lambda.** `context.function_name` and the `AWS_LAMBDA_*` env vars are set, and a request waits for the Function's `timeout` (up to 25 s), not 16 s.
 - **Router rejects route paths it routed wrong.** `/api/`, `api` or a `?` deployed but routed wrong. Use `/api`, `/api/*` or `/*`. A route that an earlier route always catches (`/api` next to `/api*`) is rejected too. A `*` mid-path (`/images/*.jpg`) now works for a Bucket too.
 - **Adding a Router route no longer touches the other routes' resources.** Before, a new `/static/*` could leave a bucket route at 403. Existing stacks: deploy once with routes unchanged first. If a route must change in that deploy, see [Upgrading](components/aws/cloudfront-router.md#upgrading-an-existing-router).

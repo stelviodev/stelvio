@@ -7,7 +7,6 @@ Uses connection reuse for better performance.
 
 import asyncio
 import base64
-import contextlib
 import json
 import os
 import time
@@ -15,7 +14,7 @@ import uuid
 
 import stlv_chunking
 import websockets
-from stlv_chunking import STUB_LAMBDA_ENV_KEYS, channel_segment
+from stlv_chunking import STUB_LAMBDA_ENV_KEYS, channel_segment, wait_for_appsync_ack
 
 # Environment variables (set by deployment)
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
@@ -31,8 +30,6 @@ STAGE_SEGMENT = channel_segment(STAGE)
 
 WEBSOCKET_STALE_TIMEOUT = 240  # 4 minutes
 RESPONSE_WAIT_MAX = 25  # under API Gateway's 29 s integration timeout
-APPSYNC_ACK_TIMEOUT = 10
-APPSYNC_CLOSE_TIMEOUT = 2
 
 # Global state for connection reuse (survives across warm container invocations)
 _event_loop = None
@@ -77,50 +74,10 @@ async def connect_to_appsync() -> websockets.WebSocketClientProtocol:
         # Wait for connection_ack
         await wait_for_appsync_ack(ws, "connection_ack")
     except BaseException:
-        await _close_failed_connection(ws)
+        ws.transport.abort()
         raise
 
     return ws
-
-
-async def wait_for_appsync_ack(
-    ws: websockets.WebSocketClientProtocol,
-    expected_type: str,
-    *,
-    operation_id: str | None = None,
-) -> dict:
-    """Wait for the matching AppSync acknowledgement, ignoring keepalives."""
-    deadline = asyncio.get_running_loop().time() + APPSYNC_ACK_TIMEOUT
-    while True:
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}")
-        try:
-            raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
-        except TimeoutError as exc:
-            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}") from exc
-        message = json.loads(raw_message)
-        message_type = message.get("type")
-        if message_type == "ka":
-            continue
-        if message_type == "subscribe_error":
-            raise ConnectionError(f"AppSync subscribe failed: {message.get('errors', [])}")
-        if message_type != expected_type:
-            raise ConnectionError(f"Expected AppSync {expected_type}, received {message_type!r}")
-        if operation_id is not None and message.get("id") != operation_id:
-            raise ConnectionError(
-                f"AppSync {expected_type} acknowledgement had an unexpected operation ID"
-            )
-        return message
-
-
-async def _close_failed_connection(ws: websockets.WebSocketClientProtocol) -> None:
-    """Close a failed connection without replacing the original error."""
-    try:
-        await asyncio.wait_for(ws.close(), timeout=APPSYNC_CLOSE_TIMEOUT)
-    except (Exception, asyncio.CancelledError):
-        with contextlib.suppress(Exception):
-            ws.transport.abort()
 
 
 async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
@@ -137,7 +94,9 @@ async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
         )
     )
 
-    await wait_for_appsync_ack(ws, "subscribe_success", operation_id="response-sub")
+    await wait_for_appsync_ack(
+        ws, "subscribe_success", operation_id="response-sub", channel=response_channel
+    )
 
 
 async def get_or_create_connection() -> tuple[websockets.WebSocketClientProtocol, bool]:
@@ -284,7 +243,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         global _ws_connection, _subscribed  # noqa: PLW0603
         _ws_connection = None
         _subscribed = False
-        await _close_failed_connection(ws)
+        ws.transport.abort()
         return {"statusCode": 500, "body": json.dumps({"error": f"Failed to subscribe: {e!s}"})}
 
     # Publish invocation to local dev server
