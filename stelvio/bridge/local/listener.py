@@ -278,22 +278,22 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 case "ka":
                     cleanup_stale_buffers(_request_chunk_buffers)
                     continue
-                # Subscribe success/error
-                case "subscribe_success":
+                # Successful acknowledgements
+                case "subscribe_success" | "publish_success":
                     continue
+                # Subscribe error
                 case "subscribe_error":
                     errors = data.get("errors", [])
                     console.print(
                         f"[bold red]AppSync subscribe_error:[/bold red] {escape(str(errors))}"
                     )
                     continue
-                # Publish success
-                case "publish_success":
-                    continue
                 # Publish error - surface so silent failures don't masquerade as timeouts
                 case "publish_error":
                     errors = data.get("errors", [])
-                    console.print(f"[bold red]AppSync publish_error:[/bold red] {escape(str(errors))}")
+                    console.print(
+                        f"[bold red]AppSync publish_error:[/bold red] {escape(str(errors))}"
+                    )
                     continue
                 # Data message (Lambda invocation)
                 case "data":

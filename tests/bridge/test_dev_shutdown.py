@@ -155,8 +155,15 @@ def test_close_failure_aborts_transport(error_type):
     websocket.transport.abort.assert_called_once_with()
 
 
-@pytest.mark.parametrize("phase", ["subscribe", "handler"])
-@pytest.mark.parametrize("error_type", [ConnectionError, asyncio.CancelledError])
+@pytest.mark.parametrize(
+    ("error_type", "phase"),
+    [
+        (ConnectionError, "subscribe"),
+        (asyncio.CancelledError, "subscribe"),
+        (asyncio.CancelledError, "handler"),
+        (ConnectionError, "receive"),
+    ],
+)
 def test_main_preserves_failure_when_close_times_out(monkeypatch, phase, error_type):
     websocket = _WebSocket('{"type":"data"}')
     failure = error_type("original failure")
@@ -182,7 +189,13 @@ def test_main_preserves_failure_when_close_times_out(monkeypatch, phase, error_t
         "subscribe_to_channel",
         AsyncMock(side_effect=failure if phase == "subscribe" else None),
     )
-    monkeypatch.setattr(listener, "_handle_data_message", AsyncMock(side_effect=failure))
+    monkeypatch.setattr(
+        listener,
+        "_handle_data_message",
+        AsyncMock(side_effect=failure if phase == "handler" else None),
+    )
+    if phase == "receive":
+        monkeypatch.setattr(_WebSocket, "__anext__", AsyncMock(side_effect=failure))
 
     with pytest.raises(error_type) as caught:
         asyncio.get_event_loop().run_until_complete(
