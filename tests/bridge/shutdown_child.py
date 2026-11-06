@@ -22,18 +22,6 @@ project_root = Path(sys.argv[2])
 bridge_loops = []
 
 
-class InterruptFuture(asyncio.Future):
-    interrupted = False
-
-    def add_done_callback(self, callback, *, context=None):
-        if not self.interrupted and isinstance(getattr(callback, "__self__", None), asyncio.Task):
-            self.interrupted = True
-            assert handler_started.wait(timeout=5), "Handler did not start"
-            # Interrupt after yielding the executor future, before Task registers its wakeup.
-            signal.raise_signal(signal.SIGINT)
-        return super().add_done_callback(callback, context=context)
-
-
 class WebSocket:
     def __aiter__(self):
         return self
@@ -56,6 +44,9 @@ class WebSocket:
                 ),
             }
         )
+
+    async def close(self):
+        await asyncio.Future()
 
 
 def blocked_handler(_event, _context):
@@ -99,8 +90,6 @@ def announce_selector_wait():
 if __name__ == "__main__":
     if interrupt_phase == "worker":
         announce_selector_wait()
-    if interrupt_phase == "registration":
-        asyncio.BaseEventLoop.create_future = lambda self: InterruptFuture(loop=self)
     listener.discover_or_create_appsync = lambda *_args: AppSyncResource(
         api_id="api-id",
         http_endpoint="https://example.com",

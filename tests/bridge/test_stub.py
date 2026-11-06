@@ -41,6 +41,78 @@ def answer(request_id):
     return json.dumps({"type": "data", "event": json.dumps(event)})
 
 
+def assert_subscribed(ws):
+    assert any(message.get("type") == "subscribe" for message in ws.sent), (
+        "New AppSync connection did not subscribe to the response channel"
+    )
+
+
+def test_handler_reuses_one_connection_for_two_calls(reset_global_state, monkeypatch):
+    stub = reset_global_state
+    ws = Socket([ACK, SUBSCRIBED, answer("first"), answer("second")])
+    connect = AsyncMock(return_value=ws)
+    monkeypatch.setattr(stub.websockets, "connect", connect)
+
+    assert stub.handler({}, make_lambda_context("first")) == OK
+    assert stub.handler({}, make_lambda_context("second")) == OK
+
+    connect.assert_awaited_once()
+    assert_subscribed(ws)
+
+
+def test_stub_connections_disable_background_pings(reset_global_state, monkeypatch):
+    stub = reset_global_state
+    ws = Socket([ACK, SUBSCRIBED, answer("first")])
+    connect = AsyncMock(return_value=ws)
+    monkeypatch.setattr(stub.websockets, "connect", connect)
+
+    assert stub.handler({}, make_lambda_context("first")) == OK
+
+    assert connect.call_args.kwargs.get("ping_interval", object()) is None
+    assert_subscribed(ws)
+
+
+def test_handler_recovers_after_a_failed_reconnect(reset_global_state, monkeypatch):
+    stub = reset_global_state
+    old = Socket([ACK, SUBSCRIBED, answer("first")])
+    healthy = Socket([ACK, SUBSCRIBED, answer("third")])
+    monkeypatch.setattr(
+        stub.websockets,
+        "connect",
+        AsyncMock(side_effect=[old, ConnectionError("Connection failed"), healthy]),
+    )
+    monkeypatch.setattr(stub, "WEBSOCKET_STALE_TIMEOUT", 0)
+
+    assert stub.handler({}, make_lambda_context("first")) == OK
+    failed = stub.handler({}, make_lambda_context("second"))
+    assert failed["statusCode"] == 500
+    assert json.loads(failed["body"])["error"] == "Failed to connect to AppSync: Connection failed"
+    assert stub.handler({}, make_lambda_context("third")) == OK
+
+    old.transport.abort.assert_called_once_with()
+    assert_subscribed(old)
+    assert_subscribed(healthy)
+
+
+def test_handler_recovers_after_a_failed_subscription(reset_global_state, monkeypatch):
+    stub = reset_global_state
+    rejected = Socket([ACK, '{"type":"subscribe_error","errors":[{"message":"denied"}]}'])
+    healthy = Socket([ACK, SUBSCRIBED, answer("second")])
+    monkeypatch.setattr(stub.websockets, "connect", AsyncMock(side_effect=[rejected, healthy]))
+
+    failed = stub.handler({}, make_lambda_context("first"))
+    assert failed["statusCode"] == 500
+    assert json.loads(failed["body"])["error"] == (
+        "Failed to subscribe: AppSync subscribe to '/stelvio/test-app/dev/out' failed: "
+        "[{'message': 'denied'}]"
+    )
+    assert stub.handler({}, make_lambda_context("second")) == OK
+
+    rejected.transport.abort.assert_called_once_with()
+    assert_subscribed(rejected)
+    assert_subscribed(healthy)
+
+
 def test_call_after_a_timeout_gets_its_answer_on_a_new_connection(reset_global_state, monkeypatch):
     stub = reset_global_state
     silent = Socket([ACK, SUBSCRIBED])
@@ -55,6 +127,8 @@ def test_call_after_a_timeout_gets_its_answer_on_a_new_connection(reset_global_s
     assert json.loads(result["body"])["error"] == "Local dev server did not respond within 0.1 s"
     silent.transport.abort.assert_called_once_with()
     assert stub.handler({}, make_lambda_context("second")) == OK
+    assert_subscribed(silent)
+    assert_subscribed(healthy)
 
 
 def test_stale_connection_is_aborted_when_the_stub_reconnects(reset_global_state, monkeypatch):
@@ -67,6 +141,8 @@ def test_stale_connection_is_aborted_when_the_stub_reconnects(reset_global_state
     assert stub.handler({}, make_lambda_context("first")) == OK
     assert stub.handler({}, make_lambda_context("second")) == OK
     old.transport.abort.assert_called_once_with()
+    assert_subscribed(old)
+    assert_subscribed(new)
 
 
 def test_creates_new_loop_when_none_exists(reset_global_state):
@@ -120,8 +196,6 @@ def test_connect_with_correct_uri_and_subprotocols(mock_connect, reset_global_st
 
     # Check URI
     assert call_args[0][0] == "wss://realtime.example.com/event/realtime"
-    # A frozen Lambda runtime must not carry a background ping deadline across invocations.
-    assert call_args[1]["ping_interval"] is None
 
     # Check subprotocols - exactly 2: protocol and auth header
     subprotocols = call_args[1]["subprotocols"]
@@ -181,24 +255,6 @@ def test_creates_new_connection_when_none_exists(mock_connect, reset_global_stat
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.connect_to_appsync", new_callable=AsyncMock)
-def test_reuses_valid_connection(mock_connect, reset_global_state):
-    """Should reuse existing valid connection."""
-    stub = reset_global_state
-
-    # Set up existing connection
-    mock_ws = AsyncMock()
-    mock_ws.close_code = None  # Connection is open
-    stub._ws_connection = mock_ws
-    stub._last_connected = time.time()  # Recently connected
-
-    ws, reused = _run(stub.get_or_create_connection())
-
-    assert ws == mock_ws
-    assert reused is True
-    mock_connect.assert_not_called()
-
-
-@patch("stelvio.bridge.remote.stub.function_stub.connect_to_appsync", new_callable=AsyncMock)
 def test_creates_new_connection_when_closed(mock_connect, reset_global_state):
     """Should create new connection when existing one is closed."""
     stub = reset_global_state
@@ -218,41 +274,6 @@ def test_creates_new_connection_when_closed(mock_connect, reset_global_state):
 
     assert ws == new_ws
     assert reused is False
-
-
-@patch("stelvio.bridge.remote.stub.function_stub.connect_to_appsync", new_callable=AsyncMock)
-def test_resets_subscribed_flag_on_new_connection(mock_connect, reset_global_state):
-    """Should reset subscribed flag when creating new connection."""
-    stub = reset_global_state
-    stub._subscribed = True
-
-    mock_ws = AsyncMock()
-    mock_ws.close_code = None
-    mock_connect.return_value = mock_ws
-
-    _run(stub.get_or_create_connection())
-
-    assert stub._subscribed is False
-
-
-@patch("stelvio.bridge.remote.stub.function_stub.connect_to_appsync", new_callable=AsyncMock)
-def test_resets_state_on_connection_error(mock_connect, reset_global_state):
-    """Should reset state when connection fails."""
-    stub = reset_global_state
-    old = Socket()
-    stub._ws_connection = old
-    stub._last_connected = time.time() - stub.WEBSOCKET_STALE_TIMEOUT - 1
-    stub._subscribed = True
-
-    mock_connect.side_effect = Exception("Connection failed")
-
-    with pytest.raises(Exception, match="Connection failed"):
-        _run(stub.get_or_create_connection())
-
-    assert stub._ws_connection is None
-    assert stub._last_connected is None
-    assert stub._subscribed is False
-    old.transport.abort.assert_called_once_with()
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.subscribe_to_channel", new_callable=AsyncMock)
@@ -442,37 +463,6 @@ def test_connection_failure_returns_500(mock_get_connection, reset_global_state)
 
     assert result["statusCode"] == 500
     assert "Failed to connect to AppSync" in result["body"]
-
-
-@patch("stelvio.bridge.remote.stub.function_stub.ensure_subscribed", new_callable=AsyncMock)
-@patch("stelvio.bridge.remote.stub.function_stub.get_or_create_connection", new_callable=AsyncMock)
-def test_subscription_failure_resets_state(
-    mock_get_connection, mock_ensure_subscribed, reset_global_state
-):
-    """Should reset connection state when subscription fails."""
-    stub = reset_global_state
-
-    mock_ws = AsyncMock()
-    mock_ws.transport = MagicMock(spec=asyncio.Transport)
-    mock_get_connection.return_value = (mock_ws, False)
-    mock_ensure_subscribed.side_effect = Exception("Subscribe failed")
-
-    # Set up some state that should be reset
-    stub._ws_connection = mock_ws
-    stub._last_connected = time.time()
-    stub._subscribed = True
-
-    event = {"httpMethod": "GET"}
-    context = make_lambda_context()
-
-    result = _run(stub.async_handler(event, context))
-
-    assert result["statusCode"] == 500
-    assert "Failed to subscribe" in result["body"]
-    assert stub._ws_connection is None
-    assert stub._last_connected is None
-    assert stub._subscribed is False
-    mock_ws.transport.abort.assert_called_once_with()
 
 
 @patch("stelvio.bridge.remote.stub.function_stub.wait_for_response", new_callable=AsyncMock)

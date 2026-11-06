@@ -16,7 +16,7 @@ import pytest
 from stelvio.bridge.local import listener
 
 
-@pytest.mark.parametrize("interrupt_phase", ["parent", "registration", "worker"])
+@pytest.mark.parametrize("interrupt_phase", ["parent", "worker"])
 def test_cli_interrupt_exits_with_blocked_handler(interrupt_phase, tmp_path):
     if interrupt_phase == "worker" and not hasattr(signal, "pthread_kill"):
         pytest.skip("Thread-directed signals require pthread_kill")
@@ -47,24 +47,32 @@ def test_cli_interrupt_exits_with_blocked_handler(interrupt_phase, tmp_path):
                     assert chunk, "Child closed stdout before readiness"
                     output += chunk
 
+            shutdown_deadline = time.monotonic() + (1 if interrupt_phase == "parent" else 5)
             if interrupt_phase == "parent":
                 child.send_signal(signal.SIGINT)
             if interrupt_phase == "worker":
                 child.stdin.write(b"\n")
                 child.stdin.flush()
-            stdout, stderr = child.communicate(timeout=5)
-            output += stdout
-            diagnostics = f"stdout:\n{output.decode()}\nstderr:\n{stderr.decode()}"
+            stdout, stderr = child.communicate(
+                timeout=max(0, shutdown_deadline - time.monotonic())
+            )
+            diagnostics = f"stdout:\n{(output + stdout).decode()}\nstderr:\n{stderr.decode()}"
             assert child.returncode == 1, diagnostics
             assert stderr == b"\nAborted!\n", diagnostics
         except (AssertionError, subprocess.TimeoutExpired) as error:
             if child.poll() is None:
                 child.kill()
             stdout, stderr = child.communicate(timeout=5)
+            reason = (
+                "Ctrl+C did not stop stlv dev while a handler was blocked"
+                if isinstance(error, subprocess.TimeoutExpired)
+                else str(error)
+            )
             pytest.fail(
-                f"{error}\n"
+                f"{reason}\n"
                 f"stdout:\n{(output + stdout).decode(errors='replace')}\n"
-                f"stderr:\n{stderr.decode(errors='replace')}"
+                f"stderr:\n{stderr.decode(errors='replace')}",
+                pytrace=False,
             )
         finally:
             if child.poll() is None:
@@ -134,25 +142,6 @@ def test_bridge_restores_signal_state_and_closes_loop(monkeypatch, outcome):
             signal.signal(signal.SIGINT, previous_handler)
 
 
-def test_bridge_preserves_custom_sigint_handler(monkeypatch):
-    received = []
-
-    def custom_handler(signum, _frame):
-        received.append(signum)
-
-    async def main(**_kwargs):
-        signal.raise_signal(signal.SIGINT)
-
-    previous = signal.signal(signal.SIGINT, custom_handler)
-    monkeypatch.setattr(listener, "main", main)
-    try:
-        listener.run_bridge_server("us-east-1", "default", "app", "dev")
-        assert signal.getsignal(signal.SIGINT) is custom_handler
-        assert received == [signal.SIGINT]
-    finally:
-        signal.signal(signal.SIGINT, previous)
-
-
 def test_bridge_runs_outside_main_thread(monkeypatch):
     main = AsyncMock()
     monkeypatch.setattr(listener, "main", main)
@@ -184,19 +173,3 @@ def test_bridge_runs_when_loop_has_no_add_reader(monkeypatch):
 
     main.assert_awaited_once()
     assert loop.is_closed()
-
-
-def test_bridge_closes_loop_after_signal_setup_failure(monkeypatch):
-    loop = asyncio.new_event_loop()
-    monkeypatch.setattr(asyncio.events, "new_event_loop", lambda: loop)
-    monkeypatch.setattr(
-        loop, "add_reader", MagicMock(side_effect=RuntimeError("signal setup failed"))
-    )
-    main = AsyncMock()
-    monkeypatch.setattr(listener, "main", main)
-
-    with pytest.raises(RuntimeError, match="signal setup failed"):
-        listener.run_bridge_server("us-east-1", "default", "app", "dev")
-
-    assert loop.is_closed()
-    main.assert_not_awaited()

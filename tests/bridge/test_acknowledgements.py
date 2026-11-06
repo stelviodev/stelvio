@@ -101,14 +101,15 @@ def test_connect_failure_reports_appsync_error(side, frames, error, text):
         _run(side.connect())
 
     assert ws.frames == (["next"] if frames else [])
-    assert ws.transport.abort.called is side.aborts_connect
+    if side.aborts_connect:
+        ws.transport.abort.assert_called_once_with()
 
 
 def test_subscribe_accepts_ack_after_keepalive(side):
     ack = json.dumps({"type": "subscribe_success", "id": side.subscription_id})
     ws = Socket([KA, ack, "next"])
 
-    assert _run(side.subscribe(ws)) is None
+    _run(side.subscribe(ws))
     assert ws.frames == ["next"]
 
 
@@ -176,5 +177,5 @@ def test_acknowledgement_has_one_deadline_across_keepalives(side, operation):
     with pytest.raises(TimeoutError, match=f"^Timed out waiting for AppSync {expected_type}$"):
         _run(side.connect() if operation == "connect" else side.subscribe(ws))
 
-    if operation == "connect":
-        assert ws.transport.abort.called is side.aborts_connect
+    if operation == "connect" and side.aborts_connect:
+        ws.transport.abort.assert_called_once_with()

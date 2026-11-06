@@ -1,4 +1,5 @@
 import asyncio
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,11 +10,12 @@ class Socket:
 
     def __init__(self, frames=()):
         self.frames = list(frames)
+        self.sent = []
         self.close_code = None
         self.transport = MagicMock(spec=asyncio.Transport)
 
-    async def send(self, _message):
-        pass
+    async def send(self, message):
+        self.sent.append(json.loads(message))
 
     async def recv(self):
         if self.frames:
