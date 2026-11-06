@@ -5,31 +5,16 @@ import json
 import re
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from stelvio.bridge import _chunking
 from stelvio.bridge.local import listener
 
+from .conftest import Socket
+
 KA = '{"type":"ka"}'
-
-
-class Socket:
-    """Play frames, then stay silent for at most three seconds."""
-
-    def __init__(self, frames=()):
-        self.frames = list(frames)
-        self.transport = MagicMock(spec=asyncio.Transport)
-
-    async def send(self, _message):
-        pass
-
-    async def recv(self):
-        if self.frames:
-            return self.frames.pop(0)
-        await asyncio.sleep(3)
-        raise AssertionError("a silent socket had no deadline")
 
 
 class KeepaliveSocket(Socket):
