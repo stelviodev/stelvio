@@ -1,0 +1,83 @@
+name: Split Traforo repository
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'pkg/traforo-client-go/**'
+
+run-name: Split Traforo Go module
+
+concurrency:
+  group: traforo-repository-split
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    env:
+      TARGET_REPOSITORY: stelviodev/traforo
+      SPLIT_PATH: pkg/traforo-client-go/
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@v5
+        with:
+          repository: stelviodev/stelvio
+          ref: main
+          path: origin
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.PAT_GITHUB_TOKEN }}
+
+      - name: Check out external repository history
+        uses: actions/checkout@v5
+        with:
+          repository: stelviodev/traforo
+          ref: main
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.PAT_GITHUB_TOKEN }}
+
+      - name: Record external main before filtering
+        run: |
+          target_base_sha="$(git -C target rev-parse refs/remotes/origin/main)"
+          printf 'TARGET_BASE_SHA=%s\n' "${target_base_sha}" >> "${GITHUB_ENV}"
+
+      - name: Install git-filter-repo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-filter-repo
+
+      - name: Split module history
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git filter-repo \
+            --refs main \
+            --path "${SPLIT_PATH}" \
+            --path-rename "${SPLIT_PATH}:" \
+            --name-callback 'return b"github-actions[bot]"' \
+            --email-callback 'return b"github-actions[bot]@users.noreply.github.com"' \
+            --commit-callback 'commit.message += f"\noriginal-commit: https://github.com/stelviodev/stelvio/commit/{commit.original_id.decode()}/".encode("ascii")' \
+            --source ./origin \
+            --target ./target
+
+      - name: Publish module history if external main is unchanged
+        env:
+          SPLIT_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}
+        run: |
+          test -n "${SPLIT_TOKEN}"
+          EXTRA_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${SPLIT_TOKEN}" | base64 | tr -d '\n')"
+          git -C target remote add split-target "https://github.com/${TARGET_REPOSITORY}.git"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="${EXTRA_HEADER}" \
+            git -C target push \
+              --force-with-lease="refs/heads/main:${TARGET_BASE_SHA}" \
+              split-target main:main

@@ -156,6 +156,35 @@ Default is state files in the temp dir; `--tags` scans by `stelvio:env=test`, `-
 `stlv-<hex>-test-` prefix, `--dry-run` shows without deleting, `--region` repeats for
 cross-region runs.
 
+## Traforo build and distribution acceptance
+
+Traforo build checks are separate from AWS and host-mutating integration tiers.
+Run the build-only target on macOS with the pinned Go and GoReleaser tools:
+
+```bash
+make -C pkg/traforo-client-go build
+```
+
+It validates both Darwin images and writes provenance without helper installation
+or release publication. The builder prints the host image path for explicit local
+selection. The default builder command can install that image through the existing
+administrator transaction; do not use it in CI or artifact validation.
+
+Build Python archives before running distribution acceptance. Pytest inspects the
+archives and installs the wheel outside the checkout; it does not build artifacts:
+
+```bash
+DIST_DIR="$(mktemp -d)"
+uv build --out-dir "${DIST_DIR}"
+STLV_TEST_STELVIO_WHEEL="$(find "${DIST_DIR}" -name '*.whl' -print -quit)" \
+STLV_TEST_STELVIO_SDIST="$(find "${DIST_DIR}" -name '*.tar.gz' -print -quit)" \
+  uv run pytest tests/tunnel/test_distribution_acceptance.py -q
+```
+
+The tests reject Go source, developer scripts, native images, and the Session
+Manager plugin in both Python archives. They also verify that isolated imports
+come from the installed wheel.
+
 ## Cost and isolation
 
 Each test deploys into its own stack (`integ-<test-name>`) under an app named `stlv-<6 hex>`,
