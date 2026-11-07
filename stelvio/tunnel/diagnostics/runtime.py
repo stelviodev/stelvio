@@ -29,6 +29,8 @@ from stelvio.tunnel.diagnostics.protocol import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from stelvio.tunnel.diagnostics.resource_checks import ResourceChecks
+
 
 DIRECTORY_MODE = 0o700
 SOCKET_MODE = 0o600
@@ -84,14 +86,14 @@ def discover() -> list[Path]:
     return sorted(result)
 
 
-def snapshot(path: Path, after_sequence: int = 0) -> dict:
+def snapshot(path: Path, after_sequence: int = 0, *, resource_checks: bool = False) -> dict:
     _safe_socket(path)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.settimeout(2)
         connection.connect(str(path))
         if peer_uid(connection) != os.geteuid():
             raise ValueError("Diagnostics peer has another owner")
-        send(connection, request(after_sequence))
+        send(connection, request(after_sequence, resource_checks=resource_checks))
         value = validate_snapshot(receive(connection))
         if not isinstance(value.get("session"), dict) or not isinstance(
             value.get("sources"), dict
@@ -189,10 +191,12 @@ class RuntimeDiagnostics:
         state: Callable[[], dict],
         sources: dict[str, Callable[[], dict]],
         events: Events,
+        resource_checks: ResourceChecks | None = None,
     ) -> None:
         self.path = directory() / f"{session_id}.sock"
         self.state = state
         self.events = events
+        self.resource_checks = resource_checks
         self.sampler = Sampler(sources)
         self.epoch = str(uuid4())
         self.stop = Event()
@@ -244,7 +248,8 @@ class RuntimeDiagnostics:
             if peer_uid(connection) != os.geteuid():
                 return
             deadline = time.monotonic() + 2
-            sequence = validate_request(receive(connection, 4096))
+            query = receive(connection, 4096)
+            sequence = validate_request(query)
             value = {
                 "version": 1,
                 "epoch": self.epoch,
@@ -253,6 +258,11 @@ class RuntimeDiagnostics:
                 "sources": self.sampler.collect(),
                 "events": self.events.after(sequence),
             }
+            if self.resource_checks is not None:
+                value["capabilities"] = ["resource_checks"]
+                value["resource_checks"] = self.resource_checks.collect(
+                    value["session"], requested=query.get("resource_checks", False)
+                )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return

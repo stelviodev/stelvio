@@ -35,6 +35,7 @@ dependencies = [
     "websockets>=15.0,<17",
     "botocore[crt]>=1.42.30",
     "platformdirs>=4.5.1,<5",
+    "textual>=6,<7",
 ]
 
 
