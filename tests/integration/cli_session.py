@@ -1,4 +1,4 @@
-"""Disposable deployed application used only by standalone tunnel acceptance."""
+"""Disposable deployment used by standalone tunnel and dev-mode acceptance."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import os
 import re
 import shlex
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -18,6 +20,9 @@ from ipaddress import IPv4Network
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import boto3
@@ -38,7 +43,11 @@ from stelvio.tunnel.installation import INSTALLED_HELPER
 from .assert_tunnel import (
     AbsenceAuditOptions,
     assert_application_absent,
+    assert_proof_lambda_namespace_empty,
+    capture_proof_lambda_log_groups,
     capture_proof_volume_ids,
+    delete_proof_lambda_log_groups,
+    validate_proof_lambda_function_names,
 )
 
 if TYPE_CHECKING:
@@ -51,11 +60,48 @@ FAULT_IO = Config(connect_timeout=5, read_timeout=10, retries={"total_max_attemp
 _SSM_REASON = re.compile(r"stelvio/[0-9a-f]{16}/[0-9a-f]{32}\Z")
 
 
-class StandaloneCliSession:
-    """Own a regular Stelvio deployment and standalone CLI processes for one test."""
+def _observed_unit(output: str, unit_id: str) -> HelperUnitState | None:
+    # Starting a command truncates its log. Keep only its latest owner report.
+    last = None
+    highest_generation = 0
+    pattern = re.compile(
+        rf"^  Host unit ({unit_id}) "
+        r"generation=([0-9]+) status=(active|retained|inactive|failed|mutating|absent)$"
+    )
+    for line in output.splitlines():
+        if line == "Network DEGRADED: runtime status unavailable.":
+            last = None
+        match = pattern.fullmatch(line)
+        if match:
+            last = (
+                HelperUnitState(match[1], int(match[2]), HelperUnitStatus[match[3].upper()])
+                if match[3] != "absent" and 0 < int(match[2]) < 2**64
+                else None
+            )
+            if last is not None:
+                assert last.generation >= highest_generation, (
+                    f"Host unit {unit_id} generation regressed"
+                )
+                highest_generation = last.generation
+    return last
 
-    def __init__(self, project: Path) -> None:
+
+def _network_is_ready(output: str) -> bool:
+    latest = next(
+        (line for line in reversed(output.splitlines()) if line.startswith("Network ")),
+        None,
+    )
+    return latest == "Network READY"
+
+
+class StandaloneCliSession:
+    """Own a regular Stelvio deployment and tunnel/dev CLI process for one test."""
+
+    def __init__(
+        self, project: Path, *, require_helper: bool = True, no_vpc: bool = False
+    ) -> None:
         self.project = project
+        self.no_vpc = no_vpc
         self.profile = os.environ.get("STLV_TEST_AWS_PROFILE")
         self.expected_account = os.environ.get("STLV_TEST_TUNNEL_AWS_ACCOUNT")
         if not self.profile or not self.expected_account:
@@ -72,12 +118,19 @@ class StandaloneCliSession:
                 "Configured AWS credentials do not match STLV_TEST_TUNNEL_AWS_ACCOUNT; "
                 "no proof resources were created"
             )
-        if not INSTALLED_HELPER.is_file():
+        try:
+            assert_proof_lambda_namespace_empty(
+                sdk=self.aws, app=self.app, env=self.environment_name
+            )
+        except RuntimeError as error:
+            pytest.fail(str(error), pytrace=False)
+        if require_helper and not INSTALLED_HELPER.is_file():
             pytest.skip("Install the approved native helper before standalone acceptance")
-        baseline = NativeHelper().status()
-        if baseline.owned or baseline.uncertain or baseline.mutating or baseline.units:
-            pytest.skip("Standalone acceptance requires an idle native helper and host")
-        if importlib.util.find_spec("pymongo") is None:
+        if require_helper:
+            baseline = NativeHelper().status()
+            if baseline.owned or baseline.uncertain or baseline.mutating or baseline.units:
+                pytest.skip("Standalone acceptance requires an idle native helper and host")
+        if not no_vpc and importlib.util.find_spec("pymongo") is None:
             pytest.skip("Install pymongo in the acceptance Python environment")
 
         bootstrap = self.aws.client("ssm").get_parameter(Name="/stlv/bootstrap")
@@ -91,16 +144,27 @@ class StandaloneCliSession:
         self._deployed = False
         self._state_hash: str | None = None
         self._outputs: dict[str, object] = {}
+        self._proof_lambda_function_names: tuple[str, ...] = ()
         self._manifest = None
         self._proof_trust_targets: list[HostIdentity] = []
         self._fault_command_uncertain: str | None = None
+        self._mode = "standalone"
+        self.invocation_path = self.project / "handler-imports.jsonl"
         self._write_project()
 
     def _write_project(self) -> None:
         self.project.mkdir(parents=True, exist_ok=True)
         (self.project / "handlers").mkdir()
-        (self.project / "handlers" / "probe.py").write_text(
-            "def handler(event, context):\n    return {'ok': True}\n"
+        source_probe = Path(__file__).parent / "handlers" / "tunnel_dev_probe.py"
+        (self.project / "handlers" / "probe.py").write_text(source_probe.read_text())
+        (self.project / "handlers" / "plain.py").write_text(
+            "import json, os\n"
+            "def handler(event, context):\n"
+            "    return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, "
+            "'body': json.dumps({'plain': True, "
+            "'marker': os.environ.get('STLV_TEST_TUNNEL_MARKER'), "
+            "'query_marker': (event.get('queryStringParameters') or {}).get('marker'), "
+            "'pid': os.getpid()})}\n"
         )
         source = """
 import os
@@ -128,18 +192,41 @@ def relocate(octet):
 
 @app.run
 def run():
-    for number, octet in ((1, 252), (2, 253)):
-        vpc = Vpc(f'net{number}', az=2, bastion=True, customize=relocate(octet))
+"""
+        if self.no_vpc:
+            source += """
+    function = Function('plain', handler='handlers/plain.handler', url='public')
+    export_output('function1_url', function.url)
+    export_output('function1_name', function.resources.function.name)
+"""
+        else:
+            source += """
+    for number, octet, bastion in ((1, 252, True), (2, 253, {})):
+        vpc = Vpc(f'net{number}', az=2, bastion=bastion, customize=relocate(octet))
         database = DocumentDb(f'docdb{number}', vpc=vpc, replicas=1 if number == 1 else 0)
         function = Function(
             f'client{number}', handler='handlers/probe.handler', vpc=vpc,
-            links=[database], requirements=['pymongo'],
+            links=[database], requirements=['pymongo'], url='public',
         )
         export_output(f'vpc{number}_id', vpc.resources.vpc.id)
         export_output(f'bastion{number}_id', vpc.resources.bastion.id)
         export_output(f'cluster{number}_id', database.resources.cluster.id)
         export_output(f'function{number}_name', function.resources.function.name)
-""".replace("APP_NAME", repr(self.app)).replace("ENVIRONMENT_NAME", repr(self.environment_name))
+        export_output(f'function{number}_url', function.url)
+    disabled = Vpc('net3', az=2, bastion=False, customize=relocate(254))
+    disabled_function = Function(
+        'disabled-client', handler='handlers/plain.handler', vpc=disabled, url='public'
+    )
+    plain_function = Function('plain', handler='handlers/plain.handler', url='public')
+    export_output('vpc3_id', disabled.resources.vpc.id)
+    export_output('function3_url', disabled_function.url)
+    export_output('function3_name', disabled_function.resources.function.name)
+    export_output('function4_url', plain_function.url)
+    export_output('function4_name', plain_function.resources.function.name)
+"""
+        source = source.replace("APP_NAME", repr(self.app)).replace(
+            "ENVIRONMENT_NAME", repr(self.environment_name)
+        )
         (self.project / "stlv_app.py").write_text(source)
         (self.project / ".stelvio").mkdir()
         (self.project / ".stelvio" / "userenv").write_text(self.environment_name)
@@ -151,6 +238,8 @@ def run():
         self.environment["AWS_DEFAULT_REGION"] = self.region
         self.environment["STLV_TEST_AWS_PROFILE"] = self.profile
         self.environment["STLV_TEST_AWS_REGION"] = self.region
+        self.environment["STLV_TEST_TUNNEL_INVOCATIONS"] = str(self.invocation_path)
+        self.environment["STLV_TEST_TUNNEL_MARKER"] = self.app
 
     def _command_evidence(self, directory: Path, metadata: dict, stdout, stderr) -> None:
         def publish(name, value):
@@ -218,11 +307,22 @@ def run():
         self.command("deploy", self.environment_name, "--yes", timeout=STARTUP_TIMEOUT)
         outputs = json.loads(self.command("outputs", self.environment_name, "--json"))
         self._outputs = outputs["user_defined"]
+        function_name_keys = (
+            ("function1_name",)
+            if self.no_vpc
+            else tuple(f"function{number}_name" for number in range(1, 5))
+        )
+        self._proof_lambda_function_names = validate_proof_lambda_function_names(
+            app=self.app,
+            env=self.environment_name,
+            function_names=tuple(self._outputs[key] for key in function_name_keys),
+        )
         state = self.state()
         self._state_hash = hashlib.sha256(state).hexdigest()
         self._manifest = read_network_manifest(json.loads(state))
-        assert len(self._manifest.enabled_vpcs) == 2
-        assert len(self._manifest.resources) == 2
+        assert len(self._manifest.enabled_vpcs) == (0 if self.no_vpc else 2)
+        assert len(self._manifest.used_vpcs) == (0 if self.no_vpc else 3)
+        assert len(self._manifest.resources) == (0 if self.no_vpc else 2)
         self._initialize_proof_host_trust()
 
     def _initialize_proof_host_trust(self) -> None:
@@ -271,13 +371,25 @@ def run():
         return self._manifest
 
     def start(self) -> None:
+        self._start(["tunnel", "start", self.environment_name], mode="standalone")
+
+    def start_dev(self) -> None:
+        self._start(["dev", self.environment_name, "--yes"], mode="dev")
+
+    def _start(self, arguments: list[str], *, mode: str) -> None:
         if self.process is not None and self.process.poll() is None:
-            raise RuntimeError("Standalone command is already running")
+            raise RuntimeError("Tunnel or dev command is already running")
+        if mode == "dev":
+            # Dev startup deploys fresh endpoints; an earlier checkpoint is not
+            # a baseline for this command, even if startup fails.
+            self._state_hash = None
+        self._mode = mode
         self._log_file = self.log_path.open("wb")
         self.process = subprocess.Popen(  # noqa: S603 - selected local Stelvio CLI, explicit project cwd
-            [str(self.cli), "tunnel", "start", self.environment_name],
+            [str(self.cli), *arguments],
             cwd=self.project,
             env=self.environment,
+            stdin=subprocess.DEVNULL,
             stdout=self._log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -291,11 +403,44 @@ def run():
         while time.monotonic() < deadline:
             output = self.log()
             if self.process is None or self.process.poll() is not None:
-                raise RuntimeError(f"Standalone CLI exited before readiness: {output[-5000:]}")
-            if "Network READY" in output:
+                raise RuntimeError(f"Tunnel or dev CLI exited before readiness: {output[-5000:]}")
+            bridge_ready = self._mode != "dev" or "local dev server connected to AppSync" in output
+            if "Network READY" in output and bridge_ready:
+                if self._mode == "dev" and self._state_hash is None:
+                    self._state_hash = hashlib.sha256(self.state()).hexdigest()
                 return
             time.sleep(1)
-        raise TimeoutError(f"Standalone network did not become ready: {self.log_path}")
+        raise TimeoutError(f"Tunnel or dev network did not become ready: {self.log_path}")
+
+    def invoke_function(
+        self, number: int, timeout: float = 60, *, marker: str | None = None
+    ) -> tuple[int, dict | str]:
+        url = self._outputs[f"function{number}_url"]
+        if urlparse(url).scheme != "https":
+            raise ValueError("Proof Function URL must use HTTPS")
+        if marker is not None:
+            parsed = urlparse(url)
+            query = parsed.query
+            encoded_marker = urlencode({"marker": marker})
+            query = f"{query}&{encoded_marker}" if query else encoded_marker
+            url = urlunparse(parsed._replace(query=query))
+        request = Request(url, method="GET")  # noqa: S310 - URL was verified as HTTPS
+        try:
+            with urlopen(request, timeout=timeout) as response:  # noqa: S310 - proof-app URL
+                status = response.status
+                body = response.read().decode()
+        except HTTPError as error:
+            status = error.code
+            body = error.read().decode(errors="replace")
+        try:
+            return status, json.loads(body)
+        except json.JSONDecodeError:
+            return status, body
+
+    def invocations(self) -> list[dict]:
+        if not self.invocation_path.exists():
+            return []
+        return [json.loads(line) for line in self.invocation_path.read_text().splitlines()]
 
     def _route_to(self, address) -> dict[str, str]:
         from .macos_host import run
@@ -467,7 +612,14 @@ def run():
                 )
             self.run_ssm_commands(instance_id, restore)
 
-    def check_database(self, cluster_id: str, timeout: float = 30) -> dict:
+    def check_database(
+        self,
+        cluster_id: str,
+        timeout: float = 30,
+        *,
+        marker: str | None = None,
+        marker_expected: bool = True,
+    ) -> dict:
         ca_file = self.project / ".stelvio" / "aws" / "documentdb" / "global-bundle.pem"
         script = """
 import boto3, json, sys, uuid
@@ -484,10 +636,16 @@ mongo = MongoClient(cluster["Endpoint"], cluster["Port"],
     serverSelectionTimeoutMS=20000)
 try:
     assert mongo.admin.command("ping")["ok"] == 1
-    marker = uuid.uuid4().hex
-    collection = mongo.stelvio_standalone.acceptance
-    collection.replace_one({"_id": marker}, {"_id": marker, "marker": marker}, upsert=True)
-    assert collection.find_one({"_id": marker})["marker"] == marker
+    marker = sys.argv[3] if len(sys.argv) > 3 else None
+    collection = mongo.stelvio_dev.acceptance
+    if marker is None:
+        marker = uuid.uuid4().hex
+        collection.replace_one({"_id": marker}, {"_id": marker}, upsert=True)
+        assert collection.find_one({"_id": marker})["_id"] == marker
+        marker_present = True
+    else:
+        marker_present = collection.find_one({"_id": marker}) is not None
+        assert marker_present == (sys.argv[4] == "present")
     expected = set()
     for member in cluster["DBClusterMembers"]:
         instance = client.describe_db_instances(
@@ -497,12 +655,24 @@ try:
     assert expected <= discovered, (expected, discovered)
     print(json.dumps({"tls": True, "read_write": True,
         "replica_set": mongo.topology_description.replica_set_name,
-        "members": sorted(discovered)}))
+        "members": sorted(discovered), "marker_present": marker_present}))
 finally:
     mongo.close()
 """
         result = subprocess.run(  # noqa: S603 - fixed local verification script
-            [sys.executable, "-I", "-c", script, cluster_id, str(ca_file)],
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                script,
+                cluster_id,
+                str(ca_file),
+                *(
+                    [marker, "present" if marker_expected else "absent"]
+                    if marker is not None
+                    else []
+                ),
+            ],
             cwd=self.project,
             env=self.environment,
             capture_output=True,
@@ -534,25 +704,7 @@ finally:
         while time.monotonic() < deadline:
             if self.process is None or self.process.poll() is not None:
                 raise RuntimeError(f"Tunnel command exited while observing {identity}")
-            # Starting a command truncates its log. Keep only
-            # the newest owner observation, including absence/unavailability.
-            last = None
-            pattern = re.compile(
-                rf"^  Host unit ({unit_id}) "
-                r"generation=([0-9]+) status=(active|retained|inactive|failed|mutating|absent)$"
-            )
-            for line in self.log().splitlines():
-                if line == "Network DEGRADED: runtime status unavailable.":
-                    last = None
-                match = pattern.fullmatch(line)
-                if match:
-                    last = (
-                        HelperUnitState(
-                            match[1], int(match[2]), HelperUnitStatus[match[3].upper()]
-                        )
-                        if match[3] != "absent" and 0 < int(match[2]) < 2**64
-                        else None
-                    )
+            last = _observed_unit(self.log(), unit_id)
             if (
                 last is not None
                 and last.status.name.lower() == status_name
@@ -564,6 +716,125 @@ finally:
             f"VPC unit {identity} did not reach {status_name} after generation {after}; "
             f"last owner observation: {last}"
         )
+
+    def wait_recovered_unit(
+        self,
+        identity: str,
+        retained: HelperUnitState,
+        *,
+        after_log: int,
+        timeout: float = STARTUP_TIMEOUT,
+    ) -> HelperUnitState:
+        assert retained.unit == hashlib.sha256(identity.encode()).hexdigest()[:8]
+        assert retained.status == HelperUnitStatus.RETAINED
+        deadline = time.monotonic() + timeout
+        last = None
+        while time.monotonic() < deadline:
+            if self.process is None or self.process.poll() is not None:
+                raise RuntimeError(f"Tunnel command exited while observing {identity}")
+            output = self.log()
+            last = _observed_unit(output, retained.unit)
+            if (
+                _network_is_ready(output[after_log:])
+                and last is not None
+                and last.status == HelperUnitStatus.ACTIVE
+                and last.generation > retained.generation
+            ):
+                # The first activation advances once. Each additional configured
+                # attempt retires and activates again, advancing two more generations.
+                advance = last.generation - retained.generation
+                assert advance % 2 == 1, "Invalid reconnect generation cycle"
+                return last
+            time.sleep(0.1)
+        raise TimeoutError(
+            f"VPC unit {identity} did not report fresh Network READY and a recovered "
+            f"active generation; last owner observation: {last}"
+        )
+
+    def wait_network_ready(self, *, after: int = 0, timeout: float = STARTUP_TIMEOUT) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            output = self.log()
+            if _network_is_ready(output[after:]):
+                return
+            if self.process is None or self.process.poll() is not None:
+                raise RuntimeError(f"Dev CLI exited before network readiness: {output[-5000:]}")
+            time.sleep(1)
+        raise TimeoutError("Dev session did not report fresh Network READY status")
+
+    def wait_worker_cause(
+        self, identity: str, cause: str, *, state: str = "failed", timeout: float = 180
+    ) -> None:
+        deadline = time.monotonic() + timeout
+        needle = f"{identity}: {state}"
+        record = re.compile(
+            rf"{re.escape(needle)}\s+attempt=[0-9]+\s+"
+            rf"cause={re.escape(cause)}\s+retained_dns=(?:True|False)"
+        )
+        while time.monotonic() < deadline:
+            if self.process is None or self.process.poll() is not None:
+                raise RuntimeError(
+                    f"Dev CLI exited before {identity} reported {cause}: {self.log()}"
+                )
+            lines = self.log().splitlines()
+            for index, line in enumerate(lines):
+                if not line.lstrip().startswith(needle):
+                    continue
+                # Rich may wrap between status fields. Match one complete,
+                # bounded record; never borrow a cause from another VPC.
+                for end in range(index + 1, min(index + 4, len(lines)) + 1):
+                    candidate = "\n".join(lines[index:end]).strip()
+                    if len(candidate) > 4096:
+                        break
+                    if record.fullmatch(candidate):
+                        return
+            time.sleep(1)
+        raise TimeoutError(f"VPC {identity} did not report {state} cause={cause}")
+
+    def terminate_transport(self, instance_id: str) -> None:
+        owned = [item for item in self.active_ssm_sessions() if item.get("Target") == instance_id]
+        assert len(owned) == 1, f"Expected one owned transport to {instance_id}, got {owned}"
+        self.aws.client("ssm").terminate_session(SessionId=owned[0]["SessionId"])
+
+    @staticmethod
+    def dns_rcode(hostname: str, port: int) -> int:
+        transaction_id = int.from_bytes(os.urandom(2), "big")
+        labels = hostname.rstrip(".").split(".")
+        question = (
+            b"".join(bytes([len(label)]) + label.encode("ascii") for label in labels) + b"\0"
+        )
+        query = struct.pack("!HHHHHH", transaction_id, 0x0100, 1, 0, 0, 0) + question
+        query += struct.pack("!HH", 1, 1)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            client.settimeout(2)
+            client.sendto(query, ("127.0.0.1", port))
+            response, _address = client.recvfrom(4096)
+        response_id, flags = struct.unpack("!HH", response[:4])
+        assert response_id == transaction_id
+        return flags & 0x000F
+
+    def wait_dns_rcode(self, hostname: str, port: int, expected: int, timeout: float = 45) -> None:
+        deadline = time.monotonic() + timeout
+        last_error = None
+        while time.monotonic() < deadline:
+            try:
+                if self.dns_rcode(hostname, port) == expected:
+                    return
+            except (OSError, AssertionError) as error:
+                last_error = error
+            time.sleep(1)
+        raise TimeoutError(f"Scoped DNS did not return rcode={expected}: {last_error}")
+
+    def wait_function_marker(self, number: int, marker: str, *, timeout: float = 90) -> dict:
+        deadline = time.monotonic() + timeout
+        last_response = None
+        while time.monotonic() < deadline:
+            status, response = self.invoke_function(number, timeout=20, marker=marker)
+            last_response = (status, response)
+            if status == 200 and isinstance(response, dict) and response.get("marker") == marker:
+                return response
+            time.sleep(1)
+        raise TimeoutError(f"Function {number} did not return marker {marker}: {last_response}")
 
     def terminate(self, signum: int = signal.SIGINT) -> int:
         if self.process is None:
@@ -589,34 +860,22 @@ finally:
             values.extend(owned)
         return values
 
-    def assert_sessions_terminated(self, receipts: list[dict], timeout: float = 60) -> None:
-        ssm = self.aws.client("ssm")
-        expected = {item["SessionId"] for item in receipts}
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            active = {
-                item["SessionId"]
-                for vpc in self.manifest.enabled_vpcs
-                for item in ssm.describe_sessions(
-                    State="Active",
-                    Filters=[{"key": "Target", "value": vpc.access.instance_id}],
-                )["Sessions"]
-                if item["SessionId"] in expected
-            }
-            histories = {
-                session_id: ssm.describe_sessions(
-                    State="History", Filters=[{"key": "SessionId", "value": session_id}]
-                )["Sessions"]
-                for session_id in expected
-            }
-            if not active and all(
-                len(values) == 1 and values[0]["Status"] == "Terminated"
-                for values in histories.values()
-            ):
-                return
-            time.sleep(1)
-        raise AssertionError(
-            f"Owned SSM sessions were not certified terminated: {sorted(expected)}"
+    def assert_sessions_terminated(self, receipts: list[dict], timeout: float = 60) -> Path:
+        from stelvio.pulumi import get_bin_path
+
+        from .ssm_cleanup import assert_ssm_cleanup
+
+        return assert_ssm_cleanup(
+            self.aws.client(
+                "ssm",
+                config=Config(
+                    connect_timeout=2, read_timeout=2, retries={"total_max_attempts": 1}
+                ),
+            ),
+            receipts,
+            get_bin_path() / "tunnel-evidence",
+            self.project,
+            timeout=timeout,
         )
 
     def resolver_ports(self) -> dict[str, int]:
@@ -667,19 +926,58 @@ finally:
         assert observed == dict.fromkeys(ids, "running")
 
     def assert_state_unchanged(self) -> None:
+        assert self._state_hash is not None, "No valid checkpoint baseline for this command"
         assert hashlib.sha256(self.state()).hexdigest() == self._state_hash
+
+    def _require_idle_host(self) -> None:
+        if INSTALLED_HELPER.exists():
+            state = NativeHelper().status()
+            if state.owned or state.uncertain or state.mutating or state.units:
+                raise RuntimeError(
+                    f"Retaining proof deployment {self.app}/{self.environment_name}: "
+                    "native helper cleanup is not certified; preserve evidence and recover first"
+                )
+        elif not self.no_vpc:
+            raise RuntimeError("Retaining VPC proof deployment because the helper is unavailable")
+
+    def _capture_dev_lambda_log_groups(self) -> tuple[tuple[str, ...], list[Exception]]:
+        if getattr(self, "_mode", "standalone") != "dev":
+            return (), []
+        try:
+            groups = capture_proof_lambda_log_groups(
+                sdk=self.aws,
+                app=self.app,
+                env=self.environment_name,
+                function_names=getattr(self, "_proof_lambda_function_names", ()),
+            )
+        except Exception as error:
+            failure = RuntimeError("Proof Lambda log groups could not be captured before destroy")
+            failure.__cause__ = error
+            return (), [failure]
+        return groups, []
+
+    def _remove_dev_lambda_log_groups(self, names: tuple[str, ...]) -> list[Exception]:
+        if getattr(self, "_mode", "standalone") != "dev":
+            return []
+        try:
+            delete_proof_lambda_log_groups(
+                sdk=self.aws,
+                app=self.app,
+                env=self.environment_name,
+                function_names=getattr(self, "_proof_lambda_function_names", ()),
+                log_group_names=names,
+            )
+        except Exception as error:
+            return [error]
+        return []
 
     def destroy(self) -> None:
         if not self._deployed:
             return
         if self.process is not None and self.process.poll() is None:
             self.terminate()
-        state = NativeHelper().status()
-        if state.owned or state.uncertain or state.mutating or state.units:
-            raise RuntimeError(
-                f"Retaining proof deployment {self.app}/{self.environment_name}: "
-                "native helper cleanup is not certified; preserve evidence and recover first"
-            )
+        self._require_idle_host()
+        proof_lambda_log_groups, log_group_errors = self._capture_dev_lambda_log_groups()
         volume_capture_error = None
         try:
             bastion_ids = [
@@ -701,10 +999,12 @@ finally:
             error = RuntimeError("Bastion block-device absence could not be certified")
             error.__cause__ = volume_capture_error
             errors.append(error)
+        errors.extend(log_group_errors)
         try:
             self.command("destroy", self.environment_name, "--yes", timeout=DESTROY_TIMEOUT)
         except Exception as error:
             errors.append(error)
+        errors.extend(self._remove_dev_lambda_log_groups(proof_lambda_log_groups))
         try:
             self._assert_aws_resources_absent()
         except Exception as error:

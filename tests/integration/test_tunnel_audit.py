@@ -11,6 +11,42 @@ from botocore.exceptions import ClientError
 from . import assert_tunnel, cli_session
 
 
+def _write_cli_session_project(tmp_path, *, no_vpc: bool = False) -> str:
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session.project = tmp_path
+    session.no_vpc = no_vpc
+    session.app = "proof-app"
+    session.profile = "proof-profile"
+    session.region = "us-east-1"
+    session.environment_name = "proof"
+    session.invocation_path = tmp_path / "imports.jsonl"
+    session._write_project()
+    source = (tmp_path / "stlv_app.py").read_text()
+    compile(source, str(tmp_path / "stlv_app.py"), "exec")
+    return source
+
+
+def test_mixed_dev_proof_project_covers_enabled_disabled_and_plain_functions(tmp_path):
+    source = _write_cli_session_project(tmp_path)
+
+    assert "((1, 252, True), (2, 253, {}))" in source
+    assert "bastion=False" in source
+    assert "disabled-client" in source
+    assert "plain_function = Function('plain'" in source
+    assert "export_output('function3_url'" in source
+    assert "export_output('function4_url'" in source
+    assert "export_output('function3_name'" in source
+    assert "export_output('function4_name'" in source
+
+
+def test_non_vpc_proof_project_has_no_vpc_resource(tmp_path):
+    source = _write_cli_session_project(tmp_path, no_vpc=True)
+
+    assert "Function('plain', handler='handlers/plain.handler'" in source
+    assert "export_output('function1_name'" in source
+    assert "Vpc(" not in source
+
+
 class _Paginator:
     def __init__(self, client: _Client, operation: str) -> None:
         self.client = client
@@ -93,7 +129,10 @@ def _empty_session() -> _Session:
         }
     )
     ssm = _Client(pages={"list_documents": [{"DocumentIdentifiers": []}]})
-    return _Session({"ec2": ec2, "docdb": docdb, "lambda": functions, "iam": iam, "ssm": ssm})
+    logs = _Client(pages={"describe_log_groups": [{"logGroups": []}]})
+    return _Session(
+        {"ec2": ec2, "docdb": docdb, "lambda": functions, "iam": iam, "ssm": ssm, "logs": logs}
+    )
 
 
 def test_audit_covers_application_and_bastion_supporting_resources():
@@ -145,6 +184,14 @@ def test_audit_covers_application_and_bastion_supporting_resources():
     session.clients["lambda"].pages["list_functions"] = [
         {"Functions": [{"FunctionName": "demo-test-function"}]}
     ]
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {
+            "logGroups": [
+                {"logGroupName": "/aws/lambda/demo-test-function"},
+                {"logGroupName": "/aws/lambda/demo-production-function"},
+            ]
+        }
+    ]
     session.clients["iam"].pages.update(
         {
             "list_roles": [{"Roles": [{"RoleName": "demo-test-role"}]}],
@@ -176,6 +223,7 @@ def test_audit_covers_application_and_bastion_supporting_resources():
         "DocumentDB DBSubnetGroupName demo-test-subnets",
         "DocumentDB DBClusterParameterGroupName demo-test-params",
         "Lambda function demo-test-function",
+        "Lambda log group /aws/lambda/demo-test-function",
         "IAM RoleName demo-test-role",
         "IAM InstanceProfileName demo-test-profile",
         "IAM PolicyName demo-test-policy",
@@ -215,6 +263,373 @@ def test_audit_accepts_terminated_instances_deleted_nat_and_filters_vpc_lookup()
     assert all(
         "VpcIds" not in kwargs for operation, kwargs in ec2.calls if operation == "describe_vpcs"
     )
+
+
+def test_audit_finds_orphaned_lambda_log_groups_after_functions_are_gone():
+    session = _empty_session()
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {"logGroups": [{"logGroupName": "/aws/lambda/demo-test-removed-function"}]}
+    ]
+
+    with pytest.raises(
+        AssertionError, match="Lambda log group /aws/lambda/demo-test-removed-function"
+    ):
+        assert_tunnel.assert_application_absent(
+            "demo",
+            "test",
+            sdk=session,
+            options=assert_tunnel.AbsenceAuditOptions(timeout=0),
+        )
+
+
+def test_proof_namespace_preflight_rejects_existing_function_or_log_group():
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-owned-by-other"}]}
+    ]
+
+    with pytest.raises(RuntimeError, match="function demo-test-owned-by-other"):
+        assert_tunnel.assert_proof_lambda_namespace_empty(sdk=session, app="demo", env="test")
+
+    session.clients["lambda"].pages["list_functions"] = [{"Functions": []}]
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {"logGroups": [{"logGroupName": "/aws/lambda/demo-test-orphan"}]}
+    ]
+    with pytest.raises(RuntimeError, match="/aws/lambda/demo-test-orphan"):
+        assert_tunnel.assert_proof_lambda_namespace_empty(sdk=session, app="demo", env="test")
+
+
+def test_proof_function_names_are_validated_from_deployment_outputs():
+    assert assert_tunnel.validate_proof_lambda_function_names(
+        app="demo",
+        env="test",
+        function_names=("demo-test-api", "demo-test-disabled", "demo-test-plain"),
+    ) == ("demo-test-api", "demo-test-disabled", "demo-test-plain")
+    with pytest.raises(ValueError, match="owned by the proof app"):
+        assert_tunnel.validate_proof_lambda_function_names(
+            app="demo", env="test", function_names=("other-test-api",)
+        )
+
+
+def test_proof_log_group_capture_matches_only_deployed_function_names():
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-function"}]}
+    ]
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {
+            "logGroups": [
+                {"logGroupName": "/aws/lambda/demo-test-function"},
+                {"logGroupName": "/aws/lambda/demo-test-extra"},
+                {"logGroupName": "/aws/lambda/demo-prod-function"},
+            ]
+        }
+    ]
+
+    assert assert_tunnel.capture_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=("demo-test-function",),
+    ) == ("/aws/lambda/demo-test-function",)
+    assert session.clients["logs"].calls == [
+        ("describe_log_groups", {"logGroupNamePrefix": "/aws/lambda/demo-test-"})
+    ]
+
+
+def test_proof_log_group_capture_rejects_an_untracked_function_name():
+    session = _empty_session()
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {"logGroups": [{"logGroupName": "/aws/lambda/demo-test-other"}]}
+    ]
+
+    assert (
+        assert_tunnel.capture_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=("demo-test-function",),
+        )
+        == ()
+    )
+
+
+def test_same_prefix_function_created_after_preflight_is_never_deleted():
+    session = _empty_session()
+    proof_names = ("demo-test-function",)
+    session.clients["logs"].pages["describe_log_groups"] = [
+        {
+            "logGroups": [
+                {"logGroupName": "/aws/lambda/demo-test-function"},
+                {"logGroupName": "/aws/lambda/demo-test-concurrent"},
+            ]
+        }
+    ]
+    captured = assert_tunnel.capture_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=proof_names,
+    )
+    assert captured == ("/aws/lambda/demo-test-function",)
+
+    # This function appeared after preflight and is absent from the names in
+    # this deployment's outputs. Its similarly prefixed group must stay intact.
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-concurrent"}]}
+    ]
+    session.clients["logs"].direct["delete_log_group"] = {}
+    assert_tunnel.delete_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=proof_names,
+        log_group_names=captured,
+    )
+    assert session.clients["logs"].calls[-1] == (
+        "delete_log_group",
+        {"logGroupName": "/aws/lambda/demo-test-function"},
+    )
+    assert all(
+        kwargs["logGroupName"] != "/aws/lambda/demo-test-concurrent"
+        for operation, kwargs in session.clients["logs"].calls
+        if operation == "delete_log_group"
+    )
+
+
+def test_proof_log_group_cleanup_waits_for_function_absence_and_deletes_only_owned_names(
+    monkeypatch,
+):
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-function"}]}
+    ]
+
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_TIMEOUT", 0)
+    with pytest.raises(RuntimeError, match="while Functions remain"):
+        assert_tunnel.delete_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=("demo-test-function",),
+            log_group_names=("/aws/lambda/demo-test-function",),
+        )
+
+    assert session.clients["logs"].calls == []
+
+    session.clients["lambda"].pages["list_functions"] = [{"Functions": []}]
+    session.clients["logs"].direct["delete_log_group"] = {}
+    assert_tunnel.delete_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=("demo-test-function", "demo-test-plain"),
+        log_group_names=(
+            "/aws/lambda/demo-test-function",
+            "/aws/lambda/demo-test-plain",
+        ),
+    )
+    assert session.clients["logs"].calls == [
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-function"}),
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-plain"}),
+    ]
+
+
+def test_proof_log_group_cleanup_waits_until_functions_disappear(monkeypatch):
+    session = _empty_session()
+    clock = _Clock()
+    monkeypatch.setattr(assert_tunnel, "monotonic", clock.monotonic)
+    monkeypatch.setattr(assert_tunnel, "sleep", clock.sleep)
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_TIMEOUT", 5)
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_POLL_INTERVAL", 2)
+    function_states = iter([["demo-test-function"], []])
+    monkeypatch.setattr(
+        assert_tunnel,
+        "_lambda_function_names",
+        lambda *_args, **_kwargs: next(function_states),
+    )
+    session.clients["logs"].direct["delete_log_group"] = {}
+
+    assert_tunnel.delete_proof_lambda_log_groups(
+        sdk=session,
+        app="demo",
+        env="test",
+        function_names=("demo-test-function",),
+        log_group_names=("/aws/lambda/demo-test-function",),
+    )
+
+    assert clock.now == 2
+    assert clock.sleeps == [2]
+    assert session.clients["logs"].calls == [
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-function"})
+    ]
+
+
+@pytest.mark.parametrize(
+    ("function_names", "log_group_names"),
+    [
+        (("demo-test-function",), ("/aws/lambda/demo-production-function",)),
+        (("demo-test-function",), ("/aws/lambda/demo-test-other",)),
+    ],
+)
+def test_proof_log_group_cleanup_rejects_names_outside_the_deployed_function_set(
+    function_names, log_group_names
+):
+    session = _empty_session()
+    with pytest.raises(ValueError, match="match unique Functions"):
+        assert_tunnel.delete_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=function_names,
+            log_group_names=log_group_names,
+        )
+    assert session.clients["logs"].calls == []
+
+
+def test_dev_destroy_captures_then_removes_log_groups_before_absence_audit(monkeypatch):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._deployed = True
+    session.no_vpc = True
+    session._mode = "dev"
+    session.process = None
+    session._outputs = {}
+    session.app = "demo"
+    session.environment_name = "test"
+    session._proof_lambda_function_names = ("demo-test-plain",)
+    session.aws = object()
+    operations = []
+    session.command = lambda *args, **kwargs: operations.append("destroy")
+    session._assert_aws_resources_absent = lambda: operations.append("audit")
+    session._clear_proof_host_trust = lambda: operations.append("clear-trust")
+
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", SimpleNamespace(exists=lambda: False))
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", lambda **_kwargs: ())
+    monkeypatch.setattr(
+        cli_session,
+        "capture_proof_lambda_log_groups",
+        lambda **_kwargs: operations.append("capture") or ("/aws/lambda/demo-test-plain",),
+    )
+    monkeypatch.setattr(
+        cli_session,
+        "delete_proof_lambda_log_groups",
+        lambda **_kwargs: operations.append("delete"),
+    )
+
+    session.destroy()
+
+    assert operations == ["capture", "destroy", "delete", "audit", "clear-trust"]
+
+
+def test_dev_cleanup_passes_captured_evidence_to_owned_group_cleanup(monkeypatch):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._mode = "dev"
+    session.aws = object()
+    session.app = "demo"
+    session.environment_name = "test"
+    deleted = []
+    monkeypatch.setattr(
+        cli_session,
+        "capture_proof_lambda_log_groups",
+        lambda **_kwargs: pytest.fail("The owned-group cleanup handles deletion after destroy"),
+    )
+    monkeypatch.setattr(
+        cli_session,
+        "delete_proof_lambda_log_groups",
+        lambda **kwargs: deleted.extend(kwargs["log_group_names"]),
+    )
+
+    errors = session._remove_dev_lambda_log_groups(("/aws/lambda/demo-test-before-destroy",))
+
+    assert errors == []
+    assert deleted == ["/aws/lambda/demo-test-before-destroy"]
+
+
+@pytest.mark.parametrize("captured", [(), ("/aws/lambda/demo-test-first",)])
+def test_dev_destroy_removes_late_log_groups_for_verified_functions(monkeypatch, captured):
+    session = object.__new__(cli_session.StandaloneCliSession)
+    session._deployed = True
+    session.no_vpc = True
+    session._mode = "dev"
+    session.process = None
+    session._outputs = {}
+    session.app = "demo"
+    session.environment_name = "test"
+    session._proof_lambda_function_names = ("demo-test-first", "demo-test-late")
+    session.aws = _empty_session()
+    logs = session.aws.clients["logs"]
+    groups = set(captured)
+    foreign = "/aws/lambda/demo-test-untracked"
+
+    def destroy(*_args, **_kwargs):
+        # Lambda creates logs asynchronously, after the pre-destroy capture.
+        groups.update({"/aws/lambda/demo-test-late", foreign})
+        logs.pages["describe_log_groups"] = [
+            {"logGroups": [{"logGroupName": name} for name in groups]}
+        ]
+
+    def delete(**kwargs):
+        name = kwargs["logGroupName"]
+        if name not in groups:
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException"}}, "DeleteLogGroup")
+        groups.remove(name)
+
+    session.command = destroy
+    logs.direct["delete_log_group"] = delete
+
+    def assert_owned_groups_absent():
+        assert groups == {foreign}, "Late proof log group remains after destroy"
+
+    session._assert_aws_resources_absent = assert_owned_groups_absent
+    session._clear_proof_host_trust = lambda: None
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", SimpleNamespace(exists=lambda: False))
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", lambda **_kwargs: ())
+    monkeypatch.setattr(cli_session, "capture_proof_lambda_log_groups", lambda **_kwargs: captured)
+
+    session.destroy()
+    assert groups == {foreign}
+
+
+def test_empty_capture_does_not_allow_cleanup_while_function_is_live(monkeypatch):
+    session = _empty_session()
+    session.clients["lambda"].pages["list_functions"] = [
+        {"Functions": [{"FunctionName": "demo-test-function"}]}
+    ]
+    monkeypatch.setattr(assert_tunnel, "ABSENCE_TIMEOUT", 0)
+    with pytest.raises(RuntimeError, match="while Functions remain"):
+        assert_tunnel.delete_proof_lambda_log_groups(
+            sdk=session,
+            app="demo",
+            env="test",
+            function_names=("demo-test-function",),
+            log_group_names=(),
+        )
+    assert session.clients["logs"].calls == []
+
+
+@pytest.mark.parametrize("code", ["ResourceNotFoundException", "AccessDeniedException"])
+def test_proof_log_cleanup_ignores_only_missing_groups(code):
+    session = _empty_session()
+
+    def delete(**_kwargs):
+        raise ClientError({"Error": {"Code": code}}, "DeleteLogGroup")
+
+    session.clients["logs"].direct["delete_log_group"] = delete
+    kwargs = {
+        "sdk": session,
+        "app": "demo",
+        "env": "test",
+        "function_names": ("demo-test-function",),
+        "log_group_names": (),
+    }
+    if code == "ResourceNotFoundException":
+        assert_tunnel.delete_proof_lambda_log_groups(**kwargs)
+    else:
+        with pytest.raises(ClientError, match=code):
+            assert_tunnel.delete_proof_lambda_log_groups(**kwargs)
+    assert session.clients["logs"].calls == [
+        ("delete_log_group", {"logGroupName": "/aws/lambda/demo-test-function"})
+    ]
 
 
 def test_captures_exact_bastion_volume_ids_before_destroy():
@@ -353,15 +768,26 @@ def test_bastion_capture_uses_single_attempt_io_timeouts_and_deadline_hook():
     assert client.meta.events.registered[0][0] == "before-call.ec2.*"
 
 
-def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypatch):
+def test_destroy_still_runs_when_bastion_volume_capture_cannot_complete(monkeypatch, tmp_path):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
-    session.environment_name = "test"
+    session.no_vpc = False
     session.process = None
-    session._outputs = {}
+    session._outputs = {
+        "bastion1_id": "i-bastion-1",
+        "bastion2_id": "i-bastion-2",
+    }
     session.app = "demo"
     session.environment_name = "test"
     session.aws = object()
+    helper_path = tmp_path / "stelvio-traforo"
+    helper_path.touch()
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", helper_path)
+
+    def fail_volume_capture(**_kwargs):
+        raise RuntimeError("volume inventory unavailable")
+
+    monkeypatch.setattr(cli_session, "capture_proof_volume_ids", fail_volume_capture)
     operations = []
     monkeypatch.setattr(
         cli_session,
@@ -545,10 +971,14 @@ def test_host_key_fault_restores_on_body_failure_but_not_uncertain_setup():
 
 
 @pytest.mark.parametrize("audit_fails", [False, True])
-def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch, audit_fails):
+@pytest.mark.parametrize("helper_present", [False, True])
+def test_destroy_resets_proof_pins_only_after_certified_aws_absence(
+    monkeypatch, audit_fails, helper_present
+):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
     session.app = "demo"
+    session.no_vpc = False
     session.environment_name = "test"
     session.process = None
     session._outputs = {"bastion1_id": "i-first", "bastion2_id": "i-second"}
@@ -565,13 +995,20 @@ def test_destroy_resets_proof_pins_only_after_certified_aws_absence(monkeypatch,
     session._assert_aws_resources_absent = audit
     monkeypatch.setattr(cli_session, "capture_proof_volume_ids", lambda **kwargs: ())
     monkeypatch.setattr(
+        cli_session, "INSTALLED_HELPER", SimpleNamespace(exists=lambda: helper_present)
+    )
+    monkeypatch.setattr(
         cli_session,
         "NativeHelper",
         lambda: SimpleNamespace(
             status=lambda: SimpleNamespace(owned=False, uncertain=False, mutating=False, units=[])
         ),
     )
-    if audit_fails:
+    if not helper_present:
+        with pytest.raises(RuntimeError, match="helper is unavailable"):
+            session.destroy()
+        assert operations == []
+    elif audit_fails:
         with pytest.raises(AssertionError, match="uncertain"):
             session.destroy()
         assert operations == ["destroy", "audit"]
@@ -771,6 +1208,7 @@ def test_partial_destroy_audits_after_command_failure_and_retains_all_errors(
 ):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
+    session.no_vpc = False
     session.process = None
     session._outputs = {}
     session.app = "demo"
@@ -822,12 +1260,16 @@ def test_partial_destroy_audits_after_command_failure_and_retains_all_errors(
 def test_destroy_before_infrastructure_creation_needs_no_volume_capture(monkeypatch, tmp_path):
     session = object.__new__(cli_session.StandaloneCliSession)
     session._deployed = True
+    session.no_vpc = False
     session.process = None
     session._outputs = {}
     session.app = "demo"
     session.environment_name = "test"
     session.aws = _empty_session()
     session.aws.clients["ec2"].pages["describe_instances"] = [{"Reservations": []}]
+    helper = tmp_path / "helper"
+    helper.touch()
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", helper)
     operations = []
     monkeypatch.setattr(
         cli_session,
@@ -911,7 +1353,7 @@ def test_database_audit_refuses_unverified_ownership(missing_arn):
 
 
 @pytest.fixture
-def command_session(tmp_path):
+def command_session(tmp_path, monkeypatch):
     session = cli_session.StandaloneCliSession.__new__(cli_session.StandaloneCliSession)
     session.project = tmp_path
     session.app = "proof-app"
@@ -919,7 +1361,155 @@ def command_session(tmp_path):
     session.cli = tmp_path / "stlv"
     session.environment = {}
     session.aws = object()
+    session.no_vpc = False
+    session._deployed = True
+    session.process = None
+    session._outputs = {}
+    monkeypatch.setattr(cli_session, "INSTALLED_HELPER", tmp_path / "helper")
     return session
+
+
+@pytest.fixture
+def baseline_session(command_session, monkeypatch):
+    import hashlib
+
+    session = command_session
+    session.log_path = session.project / "tunnel-start.log"
+    session._log_file = None
+    session._state_hash = hashlib.sha256(b"deployed checkpoint").hexdigest()
+    current = SimpleNamespace(
+        state=b"deployed checkpoint",
+        output="Network READY\nStelvio local dev server connected to AppSync.",
+    )
+    session.state = Mock(side_effect=lambda: current.state)
+    session.log = lambda: current.output
+
+    def start_process(*args, **kwargs):
+        process = Mock()
+        process.poll.return_value = None
+
+        def wait(**kwargs):
+            if process.poll.return_value is None:
+                process.poll.return_value = 0
+            return process.poll.return_value
+
+        process.wait.side_effect = wait
+        return process
+
+    monkeypatch.setattr(cli_session.subprocess, "Popen", start_process)
+    try:
+        yield session, current
+    finally:
+        if session._log_file is not None:
+            session._log_file.close()
+
+
+@pytest.mark.parametrize(
+    "ready_commands", [(True, True, True), (True, False, True)], ids=["reconnect", "host-key"]
+)
+def test_dev_restarts_capture_each_ready_deployment(baseline_session, ready_commands):
+    session, current = baseline_session
+    for index, ready in enumerate(ready_commands):
+        current.state = f"dev deployment {index}".encode()
+        session.state.reset_mock()
+        session.start_dev()
+        assert session._state_hash is None
+        session.state.assert_not_called()
+        if ready:
+            session.wait_ready()
+            session.state.assert_called_once_with()
+            session.assert_state_unchanged()
+        else:
+            current.output = "Network DEGRADED: ssh-host-key"
+            session.process.poll.return_value = 1
+            with pytest.raises(RuntimeError, match="exited before readiness"):
+                session.wait_ready()
+            with pytest.raises(AssertionError, match="No valid checkpoint baseline"):
+                session.assert_state_unchanged()
+            session.state.assert_not_called()
+            current.output = "Network READY\nStelvio local dev server connected to AppSync."
+        session.terminate()
+
+
+@pytest.mark.parametrize(
+    "output", ["Network READY", "Network DEGRADED\nlocal dev server connected to AppSync"]
+)
+def test_dev_baseline_waits_for_network_and_bridge(baseline_session, monkeypatch, output):
+    session, current = baseline_session
+    session.start_dev()
+    current.output = output
+
+    def become_ready(_delay):
+        assert session._state_hash is None
+        session.state.assert_not_called()
+        current.output = "Network READY\nlocal dev server connected to AppSync"
+
+    monkeypatch.setattr(
+        cli_session,
+        "time",
+        SimpleNamespace(monotonic=cli_session.time.monotonic, sleep=become_ready),
+    )
+    session.wait_ready()
+    session.state.assert_called_once_with()
+    session.assert_state_unchanged()
+
+
+def test_repeated_dev_readiness_does_not_hide_state_changes(baseline_session):
+    session, current = baseline_session
+    session.start_dev()
+    session.wait_ready()
+    session.wait_ready()
+    session.state.assert_called_once_with()
+    baseline = session._state_hash
+    current.state = b"unexpected write after readiness"
+    with pytest.raises(AssertionError):
+        session.assert_state_unchanged()
+    session.wait_ready()
+    assert session._state_hash == baseline
+    with pytest.raises(AssertionError):
+        session.assert_state_unchanged()
+
+
+@pytest.mark.parametrize("failure", ["launch", "exit", "timeout", "state-read"])
+def test_failed_dev_startup_cannot_reuse_baseline(baseline_session, monkeypatch, failure):
+    session, current = baseline_session
+    if failure == "launch":
+        monkeypatch.setattr(cli_session.subprocess, "Popen", Mock(side_effect=OSError("launch")))
+        with pytest.raises(OSError, match="launch"):
+            session.start_dev()
+    else:
+        session.start_dev()
+        if failure == "exit":
+            session.process.poll.return_value = 1
+            expected = RuntimeError
+        elif failure == "timeout":
+            current.output = "Network STARTING"
+            monkeypatch.setattr(
+                cli_session,
+                "time",
+                SimpleNamespace(monotonic=Mock(side_effect=[0, 0, 2]), sleep=lambda _: None),
+            )
+            expected = TimeoutError
+        else:
+            session.state.side_effect = RuntimeError("state read failed")
+            expected = RuntimeError
+        with pytest.raises(expected):
+            session.wait_ready(timeout=1)
+    assert session._state_hash is None
+    with pytest.raises(AssertionError, match="No valid checkpoint baseline"):
+        session.assert_state_unchanged()
+
+
+def test_standalone_readiness_preserves_deployment_baseline(baseline_session):
+    session, current = baseline_session
+    baseline = session._state_hash
+    session.start()
+    current.state = b"unexpected write during tunnel startup"
+    session.wait_ready()
+    session.state.assert_not_called()
+    assert session._state_hash == baseline
+    with pytest.raises(AssertionError):
+        session.assert_state_unchanged()
 
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "timeout"])
@@ -985,9 +1575,7 @@ def test_deploy_keeps_startup_deadline(monkeypatch, command_session):
 def test_destroy_uses_separate_budget_and_audits_failures(monkeypatch, command_session, timeout):
     import subprocess
 
-    command_session._deployed = True
-    command_session.process = None
-    command_session._outputs = {}
+    cli_session.INSTALLED_HELPER.touch()
     calls = []
     monkeypatch.setattr(
         cli_session,
@@ -1014,3 +1602,139 @@ def test_destroy_uses_separate_budget_and_audits_failures(monkeypatch, command_s
     assert calls[:2] == [(("destroy", "test", "--yes"), {"timeout": 3600}), "audit"]
     assert ("trust-clear" in calls) is not timeout
     assert all(entry[0][0] == "destroy" for entry in calls if isinstance(entry, tuple))
+
+
+@pytest.mark.parametrize("no_vpc", [False, True])
+@pytest.mark.parametrize(
+    "helper_state", ["absent", "idle", "owned", "uncertain", "mutating", "units"]
+)
+def test_destroy_requires_certified_host_state(monkeypatch, command_session, no_vpc, helper_state):
+    command_session.no_vpc = no_vpc
+    if helper_state != "absent":
+        cli_session.INSTALLED_HELPER.touch()
+    state = {"owned": False, "uncertain": False, "mutating": False, "units": []}
+    if helper_state in {"owned", "uncertain", "mutating"}:
+        state[helper_state] = True
+    elif helper_state == "units":
+        state["units"] = ["proof-unit"]
+    helper = Mock(return_value=SimpleNamespace(status=lambda: SimpleNamespace(**state)))
+    monkeypatch.setattr(cli_session, "NativeHelper", helper)
+    operations = []
+    monkeypatch.setattr(
+        cli_session,
+        "capture_proof_volume_ids",
+        lambda **kwargs: operations.append("capture") or (),
+    )
+    command_session.command = lambda *args, **kwargs: operations.append("destroy")
+    command_session._assert_aws_resources_absent = lambda: operations.append("audit")
+    command_session._clear_proof_host_trust = lambda: operations.append("trust-clear")
+
+    allowed = helper_state == "idle" or (helper_state == "absent" and no_vpc)
+    if allowed:
+        command_session.destroy()
+        assert operations == ["capture", "destroy", "audit", "trust-clear"]
+    else:
+        reason = (
+            "helper is unavailable" if helper_state == "absent" else "cleanup is not certified"
+        )
+        with pytest.raises(RuntimeError, match=reason):
+            command_session.destroy()
+        assert operations == []
+    if helper_state == "absent":
+        helper.assert_not_called()
+    else:
+        helper.assert_called_once_with()
+
+
+@pytest.fixture
+def worker_status_session(command_session, monkeypatch):
+    session = command_session
+    session.process = Mock()
+    session.process.poll.return_value = None
+    session.log = Mock(return_value="")
+    clock = SimpleNamespace(now=0)
+
+    def sleep(delay):
+        clock.now += delay
+
+    monkeypatch.setattr(
+        cli_session, "time", SimpleNamespace(monotonic=lambda: clock.now, sleep=sleep)
+    )
+    return session
+
+
+_WORKER_ID = "urn:pulumi:proof::stlv-t-04a1caa5::stelvio:aws:Vpc::net1"
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "{identity}: failed attempt=2 cause=ssh-host-key retained_dns=True",
+        "  {identity}: failed \nattempt=2 cause=ssh-host-key retained_dns=True",
+        "  {identity}: failed\n  attempt=2\n  cause=ssh-host-key\n  retained_dns=True",
+        "  {identity}: failed attempt=2\n cause=ssh-host-key retained_dns=False\n",
+    ],
+    ids=["unwrapped", "captured-rich-wrap", "four-lines", "cause-wrap"],
+)
+def test_worker_cause_accepts_complete_wrapped_record(worker_status_session, record):
+    session = worker_status_session
+    session.log.return_value = record.format(identity=_WORKER_ID)
+    session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "{identity}-other: failed attempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: ready attempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed attempt=2 cause=ssh-host-key-other retained_dns=True",
+        "{identity}: failed attempt=2 cause=ssh-host-key",
+        "{identity}: failed attempt=2 cause=ssh-host-key retained_dns=Maybe",
+        "{identity}: failed attempt=bad cause=ssh-host-key retained_dns=True",
+        "{identity}: failed\nNetwork DEGRADED\nattempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed attempt=2\n"
+        "{identity}-other: failed attempt=3 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed attempt=2 cause=transport retained_dns=True\n"
+        "{identity}-other: failed attempt=3 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed\n\n\n\nattempt=2 cause=ssh-host-key retained_dns=True",
+        "{identity}: failed " + " " * 4096 + "attempt=2 cause=ssh-host-key retained_dns=True",
+    ],
+    ids=[
+        "wrong-vpc",
+        "wrong-state",
+        "wrong-cause",
+        "incomplete",
+        "invalid-dns",
+        "invalid-attempt",
+        "unrelated-message",
+        "neighbor-continuation",
+        "neighbor-cause",
+        "too-many-lines",
+        "oversized",
+    ],
+)
+def test_worker_cause_rejects_unmatched_records(worker_status_session, record):
+    session = worker_status_session
+    session.log.return_value = record.format(identity=_WORKER_ID)
+    with pytest.raises(TimeoutError, match="did not report failed cause=ssh-host-key"):
+        session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
+
+
+def test_worker_cause_waits_for_complete_output(worker_status_session):
+    session = worker_status_session
+    session.log.side_effect = [
+        f"{_WORKER_ID}: failed\nattempt=2 cause=ssh-host-key",
+        f"{_WORKER_ID}: failed\nattempt=2 cause=ssh-host-key retained_dns=True",
+    ]
+    session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
+    assert session.log.call_count == 2
+
+
+def test_worker_cause_rejects_exited_process(worker_status_session):
+    session = worker_status_session
+    session.process.poll.return_value = 1
+    session.log.return_value = (
+        f"{_WORKER_ID}: failed attempt=2 cause=ssh-host-key retained_dns=True"
+    )
+    with pytest.raises(RuntimeError, match="exited before"):
+        session.wait_worker_cause(_WORKER_ID, "ssh-host-key", timeout=2)
