@@ -1,0 +1,450 @@
+//go:build darwin
+
+package helper
+
+import (
+	"bytes"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/stelviodev/traforo/internal/darwin"
+	"github.com/stelviodev/traforo/internal/protocol"
+	"golang.org/x/sys/unix"
+)
+
+const resolverDirectory = "/etc/resolver"
+
+func checkedResolverEntries(names []string, err error) ([]string, error) {
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if len(names) > 4096 {
+		return nil, errUncertain
+	}
+	return names, nil
+}
+
+type resolverSpec struct {
+	private, public string
+	contents        []byte
+}
+
+func spec(s Snapshot, unit, domain int) resolverSpec {
+	return specFor(s, s.Units[unit].Request, domain)
+}
+
+func specFor(s Snapshot, r protocol.Request, domain int) resolverSpec {
+	session := hex.EncodeToString(s.Session[:])
+	capability := hex.EncodeToString(s.Capability[:])
+	endpoint := r.Resolvers[domain]
+	return resolverSpec{
+		fmt.Sprintf("pending.%s.%s.%08x.%016x.%02x", capability, session, r.Unit, r.Generation, domain),
+		fmt.Sprintf("stelvio.%s.%08x.%016x.%02x", session, r.Unit, r.Generation, domain),
+		[]byte(fmt.Sprintf("# Stelvio tunnel/1 session=%s unit=%08x generation=%d\ndomain %s\nnameserver 127.0.0.1\nport %d\nsearch_order 0\n", session, r.Unit, r.Generation, endpoint.Domain, endpoint.Port)),
+	}
+}
+func owned(parent int, name string, receipt Receipt, expected []byte, prefix bool) (bool, error) {
+	data, st, e := readAt(parent, name, len(expected))
+	if e == unix.ENOENT {
+		return false, nil
+	}
+	if e != nil {
+		return false, e
+	}
+	if !receiptMatches(data, st, receipt, expected, prefix) {
+		return false, errUncertain
+	}
+	return true, nil
+}
+
+func receiptMatches(data []byte, st unix.Stat_t, receipt Receipt, expected []byte, prefix bool) bool {
+	if len(data) > len(expected) || st.Mode&0777 != 0644 || (st.Nlink != 1 && st.Nlink != 2) || uint64(st.Dev) != receipt.Device || st.Ino != receipt.Inode {
+		return false
+	}
+	if !prefix && len(data) != len(expected) {
+		return false
+	}
+	return bytes.Equal(data, expected[:len(data)])
+}
+func saveReceipt(store Store, state *Snapshot, i, j int, r Receipt) error {
+	next := state.Clone()
+	next.Revision++
+	next.Units[i].Files[j] = r
+	if e := store.Save(next); e != nil {
+		return e
+	}
+	*state = next
+	return nil
+}
+func stageResolver(store Store, state *Snapshot, i, j int) (returnErr error) {
+	if !store.Current(*state) || state.Units[i].Phase != Preparing || state.Units[i].Files[j].Phase != 0 {
+		return errUncertain
+	}
+	p, e := safeDirectory(darwin.State)
+	if e != nil {
+		return e
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
+	s := spec(*state, i, j)
+	fd, st, e := prefixAt(p, s.private, s.contents, 0644)
+	if e != nil {
+		return e
+	}
+	e = writeAll(fd, s.contents[int(st.Size):])
+	if e == nil {
+		e = unix.Fsync(fd)
+	}
+	if e == nil {
+		e = unix.Fsync(p)
+	}
+	if e == nil && !namedCurrent(p, s.private, st) {
+		e = errUncertain
+	}
+	e = errors.Join(e, unix.Close(fd))
+	if e != nil {
+		return e
+	}
+	return saveReceipt(store, state, i, j, Receipt{1, uint64(st.Dev), st.Ino})
+}
+func publishResolver(store Store, state *Snapshot, i, j int) (returnErr error) {
+	if !store.Current(*state) || state.Units[i].Phase != Preparing || state.Units[i].Files[j].Phase != 1 {
+		return errUncertain
+	}
+	p, e := safeDirectory(darwin.State)
+	if e != nil {
+		return e
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
+	q, e := safeDirectory(resolverDirectory)
+	if e != nil {
+		return e
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(q)) }()
+	s := spec(*state, i, j)
+	r := state.Units[i].Files[j]
+	staged, e := owned(p, s.private, r, s.contents, false)
+	if e != nil {
+		return e
+	}
+	linked, e := owned(q, s.public, r, s.contents, false)
+	if e != nil || !staged && !linked {
+		return errUncertain
+	}
+	if !linked {
+		if e = unix.Linkat(p, s.private, q, s.public, 0); e != nil {
+			return e
+		}
+	}
+	ok, e := owned(q, s.public, r, s.contents, false)
+	if e != nil || !ok {
+		return errUncertain
+	}
+	if e = unix.Fsync(q); e != nil {
+		return e
+	}
+	if staged {
+		if e = unix.Unlinkat(p, s.private, 0); e != nil {
+			return e
+		}
+	}
+	if e = unix.Fsync(p); e != nil {
+		return e
+	}
+	r.Phase = 2
+	return saveReceipt(store, state, i, j, r)
+}
+func resolverCurrent(store Store, state Snapshot, i, j int) bool {
+	if !store.Current(state) || state.Units[i].Files[j].Phase != 2 {
+		return false
+	}
+	p, e := safeDirectory(resolverDirectory)
+	if e != nil {
+		return false
+	}
+	defer func() { _ = unix.Close(p) }() // The descriptor only supports a read-only ownership check.
+	s := spec(state, i, j)
+	ok, e := owned(p, s.public, state.Units[i].Files[j], s.contents, false)
+	return ok && e == nil
+}
+
+func retirePreviousResolvers(store Store, state *Snapshot, i int) error {
+	if state.Units[i].Previous == nil {
+		return nil
+	}
+	if state.Units[i].Phase != Active && state.Units[i].Phase != Removing {
+		return errUncertain
+	}
+	old, e := protocol.Decode(state.Units[i].Previous.Packet)
+	if e != nil {
+		return errUncertain
+	}
+	p, e := safeDirectory(darwin.State)
+	if e != nil {
+		return e
+	}
+	defer func() { _ = unix.Close(p) }()
+	q, e := safeDirectory(resolverDirectory)
+	if e != nil {
+		return e
+	}
+	defer func() { _ = unix.Close(q) }()
+	for j := range state.Units[i].Previous.Files {
+		r := state.Units[i].Previous.Files[j]
+		s := specFor(*state, old, j)
+		// A zero receipt records that the journaled unlink completed. Verify
+		// both names are still absent before dropping the previous-generation
+		// ownership evidence; a recreated path must keep the unit uncertain.
+		if e = unpublish(p, q, s, r); e != nil {
+			return e
+		}
+		if r == (Receipt{}) {
+			continue
+		}
+		if e = unix.Fsync(q); e != nil {
+			return e
+		}
+		if e = unix.Fsync(p); e != nil {
+			return e
+		}
+		next := state.Clone()
+		next.Revision++
+		next.Units[i].Previous.Files[j] = Receipt{}
+		if e = store.Save(next); e != nil {
+			return e
+		}
+		*state = next
+	}
+	if state.Units[i].Previous != nil {
+		for _, file := range state.Units[i].Previous.Files {
+			if file != (Receipt{}) {
+				return errUncertain
+			}
+		}
+		next := state.Clone()
+		next.Revision++
+		next.Units[i].Previous = nil
+		if e = store.Save(next); e != nil {
+			return e
+		}
+		*state = next
+	}
+	return nil
+}
+func unpublish(p, q int, s resolverSpec, r Receipt) error {
+	retired := s.private + ".retired"
+	if r.Phase == 0 {
+		var st unix.Stat_t
+		if unix.Fstatat(p, retired, &st, unix.AT_SYMLINK_NOFOLLOW) != unix.ENOENT {
+			return errUncertain
+		}
+		found, e := owned(q, s.public, r, s.contents, false)
+		if e != nil || found {
+			return errUncertain
+		}
+		return nil
+	}
+	moved, e := owned(p, retired, r, s.contents, false)
+	if e != nil {
+		rollbackErr := errors.Join(
+			darwin.RenameExclusive(p, retired, q, s.public),
+			unix.Fsync(p),
+			unix.Fsync(q),
+		)
+		return errors.Join(errUncertain, rollbackErr)
+	}
+	if !moved {
+		linked, e := owned(q, s.public, r, s.contents, false)
+		if e != nil {
+			return e
+		}
+		if !linked {
+			return nil
+		}
+		if e = darwin.RenameExclusive(q, s.public, p, retired); e != nil {
+			return e
+		}
+		moved, e = owned(p, retired, r, s.contents, false)
+		if e != nil || !moved {
+			rollbackErr := errors.Join(
+				darwin.RenameExclusive(p, retired, q, s.public),
+				unix.Fsync(q),
+				unix.Fsync(p),
+			)
+			return errors.Join(errUncertain, rollbackErr)
+		}
+	}
+	if e = unix.Fsync(q); e != nil {
+		return e
+	}
+	if e = unix.Fsync(p); e != nil {
+		return e
+	}
+	if e = unix.Unlinkat(p, retired, 0); e != nil {
+		return e
+	}
+	if e = unix.Fsync(p); e != nil {
+		return e
+	}
+	found, e := owned(q, s.public, r, s.contents, false)
+	if e != nil || found {
+		return errUncertain
+	}
+	return nil
+}
+func removeResolver(store Store, state *Snapshot, i, j int) (returnErr error) {
+	if !store.Current(*state) || state.Units[i].Phase != Removing {
+		return errUncertain
+	}
+	p, e := safeDirectory(darwin.State)
+	if e != nil {
+		return e
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(p)) }()
+	q, e := safeDirectory(resolverDirectory)
+	if e != nil {
+		return e
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(q)) }()
+	s := spec(*state, i, j)
+	r := state.Units[i].Files[j]
+	staged, e := owned(p, s.private, r, s.contents, true)
+	if e != nil || r.Phase == 0 && staged {
+		return errUncertain
+	}
+	if e = unpublish(p, q, s, r); e != nil {
+		return e
+	}
+	if e = unix.Fsync(q); e != nil {
+		return e
+	}
+	if staged {
+		if e = unix.Unlinkat(p, s.private, 0); e != nil {
+			return e
+		}
+	}
+	if e = unix.Fsync(p); e != nil {
+		return e
+	}
+	if r.Phase != 0 {
+		return saveReceipt(store, state, i, j, Receipt{})
+	}
+	return nil
+}
+func resolverDomain(name string, data []byte) (string, error) {
+	if len(data) > 8192 || bytes.IndexByte(data, 0) >= 0 {
+		return "", errUncertain
+	}
+	domain := ""
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(strings.SplitN(line, "#", 2)[0])
+		if len(fields) > 0 && fields[0] == "domain" {
+			if found || len(fields) != 2 {
+				return "", errUncertain
+			}
+			found = true
+			var e error
+			domain, e = protocol.Domain(fields[1])
+			if e != nil {
+				return "", e
+			}
+		}
+	}
+	if !found {
+		return protocol.Domain(name)
+	}
+	return domain, nil
+}
+func resolverConflict(store Store, state Snapshot, r protocol.Request) (returnErr error) {
+	if !store.Current(state) {
+		return errUncertain
+	}
+	domains, e := darwin.DNSDomains()
+	if e != nil {
+		return e
+	}
+	overlap := func(value string) error {
+		domain, e := protocol.Domain(value)
+		if e != nil {
+			return e
+		}
+		for _, endpoint := range r.Resolvers {
+			if protocol.DNSOverlap(domain, endpoint.Domain) {
+				return errUncertain
+			}
+		}
+		return nil
+	}
+	for _, d := range domains {
+		if e = overlap(d); e != nil {
+			return e
+		}
+	}
+	p, e := safeDirectory(resolverDirectory)
+	if e != nil {
+		return e
+	}
+	file := os.NewFile(uintptr(p), resolverDirectory)
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			returnErr = errors.Join(returnErr, closeErr)
+		}
+	}()
+	names, e := file.Readdirnames(4097)
+	names, e = checkedResolverEntries(names, e)
+	if e != nil {
+		return e
+	}
+	for _, name := range names {
+		ours := false
+		for i, u := range state.Units {
+			for j := range u.Files {
+				s := spec(state, i, j)
+				if s.public != name {
+					continue
+				}
+				ok, e := owned(p, name, u.Files[j], s.contents, false)
+				if e != nil || !ok || u.Files[j].Phase == 0 {
+					return errUncertain
+				}
+				ours = true
+			}
+			if u.Previous != nil {
+				previous, e := protocol.Decode(u.Previous.Packet)
+				if e != nil {
+					return errUncertain
+				}
+				for j, receipt := range u.Previous.Files {
+					old := specFor(state, previous, j)
+					if old.public != name {
+						continue
+					}
+					ok, e := owned(p, name, receipt, old.contents, false)
+					if e != nil || !ok || receipt == (Receipt{}) {
+						return errUncertain
+					}
+					ours = true
+				}
+			}
+		}
+		if ours {
+			continue
+		}
+		data, _, e := readAt(p, name, 8192)
+		if e != nil {
+			return e
+		}
+		d, e := resolverDomain(name, data)
+		if e != nil {
+			return e
+		}
+		if e = overlap(d); e != nil {
+			return e
+		}
+	}
+	return nil
+}

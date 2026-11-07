@@ -1,7 +1,7 @@
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 
-.PHONY: test race vet lint format fuzz
+.PHONY: test race vet lint format fuzz fuzz-snapshot
 
 test:
 	$(GO) test -mod=readonly ./...
@@ -21,3 +21,6 @@ format:
 
 fuzz:
 	$(GO) test -mod=readonly ./internal/protocol -run='^$$' -fuzz='^FuzzRequest$$' -fuzztime=30s -parallel=2
+
+fuzz-snapshot:
+	$(GO) test -mod=readonly ./internal/helper/darwin -run='^$$' -fuzz='^FuzzSnapshot$$' -fuzztime=30s -parallel=2
