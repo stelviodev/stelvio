@@ -73,3 +73,30 @@ ranges and the interface index. Unknown diagnostics must still fail closed.
 Run route and journal regressions through Go, with no service installation or
 host route mutations. Actual routing, process-death cleanup, and foreign-resource
 acceptance remain in the explicitly authorized native integration tier.
+
+## DNS resolver and resource destinations
+
+`dnsrelay.Config.CIDRs` is the selected resource destination set, not the VPC
+ownership boundary. Resource readiness checks every returned A record against
+that set before opening a resource connection. A public subnet, unused VPC
+address, or another VPC is not authorized merely because DNS returns it. The
+resolver address receives no exception as a resource, including on port 53.
+
+The AWS-validated Python session supplies the owning VPC's resolver separately.
+Go requires an RFC1918 IPv4 resolver; this check alone does not establish AWS
+ownership. The upstream inventory layer must establish that ownership before
+configuration. The resolver can lie outside the selected subnets (for example,
+`10.254.0.2` with resources in `10.254.16.0/20`). DNS exchanges always use numeric
+TCP port 53 through that unit's SOCKS proxy, including during probes. They do not
+require a host route to the resolver or authorize routing the whole VPC.
+
+A direct resource probe resolves through SOCKS, then opens the resource TCP
+connection through ordinary host routing. Resolver-only or SOCKS-only success
+cannot establish packet-forwarding readiness. Keep both resource probe modes in
+the session layer. Name ownership, answer/TTL preservation, revision fencing,
+listener retention, and outage rejection are unchanged.
+
+Run `make test`, `make race`, `make lint`, `make vet`, and `make fuzz-dns`.
+The subnet regressions cover an off-route resolver, excluded addresses, mixed A
+answers, both resource probe modes, and twenty- and thirty-two-range views.
+Actual scoped DNS and routed resource acceptance remain in the privileged tier.
