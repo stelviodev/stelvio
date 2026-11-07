@@ -31,11 +31,12 @@ func TestVersionOutput(t *testing.T) {
 	}
 }
 
-func TestOnlyStepFourCommandsAreAccepted(t *testing.T) {
+func TestInvalidCommandShapesShowUsage(t *testing.T) {
 	for _, args := range [][]string{
 		{},
 		{"helper"},
-		{"forwarder", "3"},
+		{"forwarder"},
+		{"forwarder", "3", "extra"},
 		{"tunnel", "start"},
 	} {
 		t.Run(strings.Join(args, "/"), func(t *testing.T) {
@@ -43,10 +44,22 @@ func TestOnlyStepFourCommandsAreAccepted(t *testing.T) {
 			if got := execute(args, &stdout, &stderr); got != 2 {
 				t.Fatalf("exit status = %d, want 2", got)
 			}
-			if !strings.Contains(stderr.String(), "helper serve/install/uninstall") {
-				t.Fatalf("usage does not describe the Step 4 command set: %q", stderr.String())
+			if !strings.Contains(stderr.String(), "helper serve/install/uninstall") || !strings.Contains(stderr.String(), "forwarder <carrier-fd>") {
+				t.Fatalf("usage does not describe the command set: %q", stderr.String())
 			}
 		})
+	}
+}
+
+func TestForwarderCommandDelegatesCarrierDescriptor(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	called := ""
+	status := executeWithForwarder([]string{"forwarder", "8"}, &stdout, &stderr, func(fd string) error {
+		called = fd
+		return nil
+	})
+	if status != 0 || called != "8" || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("status=%d called=%q stdout=%q stderr=%q", status, called, stdout.String(), stderr.String())
 	}
 }
 
