@@ -55,13 +55,12 @@ def test_connect_to_appsync(mock_json_dumps, mock_b64encode, mock_connect):
         subprotocols=["aws-appsync-event-ws", "header-encoded_auth"],
     )
     mock_ws.send.assert_called_once_with('{"type": "connection_init"}')
-    mock_ws.recv.assert_called_once()
     assert result == mock_ws
 
 
 def test_subscribe_to_channel():
     mock_ws = AsyncMock()
-    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success"}')
+    mock_ws.recv = AsyncMock(return_value='{"type":"subscribe_success","id":"request-sub"}')
     channel = "test_channel"
     api_key = "test_key"
 
@@ -76,7 +75,6 @@ def test_subscribe_to_channel():
         "authorization": {"x-api-key": api_key},
     }
     mock_ws.send.assert_called_once_with(json.dumps(expected_message))
-    mock_ws.recv.assert_called_once()
 
 
 @patch("uuid.uuid4", return_value="test-uuid")
@@ -384,7 +382,17 @@ def test_handle_bridge_event_with_empty_event_string():
     assert result is None
 
 
-def test_main_keeps_listening_after_a_message_the_handler_cannot_process(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("error", "expected_log"),
+    [
+        (KeyError("context"), "KeyError: 'context'"),
+        (ConnectionError("handler failed"), "ConnectionError: handler failed"),
+    ],
+    ids=["key_error", "connection_error"],
+)
+def test_main_keeps_listening_after_a_message_the_handler_cannot_process(
+    monkeypatch, capsys, error, expected_log
+):
     """Anyone with the AppSync key can publish on the channel; one bad message must not end
     `stlv dev`."""
 
@@ -403,15 +411,15 @@ def test_main_keeps_listening_after_a_message_the_handler_cannot_process(monkeyp
 
     config = AppSyncResource(api_id="id", http_endpoint="h", realtime_endpoint="r", api_key="k")
     data_message = json.dumps({"type": "data", "event": "{}"})
-    handle = AsyncMock(side_effect=[KeyError("context"), None])
+    handle = AsyncMock(side_effect=[error, None])
+
+    websocket = FakeWs([data_message] * 2)
     monkeypatch.setattr(listener, "discover_or_create_appsync", lambda *_: config)
-    monkeypatch.setattr(
-        listener, "connect_to_appsync", AsyncMock(return_value=FakeWs([data_message] * 2))
-    )
+    monkeypatch.setattr(listener, "connect_to_appsync", AsyncMock(return_value=websocket))
     monkeypatch.setattr(listener, "subscribe_to_channel", AsyncMock())
     monkeypatch.setattr(listener, "_handle_data_message", handle)
 
     _run(listener.main("us-east-1", "default", "app", "dev"))
 
     assert handle.await_count == 2
-    assert "KeyError: 'context'" in capsys.readouterr().out
+    assert expected_log in capsys.readouterr().out

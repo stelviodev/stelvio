@@ -1,9 +1,14 @@
 import asyncio
 import base64
+import contextlib
 import datetime
 import json
+import signal
+import socket
+import threading
 import traceback
 import uuid
+from collections.abc import Iterator
 from dataclasses import asdict
 
 import websockets
@@ -17,6 +22,7 @@ from stelvio.bridge._chunking import (
     is_chunked_message,
     reassemble_chunk,
     split_message,
+    wait_for_appsync_ack,
 )
 from stelvio.bridge.local.dtos import BridgeInvocationResult
 from stelvio.bridge.local.handlers import WebsocketHandlers
@@ -45,13 +51,7 @@ async def connect_to_appsync(config: dict) -> websockets.WebSocketClientProtocol
     # Send connection_init (optional but recommended)
     init_message = {"type": "connection_init"}
     await ws.send(json.dumps(init_message))
-
-    # Wait for connection_ack
-    ack = await asyncio.wait_for(ws.recv(), timeout=10)
-    ack_data = json.loads(ack)
-    if ack_data.get("type") != "connection_ack":
-        raise ConnectionError(f"Expected connection_ack, got: {ack_data.get('type')}")
-
+    await wait_for_appsync_ack(ws, "connection_ack")
     return ws
 
 
@@ -69,10 +69,9 @@ async def subscribe_to_channel(
             }
         )
     )
-    ack = json.loads(await ws.recv())
-    if ack.get("type") == "subscribe_error":
-        errors = ack.get("errors", [])
-        raise ConnectionError(f"AppSync subscribe to {channel!r} failed: {errors}")
+    await wait_for_appsync_ack(
+        ws, "subscribe_success", operation_id="request-sub", channel=channel
+    )
 
 
 async def publish_to_channel(
@@ -223,15 +222,6 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
             case "ka":
                 cleanup_stale_buffers(_request_chunk_buffers)
                 continue
-            # Subscribe success/error
-            case "subscribe_success":
-                continue
-            case "subscribe_error":
-                errors = data.get("errors", [])
-                console.print(
-                    f"[bold red]AppSync subscribe_error:[/bold red] {escape(str(errors))}"
-                )
-                continue
             # Publish success
             case "publish_success":
                 continue
@@ -255,6 +245,44 @@ async def main(region: str, profile: str, app_name: str, env: str) -> None:
                 pass
 
 
+@contextlib.contextmanager
+def _signal_wakeup(loop: asyncio.AbstractEventLoop) -> Iterator[None]:
+    """Wake the selector even when a worker receives the OS signal.
+
+    Python runs signal handlers on the main thread. Without a wakeup fd, that
+    thread can stay asleep in select before our handler can schedule cancellation.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        reader.setblocking(False)
+        writer.setblocking(False)
+
+        def drain() -> None:
+            with contextlib.suppress(BlockingIOError):
+                while reader.recv(4096):
+                    pass
+
+        try:
+            loop.add_reader(reader.fileno(), drain)
+        except NotImplementedError:
+            # ProactorEventLoop manages its own wakeup descriptor.
+            yield
+            return
+        try:
+            previous_fd = signal.set_wakeup_fd(writer.fileno(), warn_on_full_buffer=False)
+            try:
+                yield
+            finally:
+                signal.set_wakeup_fd(previous_fd)
+        finally:
+            loop.remove_reader(reader.fileno())
+
+
 def run_bridge_server(region: str, profile: str, app_name: str, env: str) -> None:
-    """Run the main loop in a blocking manner."""
-    asyncio.run(main(region=region, profile=profile, app_name=app_name, env=env))
+    """Run the bridge without joining its handler pool on interruption."""
+    with asyncio.Runner() as runner, _signal_wakeup(runner.get_loop()):
+        runner.run(main(region=region, profile=profile, app_name=app_name, env=env))

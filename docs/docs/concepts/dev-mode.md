@@ -41,7 +41,7 @@ stlv dev staging    # explicit environment
 
 Now call your API like you normally would (e.g. `https://...execute-api.../v1/`). Every request loads your handler and the files it imports fresh, so an edit shows on the next request. Installed packages stay loaded.
 
-To stop the local server: `Ctrl+C`. 
+To stop the local server: `Ctrl+C`. A handler that is still running stops where it is.
 
 !!! warning
     Stopping the dev server won't change the infrastructure in AWS. In particular, the replacement Lambda function that handles the dev mode ("stub Lambda") will remain deployed.

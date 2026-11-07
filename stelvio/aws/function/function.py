@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cached_property
@@ -79,6 +80,9 @@ if TYPE_CHECKING:
     from stelvio.customize import Customization
 
 logger = logging.getLogger("stelvio.aws.function")
+
+# Runner shuts down its default executor; dev handlers may remain blocked until CLI exit.
+_DEV_HANDLER_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="stelvio-dev-handler")
 
 
 @final
@@ -430,7 +434,7 @@ class Function(
             error = None
             try:
                 success = await asyncio.get_running_loop().run_in_executor(
-                    None, function, event.get("event", {}), lambda_context
+                    _DEV_HANDLER_EXECUTOR, function, event.get("event", {}), lambda_context
                 )
             except (Exception, SystemExit) as e:
                 error = e

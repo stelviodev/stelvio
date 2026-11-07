@@ -14,7 +14,7 @@ import uuid
 
 import stlv_chunking
 import websockets
-from stlv_chunking import STUB_LAMBDA_ENV_KEYS, channel_segment
+from stlv_chunking import STUB_LAMBDA_ENV_KEYS, channel_segment, wait_for_appsync_ack
 
 # Environment variables (set by deployment)
 APPSYNC_REALTIME = os.environ["STLV_APPSYNC_REALTIME"]
@@ -61,13 +61,21 @@ async def connect_to_appsync() -> websockets.WebSocketClientProtocol:
 
     # Connect
     uri = f"wss://{APPSYNC_REALTIME}/event/realtime"
-    ws = await websockets.connect(uri, subprotocols=["aws-appsync-event-ws", f"header-{auth_b64}"])
+    # Lambda freezes this event loop between invocations. A background ping deadline can expire
+    # while frozen and close a healthy reused connection on thaw.
+    ws = await websockets.connect(
+        uri, subprotocols=["aws-appsync-event-ws", f"header-{auth_b64}"], ping_interval=None
+    )
 
-    # Send connection_init
-    await ws.send(json.dumps({"type": "connection_init"}))
+    try:
+        # Send connection_init
+        await ws.send(json.dumps({"type": "connection_init"}))
 
-    # Wait for connection_ack
-    await ws.recv()
+        # Wait for connection_ack
+        await wait_for_appsync_ack(ws, "connection_ack")
+    except BaseException:
+        ws.transport.abort()
+        raise
 
     return ws
 
@@ -86,15 +94,25 @@ async def subscribe_to_channel(ws: websockets.WebSocketClientProtocol) -> None:
         )
     )
 
-    ack = json.loads(await ws.recv())
-    if ack.get("type") == "subscribe_error":
-        errors = ack.get("errors", [])
-        raise ConnectionError(f"AppSync subscribe to {response_channel!r} failed: {errors}")
+    await wait_for_appsync_ack(
+        ws, "subscribe_success", operation_id="response-sub", channel=response_channel
+    )
+
+
+def _drop_connection() -> None:
+    """Forget the cached connection and abort its socket, so the next call reconnects."""
+    global _ws_connection, _last_connected, _subscribed  # noqa: PLW0603
+
+    if _ws_connection is not None:
+        _ws_connection.transport.abort()
+    _ws_connection = None
+    _last_connected = None
+    _subscribed = False
 
 
 async def get_or_create_connection() -> tuple[websockets.WebSocketClientProtocol, bool]:
     """Get existing connection or create new one."""
-    global _ws_connection, _last_connected, _subscribed  # noqa: PLW0603
+    global _ws_connection, _last_connected  # noqa: PLW0603
 
     # Check if we have a valid connection
     if _ws_connection is not None:
@@ -102,26 +120,17 @@ async def get_or_create_connection() -> tuple[websockets.WebSocketClientProtocol
             # Check if connection is still open (websockets uses close_code)
             # If close_code is None, connection is still open
             if _ws_connection.close_code is None:
-                # Check if it's not stale (AppSync timeout is 5 min)
+                # Check that the connection is recent enough to reuse.
                 age = time.time() - _last_connected
-                if age < WEBSOCKET_STALE_TIMEOUT:  # 4 min safety margin
+                if age < WEBSOCKET_STALE_TIMEOUT:
                     return _ws_connection, True  # Reused!
         except Exception:  # noqa: S110
             pass  # Connection is bad, create new one
 
-    # Need fresh connection
-    try:
-        _ws_connection = await connect_to_appsync()
-        _last_connected = time.time()
-        _subscribed = False  # Will need to subscribe
-    except Exception:
-        # Reset state on error
-        _ws_connection = None
-        _last_connected = None
-        _subscribed = False
-        raise
-    else:
-        return _ws_connection, False  # New connection
+    _drop_connection()
+    _ws_connection = await connect_to_appsync()
+    _last_connected = time.time()
+    return _ws_connection, False  # New connection
 
 
 async def ensure_subscribed(ws: websockets.WebSocketClientProtocol) -> None:
@@ -232,10 +241,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         await ensure_subscribed(ws)
         _subscribe_time = int((time.time() - t_subscribe_start) * 1000)
     except Exception as e:
-        # Reset connection state on subscription failure
-        global _ws_connection, _subscribed  # noqa: PLW0603
-        _ws_connection = None
-        _subscribed = False
+        _drop_connection()
         return {"statusCode": 500, "body": json.dumps({"error": f"Failed to subscribe: {e!s}"})}
 
     # Publish invocation to local dev server
@@ -298,6 +304,7 @@ async def async_handler(event: dict, context: object) -> dict:  # noqa: PLR0911
         }
 
     if response is None:
+        _drop_connection()
         timings["total"] = int((time.time() - t_start) * 1000)
         return {
             "statusCode": 500,

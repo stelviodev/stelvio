@@ -1,16 +1,25 @@
 """
-Chunking utilities for splitting large messages across AppSync Events.
+Shared acknowledgement and chunking utilities for AppSync Events.
 
 AppSync Events has a 240KB per-message limit, but Lambda supports 6MB (sync).
 This module provides utilities to split large messages into chunks, transmit
 them over AppSync, and reassemble them on the other end.
 """
 
+from __future__ import annotations
+
+import asyncio
 import base64
 import json
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from websockets import WebSocketClientProtocol
+
+APPSYNC_ACK_TIMEOUT = 10
 
 # 200KB chunk size (leaves ~40KB for AppSync overhead/metadata)
 MAX_CHUNK_SIZE = 200_000
@@ -26,6 +35,43 @@ STUB_LAMBDA_ENV_KEYS = (
     "AWS_LAMBDA_LOG_GROUP_NAME",
     "AWS_LAMBDA_LOG_STREAM_NAME",
 )
+
+
+async def wait_for_appsync_ack(
+    ws: WebSocketClientProtocol,
+    expected_type: str,
+    *,
+    operation_id: str | None = None,
+    channel: str | None = None,
+) -> None:
+    """Wait for the matching AppSync acknowledgement within one keepalive-safe deadline."""
+    deadline = asyncio.get_running_loop().time() + APPSYNC_ACK_TIMEOUT
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}")
+        try:
+            raw_message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        except TimeoutError as exc:
+            raise TimeoutError(f"Timed out waiting for AppSync {expected_type}") from exc
+        message = json.loads(raw_message)
+        message_type = message.get("type")
+        if message_type == "ka":
+            continue
+        if message_type == "subscribe_error":
+            raise ConnectionError(
+                f"AppSync subscribe to {channel!r} failed: {message.get('errors', [])}"
+            )
+        details = f": {message['errors']}" if "errors" in message else ""
+        if message_type != expected_type:
+            raise ConnectionError(
+                f"Expected AppSync {expected_type}, received {message_type!r}{details}"
+            )
+        if operation_id is not None and message.get("id") != operation_id:
+            raise ConnectionError(
+                f"AppSync {expected_type} acknowledgement had an unexpected operation ID{details}"
+            )
+        return
 
 
 def channel_segment(name: str) -> str:
