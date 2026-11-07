@@ -48,7 +48,7 @@ func TestIndependentVectors(t *testing.T) {
 					if scoped && (r.Unit != 1 || r.Generation != 0x0102030405060708) {
 						t.Fatal("unit/generation", r)
 					}
-					anonymous := r.Operation == protocol.Status || r.Operation == protocol.Reconcile
+					anonymous := r.Operation == protocol.Status || r.Operation == protocol.Reconcile || r.Operation == protocol.Diagnostics
 					if !anonymous && hex.EncodeToString(r.Session[:]) != "38321ac9f08641ec91ce770956914537" {
 						t.Fatal("session", r)
 					}

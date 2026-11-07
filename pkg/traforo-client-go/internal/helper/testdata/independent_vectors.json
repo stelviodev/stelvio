@@ -2306,5 +2306,13 @@
     "data": "U1RMVlRVTjEGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE=",
     "returncode": 1,
     "stdout": ""
+  },
+  {
+    "name": "diagnostics-read-only",
+    "kind": "request",
+    "args": [],
+    "data": "U1RMVlRVTjEHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "returncode": 0,
+    "stdout": ""
   }
 ]

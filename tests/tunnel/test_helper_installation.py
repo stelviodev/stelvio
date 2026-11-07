@@ -288,6 +288,7 @@ def test_tunnel_help_lists_status_without_inspect_alias():
         "uninstall",
         "trust",
         "start",
+        "diagnose",
     }
     assert "Show the helper's owned networking state." in result.output
     assert "inspect" not in result.output
