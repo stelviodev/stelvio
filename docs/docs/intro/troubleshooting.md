@@ -147,6 +147,21 @@ If installation reports an active helper, close the networking session and retry
 Use `stlv tunnel status` to see local helper ownership and whether any VPC unit
 remains active. This does not verify AWS or database connectivity.
 
+For standalone access, run `stlv tunnel start [ENV]` from the deployed project. If it
+reports that the environment has no deployment, run `stlv deploy` first. The command
+does not deploy or create a bastion. If a VPC is not ready, use its printed phase and
+cause to check the AWS profile, deployed ownership, SSM agent, and DocumentDB
+membership. A missing or invalid local plugin is terminal; repair it with
+`stlv tunnel install`. If cleanup cannot be certified, keep the recovery evidence and
+run `stlv tunnel status`, then `stlv tunnel cleanup` after the session has stopped.
+
+If standalone startup reports `host-uncertain-configure-N`, read the requested
+subnet, conflicting route, and interface index in its diagnostic. An overlapping
+LAN or VPN range must be resolved before restarting. Public-only VPCs have no
+private destination ranges and cannot fall back to routing the entire VPC.
+A terminal VPC failure ends the standalone command; it does not leave a partially
+ready foreground session running. Keep any ownership evidence when cleanup fails.
+
 ### Managed VPC transport identity and authorization
 
 Managed VPC access stops when the captured AWS account or region differs from the

@@ -169,3 +169,10 @@ A new component also registers in two cross-component suites. Reviewers check bo
 `tests/aws/test_keyword_only_constructor_params.py` finds every component by itself and
 checks that `tags`, `customize` and `parent` are keyword-only. A component without `tags` or
 `customize` goes in its exception set.
+
+## Tunnel command fixtures
+
+Standalone SSH trust tests reuse the network from `tests/tunnel/conftest.py`.
+Keep its public, private, and isolated subnet ranges disjoint. A command fixture
+that changes one tier must remain valid across all three tiers, so metadata
+validation does not hide the command behavior under test.

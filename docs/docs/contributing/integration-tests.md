@@ -252,3 +252,32 @@ It verifies observed active, retained, and recovered generations with real owned
 routes and resolver files. It also verifies that the second unit does not change.
 The shared reporter keeps each host-unit record within the default console width
 so standalone and dev commands can both expose the observation without wrapping.
+
+### Tunnel acceptance teardown
+
+Tunnel startup has a 900-second limit. Destruction has a separate 3,600-second
+limit because DocumentDB deletion and Lambda VPC interface cleanup can outlast
+startup. A separate, bounded AWS absence audit runs after destruction, including
+when the command fails. Reaching the destroy deadline is a test failure.
+
+Each CLI command saves `stdout.log`, `stderr.log`, and `command.json` under a
+private `cli-<command>-*` directory in the proof project. Timeout records include
+partial output and name the app, environment, project, and recovery commands.
+Retain these files when reporting a failure.
+
+If destruction is interrupted, inspect the proof and verify that no deployment
+operation or Pulumi process remains. Only then use `stlv unlock <env>` from that
+proof project if its deployment state is locked, and run `stlv destroy <env> --yes`
+to finish cleanup. Independently audit AWS absence afterward. Tests never unlock
+or retry automatically, and a cleanup retry does not change a failed acceptance
+result. Do not erase helper journals, force-delete in-use interfaces, or change
+IAM permissions to make the test pass.
+
+### Active-session observation
+
+The AWS tests read helper-confirmed unit states and generations from the running
+command's owner reports. The command log starts empty for each invocation. Tests
+use the latest observation and reject unavailable runtime status or an exited
+command. They inspect the helper directly only before startup and after shutdown.
+Cleanup polling can wait for owner rejection to end, but uncertain ownership or
+an expired deadline fails acceptance.
