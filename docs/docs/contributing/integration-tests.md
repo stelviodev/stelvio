@@ -221,3 +221,14 @@ Use a validated local image through `STLV_TRAFORO_DEV_BINARY` for local testing.
 The fixture restores the initial helper and host state. Complete any macOS
 authorization dialog needed for restoration. A canceled restoration is not a
 passing acceptance run.
+
+### Local transport shutdown regression
+
+Run `uv run pytest tests/tunnel/test_transport.py -n 0` to check SSH process ownership
+and bounded shutdown. On macOS, the real-process regression creates a child that
+ignores SIGTERM. Shutdown must confirm that the process group has no live members
+before it reaps the SSH leader. If confirmation fails, cleanup reports an error
+and retains ownership for a retry. These tests do not deploy AWS resources or
+change host networking.
+
+Set `STLV_TEST_SSH_INTEROP=1` to include the local OpenSSH interoperability test.

@@ -6,6 +6,7 @@ import click
 
 from stelvio.tunnel.assets import NativeAssetError
 from stelvio.tunnel.helper_client import HelperError, NativeHelper
+from stelvio.tunnel.host_trust import HostIdentity, HostTrustError, fingerprint, locked_host_trust
 from stelvio.tunnel.installation import SYSTEM_CHANGES, install_helper, uninstall_helper
 from stelvio.tunnel.plugin import PluginAssetError
 
@@ -61,3 +62,37 @@ def uninstall() -> None:
     """Remove Traforo after safe host cleanup; refuse active sessions."""
     _run(uninstall_helper)
     click.echo("Native VPC helper removed.")
+
+
+@tunnel.group("trust")
+def trust() -> None:
+    """Manage persistent SSH host-key trust without changing AWS or the helper."""
+
+
+@trust.command("reset")
+@click.option("--partition", default="aws", show_default=True)
+@click.option("--account", required=True)
+@click.option("--region", required=True)
+@click.option("--instance-id", required=True)
+def reset_trust(partition: str, account: str, region: str, instance_id: str) -> None:
+    """Forget one host key after explicit confirmation. Stop its tunnels first."""
+    from threading import Event  # noqa: PLC0415 - no networking workers at import time
+
+    try:
+        target = HostIdentity(partition, account, region, instance_id)
+        with locked_host_trust(target, Event()) as entry:
+            if entry.key is None:
+                click.echo(f"No SSH host key is stored for {target.label}.")
+                return
+            expected = fingerprint(entry.key)
+        click.echo(f"Instance: {target.label}\nStored fingerprint: {expected}")
+        click.confirm(
+            "Stop all tunnels for this instance. "
+            "Forget this key and trust the next SSM connection?",
+            abort=True,
+        )
+        with locked_host_trust(target, Event()) as entry:
+            entry.reset(expected)
+        click.echo("SSH host trust removed. The next connection will establish a new pin.")
+    except (HostTrustError, NativeAssetError, OSError) as error:
+        raise click.ClickException(str(error)) from error
