@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import stat
 import struct
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -175,7 +176,6 @@ def test_explicit_override_is_selected_without_changing_pins_or_environment(tmp_
         "directory",
         "parent-writable",
         "writable",
-        "special",
         "nonexecutable",
         "foreign",
         "cpu",
@@ -208,8 +208,6 @@ def test_invalid_override_fails_without_release_fallback(  # noqa: C901, PLR0912
         path = image
     elif bad == "writable":
         image.chmod(0o777)
-    elif bad == "special":
-        image.chmod(0o4755)
     elif bad == "nonexecutable":
         image.chmod(0o644)
     elif bad == "foreign":
@@ -240,6 +238,20 @@ def test_invalid_override_fails_without_release_fallback(  # noqa: C901, PLR0912
 
     ensure.assert_not_called()
     download.assert_not_called()
+
+
+@mark.parametrize("special_bit", [stat.S_ISUID, stat.S_ISGID, stat.S_ISVTX])
+def test_developer_image_rejects_special_permission_bits(tmp_path, special_bit):
+    image = _image(tmp_path / "local-image")
+    info = image.stat()
+    metadata = SimpleNamespace(
+        st_mode=info.st_mode | special_bit,
+        st_uid=info.st_uid,
+        st_nlink=info.st_nlink,
+    )
+
+    with raises(assets.NativeAssetError, match="unsafe ownership or permissions"):
+        assets._developer_permissions(metadata)
 
 
 def test_image_change_during_version_check_is_refused(tmp_path, monkeypatch):
