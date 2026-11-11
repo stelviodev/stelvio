@@ -22,6 +22,31 @@ changes. Darwin tests require macOS, cgo, and the Apple SDK. Tests must not
 install or uninstall the helper or mutate host routes and DNS settings. Actual
 host recovery acceptance belongs to the authorized native integration step.
 
+## Build and release checks
+
+When this module is under `pkg/traforo-client-go` inside the Stelvio monorepo,
+`make build` runs the shared GoReleaser configuration in snapshot mode. It builds
+and validates both Darwin images without installing a helper or publishing a
+release. The standalone split repository does not include Stelvio's Python release
+pin or helper transaction, so the target rejects that checkout with a message.
+Python builder tests mock GoReleaser; they do not compile Go. Run the actual
+build-only check on macOS with the pinned Go and GoReleaser versions. Validate Intel
+execution through Rosetta on Apple Silicon. Record unavailable architecture checks
+as pending.
+
+The module release workflow runs only for version tags. The Stelvio split workflow
+copies `pkg/traforo-client-go/` to the root of `stelviodev/traforo` from `main`.
+It updates only the target `main` branch with `--force-with-lease` against the
+fetched target commit; it does not push tags. Review target history and the required
+Actions secret before enabling or manually dispatching that workflow. The update
+fails if target `main` changes after checkout. Local validation must not publish
+artifacts or change external history.
+
+Keep Go sources, this builder, generated executables, and the Session Manager
+plugin out of Stelvio's wheel and source archive. Use
+`tests/tunnel/test_distribution_acceptance.py` with explicit wheel and sdist paths
+to verify archive contents and isolated wheel imports.
+
 ## Destination ranges
 
 `Request.Ranges` authorizes routed IPv4 destinations for one unit. It does not
