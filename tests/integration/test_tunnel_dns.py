@@ -21,6 +21,7 @@ from .tunnel_dns_fixture import (
     dns_response,
     native_network,
     packet_network,
+    supervisor_worker,
 )
 
 pytestmark = mark.integration_macos_privileged
@@ -256,6 +257,63 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
         with raises(ConnectionError, match="Forwarder rejected operation"):
             forwarding.dns("reject", unit, 1, 1, 1)
         assert _os_lookup(uuid4().hex + "." + network.resolver_scopes[0]) == {address}
+    final = helper.status()
+    assert not final.owned
+    assert not final.uncertain
+    assert not final.units
+
+
+def test_supervisor_exact_hostname_readiness_and_independent_reconnect():
+    """Production readiness with exact resources, real scoped DNS and carrier IO."""
+    from dataclasses import replace
+
+    helper = NativeHelper()
+    owner = str(uuid4())
+    with ExitStack() as scope:
+        lease = helper.acquire(owner)
+        scope.callback(lease.close)
+        binary = scope.enter_context(packaged_forwarder())
+        forwarding = Forwarding(binary, lease.carrier)
+        scope.callback(forwarding.close)
+        workers = []
+        for octet in (254, 253):
+            proxy = SocksDnsFixture(f"10.{octet}.9.19")
+            scope.callback(proxy.close)
+            worker = supervisor_worker(octet, owner, lease, forwarding)
+            network = worker.network
+            hostname = worker._resources()[0].hostnames[0]
+            worker._host_generation = worker._attempt = 1
+            forwarding.add(worker.unit, 1, 1, network, proxy.port)
+            worker._stack_attempt = 1
+            worker._configure(worker._view())
+            worker._probe(worker._dns_revision_current)
+            assert _os_lookup(hostname) == {proxy.server.address}
+            wire = dns_query_wire("unowned." + hostname)
+            response = dns_exchange("127.0.0.1", worker._dns_port, wire, "tcp")
+            assert dns_response(wire, response)[0] == 5
+            workers.append((worker, proxy))
+        first, proxy = workers[0]
+        second, _ = workers[1]
+        assert first._probe_domain != second._probe_domain
+        port, domain = first._dns_port, first._probe_domain
+        first._reject()
+        second._probe(second._dns_revision_current)
+        first._attempt = 2
+        forwarding.add(first.unit, first._host_generation, 2, first.network, proxy.port)
+        first._stack_attempt = 2
+        first._configure(first._view())
+        first._probe(first._dns_revision_current)
+        assert first._dns_port == port
+        assert first._probe_domain == domain
+        previous = second.discovery.resources_for(second.network.identity)[0]
+        second.discovery.resources = (
+            replace(
+                previous,
+                hostnames=(*previous.hostnames, f"member-{owner.replace('-', '')}.example.test"),
+            ),
+        )
+        second._configure(second._view())
+        second._probe(second._dns_revision_current)
     final = helper.status()
     assert not final.owned
     assert not final.uncertain
