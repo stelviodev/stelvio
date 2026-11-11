@@ -100,3 +100,25 @@ Run `make test`, `make race`, `make lint`, `make vet`, and `make fuzz-dns`.
 The subnet regressions cover an off-route resolver, excluded addresses, mixed A
 answers, both resource probe modes, and twenty- and thirty-two-range views.
 Actual scoped DNS and routed resource acceptance remain in the privileged tier.
+
+## Forwarder destination ranges
+
+The packet unit retains the exact selected subnet set from `add.cidrs`. It uses
+`protocol.MaxRanges` (32) and the shared canonical RFC1918 `/16`–`/28` validator.
+It rejects duplicate or overlapping prefixes and overlaps with other active
+units. It does not merge subnets into a parent VPC block. Subnet classification
+and AWS ownership remain the session layer's responsibility.
+
+Ingress packets, return packets, and SOCKS resource connections must match that
+unit's selected destinations. DNS configuration takes its resource ranges from
+the validated packet unit; DNS controls cannot replace those ranges. The resolver
+uses its separate SOCKS path. Removing or reconnecting a unit preserves the other
+units, and generation/attempt checks continue to reject stale work.
+
+Run `make test`, `make race`, `make vet`, `make lint`, and `make fuzz-control`.
+The large-stream/half-close regression uses 20 and 32 selected subnet ranges in
+two VPCs and repeats transfers after independent removal and reconnect. Additional
+tests cover both packet directions, excluded sources before carrier writes,
+range bounds, DNS probes through real SOCKS, and rejected updates without state
+changes. These tests use userspace stacks and local sockets, with no host route
+changes. Native scoped routing acceptance remains in the privileged test tier.
