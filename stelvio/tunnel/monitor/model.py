@@ -6,6 +6,7 @@ import math
 from collections import deque
 from copy import deepcopy
 
+from stelvio.network import manifest_from_records
 from stelvio.tunnel.diagnostics.protocol import STALE_SECONDS
 
 MAX_PORT = 65535
@@ -28,9 +29,14 @@ def identity(snapshot: dict) -> tuple:
     session = snapshot["session"]
     networks = tuple(
         sorted(
-            (item["identity"], item["vpc_id"], item["account"], item["region"])
+            (
+                item["urn"],
+                item["metadata"]["vpc_id"],
+                item["metadata"]["account"],
+                item["metadata"]["region"],
+            )
             for item in session.get("records", [])
-            if item.get("kind") == "vpc"
+            if item.get("type") == "stelvio:aws:Vpc"
         )
     )
     return session.get("app"), session.get("environment"), networks
@@ -40,15 +46,14 @@ def _records(session: dict) -> None:
     records = session.get("records", [])
     if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
         raise TypeError("Invalid deployment records")
+    descriptors = []
     for record in records:
-        if record.get("kind") == "vpc":
-            if any(
-                not isinstance(record.get(key), str)
-                for key in ("identity", "vpc_id", "account", "region")
-            ):
-                raise TypeError("Invalid VPC record")
-            if not isinstance(record.get("access", {}), (dict, type(None))):
-                raise TypeError("Invalid bastion record")
+        if record.keys() != {"type", "urn", "metadata"} or any(
+            not isinstance(record.get(key), str) or not record[key] for key in ("type", "urn")
+        ):
+            raise TypeError("Invalid deployment record descriptor")
+        descriptors.append((record["type"], record["urn"], record["metadata"]))
+    manifest_from_records(descriptors)
 
 
 def _vpc(vpc: dict) -> None:  # noqa: C901, PLR0912 - validate the optional runtime fields at the boundary
@@ -204,7 +209,7 @@ class Dashboard:
             forwarder = {}
         helper_units = {unit["unit"]: unit for unit in helper.get("units", [])}
         forwarder_units = {unit["unit"]: unit for unit in forwarder.get("units", [])}
-        records = {item.get("identity"): item for item in session.get("records", [])}
+        records = {item["urn"]: item["metadata"] for item in session.get("records", [])}
         rows = []
         for vpc in session["vpcs"]:
             row = dict(vpc, network=records.get(vpc["identity"], {}))

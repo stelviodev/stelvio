@@ -46,11 +46,17 @@ def sample(session_id=None, *, tick=1, count=100):
             "vpcs": vpcs,
             "records": [
                 {
-                    "kind": "vpc",
-                    "identity": item["identity"],
-                    "vpc_id": "vpc-" + item["unit"],
-                    "account": "123456789012",
-                    "region": "us-east-1",
+                    "type": "stelvio:aws:Vpc",
+                    "urn": item["identity"],
+                    "metadata": {
+                        "version": 1,
+                        "vpc_id": "vpc-" + item["unit"],
+                        "account": "123456789012",
+                        "region": "us-east-1",
+                        "provider": "provider",
+                        "route_subnet_ids": ["subnet-" + item["unit"]],
+                        "bastion_instance_id": "i-" + item["unit"],
+                    },
                 }
                 for item in vpcs
             ],
@@ -364,3 +370,27 @@ def test_real_cli_terminal_survives_grpc_stderr_redirect(tmp_path):
         monitor.wait("Stelvio Tunnel")
         monitor.wait("Waiting for a tunnel session")
     assert monitor.process.returncode == 0
+
+
+@pytest.mark.parametrize("instance_id", [None, "i-current"])
+def test_dashboard_reads_bastion_from_minimal_record(instance_id):
+    value = sample()
+    value["session"]["records"][0]["metadata"]["bastion_instance_id"] = instance_id
+    model = Dashboard()
+    model.update(value, 1)
+    assert model.rows[0]["network"]["bastion_instance_id"] == instance_id
+
+
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        {"urn": "vpc", "metadata": {}},
+        {"type": "stelvio:aws:Vpc", "urn": 7, "metadata": {}},
+        {"type": "stelvio:aws:Vpc", "urn": "vpc", "metadata": [], "extra": True},
+    ],
+)
+def test_monitor_rejects_malformed_record_descriptors(descriptor):
+    value = sample()
+    value["session"]["records"] = [descriptor]
+    with pytest.raises((TypeError, ValueError)):
+        validate(value)

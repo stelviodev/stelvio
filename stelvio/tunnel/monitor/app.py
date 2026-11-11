@@ -320,7 +320,7 @@ class TunnelMonitor(App):
         network = row["network"]
         table.add_row(Text("Selected", style="bold"), literal(row["identity"]))
         for label, value in (
-            ("Bastion", (network.get("access") or {}).get("instance_id")),
+            ("Bastion", network.get("bastion_instance_id")),
             ("AWS", f"{network.get('account', '—')} / {network.get('region', '—')}"),
             (
                 "SSH trust",
