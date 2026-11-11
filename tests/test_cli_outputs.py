@@ -175,7 +175,9 @@ def test_only_diff_deploy_and_dev_check_the_names(
 ) -> None:
     """A name AWS rejects fails mid-deploy, so the deploying commands check it first; the
     others load a stack under any name, so one deployed before the rule can be destroyed."""
-    # run_dev starts the bridge after the deploy and reads the context for it.
+    # run_dev captures a network session and reads the context before starting the bridge.
+    monkeypatch.setattr(cli_commands, "NetworkSession", Mock())
+    monkeypatch.setattr(cli_commands, "_dev_network_admission", Mock())
     for name in ("run_bridge_server", "context", "ProviderStore"):
         monkeypatch.setattr(cli_commands, name, Mock())
     getattr(cli_commands, command)("dev", **kwargs)

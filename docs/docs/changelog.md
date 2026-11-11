@@ -11,9 +11,11 @@
 ### Dev Mode
 
 - **Experimental private VPC access.** Enable `Vpc(bastion=True)` outside production,
-  then use `stlv tunnel start [ENV]` to open every bastion Vpc, including Vpcs with
-  DocumentDB and no Functions. Stelvio discovers AWS inventory and routes the
-  deployed private and isolated subnets through Session Manager.
+  then use `stlv tunnel start [ENV]` or `stlv dev` to open every bastion Vpc,
+  including Vpcs with DocumentDB and no Functions. Stelvio discovers AWS inventory
+  and routes the deployed private and isolated subnets through Session Manager.
+  Dev mode checks each loaded Function's Vpc before importing its handler; a
+  failed Vpc blocks its Functions while independent Functions keep running.
 
     → [Managed VPC transport](concepts/dev-mode.md#managed-vpc-transport)
 
