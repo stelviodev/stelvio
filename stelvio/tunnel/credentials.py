@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import boto3
 from botocore.config import Config
 
-from stelvio.tunnel.manifest import ACCOUNT
+from stelvio.network import ACCOUNT
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

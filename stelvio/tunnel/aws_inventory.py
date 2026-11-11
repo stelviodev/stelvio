@@ -1,96 +1,98 @@
-"""Verify VPC ownership and every declared subnet before selecting route destinations."""
+"""Read current VPC topology for only the deployment's recorded destinations."""
 
 from __future__ import annotations
 
-from dataclasses import replace
 from ipaddress import IPv4Network
 from typing import TYPE_CHECKING
 
-from stelvio.tunnel.manifest import NetworkManifest, validate_network_ownership
+from stelvio.tunnel.runtime_models import SubnetInventory, VpcInventory, validate_vpc_overlaps
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from botocore.client import BaseClient
 
-    from stelvio.tunnel.manifest import VpcNetwork
+    from stelvio.network import NetworkManifest, VpcNetwork
+
+
+class InventoryPendingError(ConnectionError):
+    """AWS is still changing the recorded network; retry before admitting routes."""
 
 
 def resolve_vpc_inventory(
     manifest: NetworkManifest, client_for: Callable[[VpcNetwork], BaseClient]
-) -> NetworkManifest:
-    """Use captured provider clients; never create a session from handler env vars.
-
-    The component's primary CIDR cannot inventory independently associated IPv4
-    ranges. Query used VPCs, retain all associated ranges, then validate overlap
-    across the full collection before any host operation. Verify public, private,
-    and isolated subnet identities against AWS. route_cidrs remains the declared
-    private/isolated set; associated ownership blocks never add destinations.
-    """
+) -> dict[str, VpcInventory]:
+    """Resolve every bastion through its captured provider, then check full VPC ranges."""
     resolved = {
         network.identity: resolve_vpc_network(network, client_for(network))
         for network in manifest.enabled_vpcs
     }
-    result = replace(
-        manifest, vpcs=tuple(resolved.get(network.identity, network) for network in manifest.vpcs)
-    )
-    validate_network_ownership(result)
-    return result
+    validate_vpc_overlaps(resolved.values())
+    return resolved
 
 
-def resolve_vpc_network(network: VpcNetwork, client: BaseClient) -> VpcNetwork:
+def resolve_vpc_network(network: VpcNetwork, client: BaseClient) -> VpcInventory:
     if client.meta.region_name != network.region:
         raise ValueError(f"VPC {network.identity!r} client has a different AWS region")
     vpcs = client.describe_vpcs(VpcIds=[network.vpc_id])["Vpcs"]
     if len(vpcs) != 1:
         raise ValueError(f"VPC {network.identity!r} is missing; redeploy before dev")
     actual = vpcs[0]
-    if actual["VpcId"] != network.vpc_id or actual["OwnerId"] != network.account:
+    if actual.get("VpcId") != network.vpc_id or actual.get("OwnerId") != network.account:
         raise ValueError(f"VPC {network.identity!r} has a different AWS owner")
-    if actual["State"] != "available":
-        raise ValueError(f"VPC {network.identity!r} is not available")
-    if actual["CidrBlock"] != str(network.cidrs[0]):
-        raise ValueError(f"VPC {network.identity!r} primary CIDR changed; redeploy before dev")
+    if actual.get("State") != "available":
+        raise InventoryPendingError(f"VPC {network.identity!r} is not available; retry later")
     _validate_dns(network, client)
     associations = actual.get("CidrBlockAssociationSet", [])
-    if any(item["CidrBlockState"]["State"] != "associated" for item in associations):
-        raise ValueError(f"VPC {network.identity!r} has changing CIDR associations; retry later")
-    cidrs = tuple(
-        dict.fromkeys(
-            IPv4Network(value, strict=True)
-            for value in [actual["CidrBlock"], *(item["CidrBlock"] for item in associations)]
+    if any(item.get("CidrBlockState", {}).get("State") != "associated" for item in associations):
+        raise InventoryPendingError(
+            f"VPC {network.identity!r} has changing CIDR associations; retry later"
         )
-    )
-    _validate_subnets(network, client, cidrs)
-    return replace(network, cidrs=cidrs)
+    primary = IPv4Network(actual["CidrBlock"], strict=True)
+    secondary = {IPv4Network(item["CidrBlock"], strict=True) for item in associations} - {primary}
+    cidrs = (primary, *sorted(secondary))
+    subnets = _route_subnets(network, client, cidrs)
+    return VpcInventory(network, cidrs, subnets)
 
 
-def _validate_subnets(
+def _route_subnets(
     network: VpcNetwork, client: BaseClient, cidrs: tuple[IPv4Network, ...]
-) -> None:
-    # Classification comes from deployed metadata, not public-IP assignment or
-    # response order. Never enumerate arbitrary AWS subnets if the ID list is empty.
-    expected = {subnet.subnet_id: subnet for subnet in network.subnets}
-    if not expected or len(expected) != len(network.subnets):
-        raise ValueError(f"VPC {network.identity!r} has an invalid deployed subnet inventory")
+) -> tuple[SubnetInventory, ...]:
+    expected = network.route_subnet_ids
+    if len(set(expected)) != len(expected):
+        raise ValueError(f"VPC {network.identity!r} has duplicate deployed subnet IDs")
+    # An empty EC2 ID filter would enumerate unrelated subnets in the account.
+    if not expected:
+        return ()
     subnets = client.describe_subnets(SubnetIds=list(expected))["Subnets"]
     if len(subnets) != len(expected) or {subnet.get("SubnetId") for subnet in subnets} != set(
         expected
     ):
         raise ValueError(f"VPC {network.identity!r} subnet inventory changed; redeploy")
+    resolved = {}
     for subnet in subnets:
-        known = expected[subnet["SubnetId"]]
+        subnet_id = subnet["SubnetId"]
+        az = subnet.get("AvailabilityZone")
         if (
             subnet.get("VpcId") != network.vpc_id
             or subnet.get("OwnerId") != network.account
-            or subnet.get("AvailabilityZone") != known.availability_zone
-            or subnet.get("CidrBlock") != str(known.cidr)
-            or subnet.get("State") != "available"
-            or not any(known.cidr.subnet_of(cidr) for cidr in cidrs)
+            or not isinstance(az, str)
+            or not az
         ):
             raise ValueError(
-                f"VPC {network.identity!r} subnet identity changed: {known.subnet_id!r}; redeploy"
+                f"VPC {network.identity!r} subnet ownership is invalid: {subnet_id!r}; redeploy"
             )
+        if subnet.get("State") != "available":
+            raise InventoryPendingError(
+                f"VPC {network.identity!r} subnet {subnet_id!r} is not available; retry later"
+            )
+        cidr = IPv4Network(subnet["CidrBlock"], strict=True)
+        if not any(cidr.subnet_of(owner) for owner in cidrs):
+            raise ValueError(f"VPC {network.identity!r} subnet {subnet_id!r} is outside its CIDRs")
+        if any(cidr.overlaps(previous.cidr) for previous in resolved.values()):
+            raise ValueError(f"VPC {network.identity!r} destination subnet {subnet_id!r} overlaps")
+        resolved[subnet_id] = SubnetInventory(subnet_id, az, cidr)
+    return tuple(resolved[subnet_id] for subnet_id in expected)
 
 
 def _validate_dns(network: VpcNetwork, client: BaseClient) -> None:

@@ -1,101 +1,56 @@
-"""AWS inventory is resolved and ownership checked before host networking."""
+"""AWS supplies topology; deployment records select the permitted subnet identities."""
 
 from dataclasses import replace
-from ipaddress import IPv4Address, IPv4Network
+from ipaddress import IPv4Network
 from types import SimpleNamespace
 
 import boto3
 import pytest
-from botocore.client import BaseClient
 from botocore.stub import Stubber
 
-from stelvio.tunnel.aws_inventory import resolve_vpc_inventory
-from stelvio.tunnel.manifest import (
-    EndpointNetwork,
-    NetworkManifest,
-    SubnetNetwork,
-    VpcNetwork,
-)
-from stelvio.tunnel.policy import BastionPolicy
+from stelvio.network import NetworkManifest, VpcNetwork
+from stelvio.tunnel.aws_inventory import InventoryPendingError, resolve_vpc_inventory
+from stelvio.tunnel.runtime_models import SubnetInventory, VpcInventory
 
 
-def _network(name: str, cidr: str) -> VpcNetwork:
-    cidr = IPv4Network(cidr)
+def _network(name="one"):
     return VpcNetwork(
-        identity=name,
-        account="123456789012",
-        region="us-east-1",
-        vpc_id=f"vpc-{name}",
-        provider=f"provider-{name}",
-        cidrs=(cidr,),
-        policy=BastionPolicy.PERSISTENT,
-        dns_domains=(),
-        public_subnets=(
-            SubnetNetwork(
-                f"subnet-{name}",
-                "us-east-1a",
-                IPv4Network((cidr.network_address, 24)),
-            ),
-        ),
-        private_subnets=(
-            SubnetNetwork(
-                f"subnet-{name}-private",
-                "us-east-1a",
-                IPv4Network((cidr.network_address + 256, 24)),
-            ),
-        ),
-        isolated_subnets=(
-            SubnetNetwork(
-                f"subnet-{name}-isolated",
-                "us-east-1a",
-                IPv4Network((cidr.network_address + 512, 24)),
-            ),
-        ),
-        access=None,
+        name,
+        "123456789012",
+        "us-east-1",
+        f"vpc-{name}",
+        f"provider-{name}",
+        (f"subnet-{name}-private", f"subnet-{name}-isolated"),
+        f"i-{name}",
     )
 
 
-def _manifest(*networks: VpcNetwork) -> NetworkManifest:
-    return NetworkManifest(
-        tuple(networks),
-        (),
-        (
-            EndpointNetwork(
-                "function", "function", tuple(network.identity for network in networks)
-            ),
-        ),
-    )
-
-
-def _client() -> BaseClient:
+def _client():
     return boto3.client(
         "ec2",
         region_name="us-east-1",
         aws_access_key_id="inventory-test",
-        aws_secret_access_key="inventory-test-secret",  # noqa: S106 - Stubber intercepts calls
+        aws_secret_access_key="inventory-test-secret",  # noqa: S106  # Stubber intercepts calls
     )
 
 
-def _subnet_record(network: VpcNetwork, subnet: SubnetNetwork) -> dict:
-    return {
-        "SubnetId": subnet.subnet_id,
-        "VpcId": network.vpc_id,
-        "OwnerId": network.account,
-        "AvailabilityZone": subnet.availability_zone,
-        "CidrBlock": str(subnet.cidr),
-        "State": "available",
-    }
+def _subnets(network):
+    return [
+        {
+            "SubnetId": subnet_id,
+            "VpcId": network.vpc_id,
+            "OwnerId": network.account,
+            "AvailabilityZone": "us-east-1a",
+            "CidrBlock": cidr,
+            "State": "available",
+        }
+        for subnet_id, cidr in zip(
+            network.route_subnet_ids, ("10.1.1.0/24", "10.1.2.0/24"), strict=True
+        )
+    ]
 
 
-def _add_vpc(
-    stub: Stubber,
-    network: VpcNetwork,
-    *,
-    associated: tuple[str, ...] = (),
-    association_state: str = "associated",
-) -> None:
-    cidr = str(network.cidrs[0])
-    associations = [cidr, *associated]
+def _add_vpc(stub, network, *, cidr="10.1.0.0/16", associated=(), association_state="associated"):
     stub.add_response(
         "describe_vpcs",
         {
@@ -107,7 +62,7 @@ def _add_vpc(
                     "CidrBlock": cidr,
                     "CidrBlockAssociationSet": [
                         {"CidrBlock": value, "CidrBlockState": {"State": association_state}}
-                        for value in associations
+                        for value in (cidr, *associated)
                     ],
                 }
             ]
@@ -120,54 +75,89 @@ def _add_vpc(
     ):
         stub.add_response(
             "describe_vpc_attribute",
-            {"VpcId": network.vpc_id, field: {"Value": True}},
+            {
+                "VpcId": network.vpc_id,
+                field: {"Value": True},
+            },
             {"VpcId": network.vpc_id, "Attribute": attribute},
         )
 
 
-def _add_network(
-    stub: Stubber,
-    network: VpcNetwork,
-    *,
-    associated: tuple[str, ...] = (),
-    subnet_response: list[dict] | None = None,
-) -> None:
-    _add_vpc(stub, network, associated=associated)
-    stub.add_response(
-        "describe_subnets",
-        {
-            "Subnets": subnet_response
-            if subnet_response is not None
-            else [_subnet_record(network, subnet) for subnet in network.subnets]
-        },
-        {"SubnetIds": [subnet.subnet_id for subnet in network.subnets]},
-    )
+def _add_network(stub, network, *, cidr="10.1.0.0/16", associated=(), subnets=None):
+    _add_vpc(stub, network, cidr=cidr, associated=associated)
+    if network.route_subnet_ids:
+        stub.add_response(
+            "describe_subnets",
+            {
+                "Subnets": _subnets(network) if subnets is None else subnets,
+            },
+            {"SubnetIds": list(network.route_subnet_ids)},
+        )
 
 
-def test_inventory_adds_associated_cidrs_without_mutating_deployed_manifest():
-    deployed = _manifest(_network("one", "10.1.0.0/16"))
+def _resolve(network, client):
+    return resolve_vpc_inventory(NetworkManifest((network,), ()), lambda _: client)[
+        network.identity
+    ]
+
+
+def test_inventory_derives_topology_without_mutating_the_deployed_record():
+    deployed = _network()
     client = _client()
     with Stubber(client) as stub:
-        _add_network(stub, deployed.vpcs[0], associated=("10.3.0.0/16",))
-        resolved = resolve_vpc_inventory(deployed, lambda _: client)
+        _add_network(stub, deployed, associated=("10.3.0.0/16",))
+        resolved = _resolve(deployed, client)
         stub.assert_no_pending_responses()
-    assert tuple(map(str, resolved.vpcs[0].cidrs)) == ("10.1.0.0/16", "10.3.0.0/16")
-    assert tuple(map(str, deployed.vpcs[0].cidrs)) == ("10.1.0.0/16",)
+    assert resolved == VpcInventory(
+        deployed,
+        (IPv4Network("10.1.0.0/16"), IPv4Network("10.3.0.0/16")),
+        (
+            SubnetInventory("subnet-one-private", "us-east-1a", IPv4Network("10.1.1.0/24")),
+            SubnetInventory("subnet-one-isolated", "us-east-1a", IPv4Network("10.1.2.0/24")),
+        ),
+    )
+    assert resolved.record is deployed
+    assert deployed == _network()
+    assert resolved.route_cidrs == (IPv4Network("10.1.1.0/24"), IPv4Network("10.1.2.0/24"))
+
+
+def test_inventory_preserves_record_order_when_aws_response_is_shuffled():
+    deployed = _network()
+    response = list(reversed(_subnets(deployed)))
+    response[0]["MapPublicIpOnLaunch"] = True
+    client = _client()
+    with Stubber(client) as stub:
+        _add_network(stub, deployed, subnets=response)
+        resolved = _resolve(deployed, client)
+        stub.assert_no_pending_responses()
+    assert (
+        tuple(subnet.subnet_id for subnet in resolved.route_subnets) == deployed.route_subnet_ids
+    )
+    assert resolved.route_cidrs == (IPv4Network("10.1.1.0/24"), IPv4Network("10.1.2.0/24"))
+
+
+def test_secondary_ownership_ranges_never_implicitly_add_routes():
+    deployed = _network()
+    response = _subnets(deployed)
+    response[0]["CidrBlock"] = "10.3.1.0/24"
+    client = _client()
+    with Stubber(client) as stub:
+        _add_network(stub, deployed, associated=("10.4.0.0/16", "10.3.0.0/16"), subnets=response)
+        resolved = _resolve(deployed, client)
+        stub.assert_no_pending_responses()
+    assert resolved.cidrs == tuple(map(IPv4Network, ("10.1.0.0/16", "10.3.0.0/16", "10.4.0.0/16")))
+    assert resolved.route_cidrs == tuple(map(IPv4Network, ("10.3.1.0/24", "10.1.2.0/24")))
 
 
 def test_inventory_refuses_a_client_from_another_region():
-    network = _network("one", "10.1.0.0/16")
-    deployed = _manifest(network)
     client = SimpleNamespace(meta=SimpleNamespace(region_name="eu-west-1"))
     with pytest.raises(ValueError, match="different AWS region"):
-        resolve_vpc_inventory(deployed, lambda _: client)
+        _resolve(_network(), client)
 
 
 @pytest.mark.parametrize("attribute", ["enableDnsSupport", "enableDnsHostnames"])
-def test_inventory_refuses_when_private_dns_is_disabled(attribute: str):
-    network = _network("one", "10.1.0.0/16")
-    deployed = _manifest(network)
-    client = _client()
+def test_inventory_refuses_disabled_private_dns(attribute):
+    network, client = _network(), _client()
     with Stubber(client) as stub:
         stub.add_response(
             "describe_vpcs",
@@ -177,267 +167,161 @@ def test_inventory_refuses_when_private_dns_is_disabled(attribute: str):
                         "VpcId": network.vpc_id,
                         "OwnerId": network.account,
                         "State": "available",
-                        "CidrBlock": str(network.cidrs[0]),
+                        "CidrBlock": "10.1.0.0/16",
                     }
                 ]
             },
             {"VpcIds": [network.vpc_id]},
         )
-        for name, response_field in (
+        for name, field in (
             ("enableDnsSupport", "EnableDnsSupport"),
             ("enableDnsHostnames", "EnableDnsHostnames"),
         ):
             stub.add_response(
                 "describe_vpc_attribute",
-                {"VpcId": network.vpc_id, response_field: {"Value": name != attribute}},
+                {"VpcId": network.vpc_id, field: {"Value": name != attribute}},
                 {"VpcId": network.vpc_id, "Attribute": name},
             )
             if name == attribute:
                 break
         with pytest.raises(ValueError, match=attribute + "=true"):
-            resolve_vpc_inventory(deployed, lambda _: client)
+            _resolve(network, client)
         stub.assert_no_pending_responses()
 
 
-@pytest.mark.parametrize("mismatch", ["account", "primary-cidr", "subnet-vpc", "subnet-owner"])
-def test_inventory_rejects_changed_aws_ownership(mismatch: str):
-    network = _network("one", "10.1.0.0/16")
-    deployed = _manifest(network)
-    client = _client()
+@pytest.mark.parametrize(
+    ("field", "value"), [("VpcId", "vpc-foreign"), ("OwnerId", "999999999999")]
+)
+def test_inventory_refuses_foreign_vpc_ownership(field, value):
+    network, client = _network(), _client()
+    response = {
+        "VpcId": network.vpc_id,
+        "OwnerId": network.account,
+        "State": "available",
+        "CidrBlock": "10.1.0.0/16",
+    }
+    response[field] = value
     with Stubber(client) as stub:
-        vpc = {
-            "VpcId": network.vpc_id,
-            "OwnerId": "999999999999" if mismatch == "account" else network.account,
-            "State": "available",
-            "CidrBlock": "10.9.0.0/16" if mismatch == "primary-cidr" else str(network.cidrs[0]),
-        }
-        stub.add_response("describe_vpcs", {"Vpcs": [vpc]}, {"VpcIds": [network.vpc_id]})
-        if mismatch not in {"account", "primary-cidr"}:
-            for attribute, field in (
-                ("enableDnsSupport", "EnableDnsSupport"),
-                ("enableDnsHostnames", "EnableDnsHostnames"),
-            ):
-                stub.add_response(
-                    "describe_vpc_attribute",
-                    {"VpcId": network.vpc_id, field: {"Value": True}},
-                    {"VpcId": network.vpc_id, "Attribute": attribute},
-                )
-            subnets = [_subnet_record(network, subnet) for subnet in network.subnets]
-            if mismatch == "subnet-vpc":
-                subnets[0]["VpcId"] = "vpc-foreign"
-            else:
-                subnets[0]["OwnerId"] = "999999999999"
-            stub.add_response(
-                "describe_subnets",
-                {"Subnets": subnets},
-                {"SubnetIds": [subnet.subnet_id for subnet in network.subnets]},
-            )
-        with pytest.raises(
-            ValueError, match=r"different AWS owner|primary CIDR changed|subnet identity changed"
-        ):
-            resolve_vpc_inventory(deployed, lambda _: client)
+        stub.add_response("describe_vpcs", {"Vpcs": [response]}, {"VpcIds": [network.vpc_id]})
+        with pytest.raises(ValueError, match="different AWS owner"):
+            _resolve(network, client)
         stub.assert_no_pending_responses()
 
 
-def test_inventory_rejects_overlap_in_full_associated_vpc_ranges():
-    first = _network("one", "10.1.0.0/16")
-    second = _network("two", "10.2.0.0/16")
-    deployed = _manifest(first, second)
-    client = _client()
-    with Stubber(client) as stub:
-        _add_network(stub, first, associated=("10.2.0.0/16",))
-        _add_network(stub, second)
-        with pytest.raises(ValueError, match="overlap"):
-            resolve_vpc_inventory(deployed, lambda _: client)
-        stub.assert_no_pending_responses()
-
-
-@pytest.mark.parametrize("tier", ["public_subnets", "private_subnets", "isolated_subnets"])
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("VpcId", "vpc-foreign"),
         ("OwnerId", "999999999999"),
-        ("AvailabilityZone", "us-east-1b"),
-        ("CidrBlock", "10.1.9.0/24"),
-        ("State", "pending"),
-        ("OwnerId", None),
+        ("AvailabilityZone", ""),
+        ("CidrBlock", "10.8.0.0/24"),
+        ("CidrBlock", "10.1.1.1/24"),
     ],
 )
-def test_inventory_rechecks_every_deployed_subnet_identity(tier, field, value):
-    network = _network("one", "10.1.0.0/16")
-    records = [_subnet_record(network, subnet) for subnet in network.subnets]
-    identity = getattr(network, tier)[0].subnet_id
-    record = next(record for record in records if record["SubnetId"] == identity)
-    if value is None:
-        del record[field]
-    else:
-        record[field] = value
-    client = _client()
+def test_inventory_refuses_invalid_subnet_ownership_and_ranges(field, value):
+    network, client = _network(), _client()
+    response = _subnets(network)
+    response[0][field] = value
     with Stubber(client) as stub:
-        _add_network(stub, network, subnet_response=records)
-        with pytest.raises(ValueError, match="subnet identity changed") as caught:
-            resolve_vpc_inventory(_manifest(network), lambda _: client)
-        assert identity in str(caught.value)
+        _add_network(stub, network, subnets=response)
+        with pytest.raises(ValueError, match=r"subnet ownership|outside its CIDRs|host bits"):
+            _resolve(network, client)
         stub.assert_no_pending_responses()
 
 
 @pytest.mark.parametrize(
-    "fault",
-    ["missing-public", "missing-private", "missing-isolated", "duplicate", "extra", "missing-id"],
+    "ids",
+    [
+        [],
+        ["subnet-one-private"],
+        ["subnet-one-private", "subnet-one-private"],
+        ["subnet-one-private", "subnet-extra"],
+    ],
 )
-def test_inventory_requires_exact_subnet_identity_multiset(fault):
-    network = _network("one", "10.1.0.0/16")
-    records = [_subnet_record(network, subnet) for subnet in network.subnets]
-    if fault.startswith("missing-") and fault != "missing-id":
-        tier = fault.removeprefix("missing-") + "_subnets"
-        identity = getattr(network, tier)[0].subnet_id
-        records = [record for record in records if record["SubnetId"] != identity]
-    elif fault == "duplicate":
-        records.append(dict(records[1]))
-    elif fault == "extra":
-        records.append(dict(records[1], SubnetId="subnet-extra"))
-    else:
-        del records[1]["SubnetId"]
-    client = _client()
+def test_inventory_requires_the_exact_subnet_identity_set(ids):
+    network, client = _network(), _client()
+    response = [dict(_subnets(network)[0], SubnetId=subnet_id) for subnet_id in ids]
     with Stubber(client) as stub:
-        _add_network(stub, network, subnet_response=records)
+        _add_network(stub, network, subnets=response)
         with pytest.raises(ValueError, match="subnet inventory changed"):
-            resolve_vpc_inventory(_manifest(network), lambda _: client)
+            _resolve(network, client)
         stub.assert_no_pending_responses()
 
 
-def test_inventory_preserves_deployed_tiers_when_aws_changes_response_order():
-    network = _network("one", "10.1.0.0/16")
-    records = [_subnet_record(network, subnet) for subnet in reversed(network.subnets)]
-    # Public IPv4 auto-assignment does not establish a subnet's declared tier.
-    for record in records:
-        record["MapPublicIpOnLaunch"] = True
-    client = _client()
+def test_empty_route_ids_never_trigger_an_unfiltered_subnet_query():
+    network, client = replace(_network(), route_subnet_ids=()), _client()
     with Stubber(client) as stub:
-        _add_network(stub, network, subnet_response=records)
-        resolved = resolve_vpc_inventory(_manifest(network), lambda _: client).vpcs[0]
+        _add_vpc(stub, network)
+        assert _resolve(network, client).route_cidrs == ()
         stub.assert_no_pending_responses()
-    assert resolved.subnets == network.subnets
-    assert resolved.route_cidrs == (IPv4Network("10.1.1.0/24"), IPv4Network("10.1.2.0/24"))
-    for address in ("10.1.0.2", "10.1.0.9", "10.1.3.1"):
-        assert not any(IPv4Address(address) in cidr for cidr in resolved.route_cidrs)
-    assert resolved.cidrs == network.cidrs
 
 
-def test_secondary_vpc_ownership_blocks_do_not_implicitly_add_routes():
-    network = _network("one", "10.1.0.0/16")
-    private = replace(network.private_subnets[0], cidr=IPv4Network("10.3.1.0/24"))
-    deployed = replace(
-        network, cidrs=(*network.cidrs, IPv4Network("10.3.0.0/16")), private_subnets=(private,)
-    )
+def test_duplicate_recorded_subnet_ids_never_trigger_a_subnet_query():
+    network = replace(_network(), route_subnet_ids=("subnet-one", "subnet-one"))
     client = _client()
     with Stubber(client) as stub:
-        _add_network(stub, deployed, associated=("10.3.0.0/16", "10.4.0.0/16"))
-        resolved = resolve_vpc_inventory(_manifest(deployed), lambda _: client).vpcs[0]
-        stub.assert_no_pending_responses()
-    assert tuple(map(str, resolved.cidrs)) == ("10.1.0.0/16", "10.3.0.0/16", "10.4.0.0/16")
-    assert tuple(map(str, resolved.route_cidrs)) == ("10.3.1.0/24", "10.1.2.0/24")
-    assert IPv4Address(int(resolved.cidrs[0].network_address) + 2) == IPv4Address("10.1.0.2")
-    assert not any(IPv4Address("10.1.0.2") in cidr for cidr in resolved.route_cidrs)
-    assert deployed.cidrs == (IPv4Network("10.1.0.0/16"), IPv4Network("10.3.0.0/16"))
-
-
-def test_inventory_refuses_a_subnet_outside_live_vpc_associations():
-    network = _network("one", "10.1.0.0/16")
-    private = replace(network.private_subnets[0], cidr=IPv4Network("10.3.1.0/24"))
-    network = replace(
-        network, cidrs=(*network.cidrs, IPv4Network("10.3.0.0/16")), private_subnets=(private,)
-    )
-    client = _client()
-    with Stubber(client) as stub:
-        _add_network(stub, network)  # The former secondary ownership block is absent.
-        with pytest.raises(ValueError, match="subnet identity changed"):
-            resolve_vpc_inventory(_manifest(network), lambda _: client)
+        _add_vpc(stub, network)
+        with pytest.raises(ValueError, match="duplicate deployed subnet IDs"):
+            _resolve(network, client)
         stub.assert_no_pending_responses()
 
 
 @pytest.mark.parametrize("state", ["associating", "disassociating", "failing"])
-def test_inventory_refuses_changing_vpc_associations_before_subnet_selection(state):
-    network = _network("one", "10.1.0.0/16")
-    client = _client()
+def test_changing_vpc_associations_are_retryable_before_subnet_selection(state):
+    network, client = _network(), _client()
     with Stubber(client) as stub:
         _add_vpc(stub, network, association_state=state)
-        with pytest.raises(ValueError, match="changing CIDR associations"):
-            resolve_vpc_inventory(_manifest(network), lambda _: client)
+        with pytest.raises(InventoryPendingError, match="changing CIDR associations"):
+            _resolve(network, client)
         stub.assert_no_pending_responses()
 
 
-def test_public_only_inventory_does_not_fall_back_to_whole_vpc_routes():
-    network = replace(_network("one", "10.1.0.0/16"), private_subnets=(), isolated_subnets=())
-    client = _client()
+def test_nonavailable_subnet_is_retryable():
+    network, client = _network(), _client()
+    response = _subnets(network)
+    response[0]["State"] = "pending"
     with Stubber(client) as stub:
-        _add_network(stub, network)
-        resolved = resolve_vpc_inventory(_manifest(network), lambda _: client).vpcs[0]
-        stub.assert_no_pending_responses()
-    assert resolved.route_cidrs == ()
-    assert resolved.cidrs == network.cidrs
-
-
-@pytest.mark.parametrize("fault", ["empty", "duplicate"])
-def test_invalid_declared_subnets_never_trigger_an_unfiltered_aws_query(fault):
-    network = _network("one", "10.1.0.0/16")
-    if fault == "empty":
-        network = replace(network, public_subnets=(), private_subnets=(), isolated_subnets=())
-    else:
-        network = replace(network, isolated_subnets=network.private_subnets)
-    client = _client()
-    with Stubber(client) as stub:
-        _add_vpc(stub, network)
-        with pytest.raises(ValueError, match="invalid deployed subnet inventory"):
-            resolve_vpc_inventory(_manifest(network), lambda _: client)
+        _add_network(stub, network, subnets=response)
+        with pytest.raises(InventoryPendingError, match="not available"):
+            _resolve(network, client)
         stub.assert_no_pending_responses()
 
 
-def test_unused_and_disabled_vpcs_do_not_request_aws_inventory():
-    enabled = _network("one", "10.1.0.0/16")
-    disabled = replace(_network("two", "10.2.0.0/16"), policy=BastionPolicy.DISABLED)
-    unused = _network("three", "10.3.0.0/16")
-    manifest = replace(_manifest(enabled, disabled), vpcs=(enabled, disabled, unused))
+def test_every_bastion_is_resolved_without_functions_and_disabled_vpcs_are_skipped():
+    first, second = _network(), _network("two")
+    disabled = replace(_network("three"), bastion_instance_id=None)
+    manifest = NetworkManifest((first, disabled, second), ())
     client = _client()
-    called = []
+    requested = []
 
     def client_for(network):
-        called.append(network.identity)
-        assert network is enabled
+        requested.append(network.identity)
         return client
 
+    response = [
+        dict(subnet, CidrBlock=cidr)
+        for subnet, cidr in zip(_subnets(second), ("10.2.1.0/24", "10.2.2.0/24"), strict=True)
+    ]
     with Stubber(client) as stub:
-        _add_network(stub, enabled)
+        _add_network(stub, first)
+        _add_network(stub, second, cidr="10.2.0.0/16", subnets=response)
         resolved = resolve_vpc_inventory(manifest, client_for)
         stub.assert_no_pending_responses()
-    assert called == ["one"]
-    assert resolved.vpcs[1:] == manifest.vpcs[1:]
+    assert requested == ["one", "two"]
+    assert tuple(resolved) == ("one", "two")
 
 
-def test_ten_az_inventory_selects_twenty_routes_from_thirty_deployed_subnets():
-    network = _network("one", "10.1.0.0/16")
-    tiers = [
-        tuple(
-            SubnetNetwork(
-                f"subnet-{tier}-{index}",
-                f"us-east-1{chr(ord('a') + index)}",
-                IPv4Network(f"10.1.{tier * 10 + index}.0/24"),
-            )
-            for index in range(10)
-        )
-        for tier in range(3)
+def test_partial_overlap_in_associated_ranges_is_rejected_without_functions():
+    first, second, client = _network(), _network("two"), _client()
+    response = [
+        dict(subnet, CidrBlock=cidr)
+        for subnet, cidr in zip(_subnets(second), ("10.2.1.0/24", "10.2.2.0/24"), strict=True)
     ]
-    network = replace(
-        network, public_subnets=tiers[0], private_subnets=tiers[1], isolated_subnets=tiers[2]
-    )
-    client = _client()
     with Stubber(client) as stub:
-        _add_network(stub, network, associated=("10.3.0.0/16",))
-        resolved = resolve_vpc_inventory(_manifest(network), lambda _: client).vpcs[0]
+        _add_network(stub, first)
+        _add_network(
+            stub, second, cidr="10.2.0.0/16", associated=("10.1.128.0/17",), subnets=response
+        )
+        with pytest.raises(ValueError, match=r"10.1.0.0/16.*10.1.128.0/17.*overlap"):
+            resolve_vpc_inventory(NetworkManifest((first, second), ()), lambda _: client)
         stub.assert_no_pending_responses()
-    assert len(resolved.subnets) == 30
-    assert tuple(map(str, resolved.route_cidrs)) == tuple(
-        f"10.1.{index}.0/24" for index in range(10, 30)
-    )
-    assert resolved.cidrs == (IPv4Network("10.1.0.0/16"), IPv4Network("10.3.0.0/16"))

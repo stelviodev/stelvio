@@ -14,9 +14,9 @@ from unittest.mock import Mock
 from botocore.exceptions import ClientError
 from pytest import fixture, mark, raises
 
-from stelvio.tunnel.manifest import AccessDescriptor, SubnetNetwork, VpcNetwork
-from stelvio.tunnel.policy import BastionPolicy
+from stelvio.network import VpcNetwork
 from stelvio.tunnel.processes import ProcessIdentity, identity
+from stelvio.tunnel.runtime_models import BastionInventory, SubnetInventory, VpcInventory
 from stelvio.tunnel.socks import TransportInterruptedError
 from stelvio.tunnel.transport import (
     SshTransport,
@@ -31,37 +31,21 @@ from stelvio.tunnel.transport import (
 
 @fixture
 def transport_world(tmp_path, monkeypatch):
-    network = VpcNetwork(
-        identity="vpc-owner",
-        account="123456789012",
-        region="us-east-1",
-        vpc_id="vpc-12345678",
-        provider="provider",
-        cidrs=(IPv4Network("10.254.0.0/16"),),
-        policy=BastionPolicy.PERSISTENT,
-        dns_domains=(),
-        public_subnets=(
-            SubnetNetwork(
-                "subnet-public",
-                "us-east-1a",
-                IPv4Network("10.254.0.0/24"),
-            ),
+    network = VpcInventory(
+        VpcNetwork(
+            identity="vpc-owner",
+            account="123456789012",
+            region="us-east-1",
+            vpc_id="vpc-12345678",
+            provider="provider",
+            route_subnet_ids=("subnet-private", "subnet-isolated"),
+            bastion_instance_id="i-12345678",
         ),
-        private_subnets=(
-            SubnetNetwork(
-                "subnet-private",
-                "us-east-1a",
-                IPv4Network("10.254.1.0/24"),
-            ),
+        (IPv4Network("10.254.0.0/16"),),
+        (
+            SubnetInventory("subnet-private", "us-east-1a", IPv4Network("10.254.1.0/24")),
+            SubnetInventory("subnet-isolated", "us-east-1a", IPv4Network("10.254.2.0/24")),
         ),
-        isolated_subnets=(
-            SubnetNetwork(
-                "subnet-isolated",
-                "us-east-1a",
-                IPv4Network("10.254.2.0/24"),
-            ),
-        ),
-        access=AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
     )
     session = Mock(region_name="us-east-1")
     session.get_partition_for_region.return_value = "aws"
@@ -78,13 +62,20 @@ def transport_world(tmp_path, monkeypatch):
     clients["sts"].get_caller_identity.return_value = {"Account": "123456789012"}
     tags = [{"Key": "stelvio:app", "Value": "app"}]
     node = {
+        "InstanceId": "i-12345678",
+        "SubnetId": "subnet-public",
         "VpcId": "vpc-12345678",
         "Placement": {"AvailabilityZone": "us-east-1a"},
         "SecurityGroups": [{"GroupId": "sg-12345678"}],
         "Tags": tags,
         "State": {"Name": "running"},
     }
-    group = {"VpcId": "vpc-12345678", "OwnerId": "123456789012", "IpPermissions": []}
+    group = {
+        "GroupId": "sg-12345678",
+        "VpcId": "vpc-12345678",
+        "OwnerId": "123456789012",
+        "IpPermissions": [],
+    }
     clients["ec2"].describe_instances.return_value = {"Reservations": [{"Instances": [node]}]}
     clients["ec2"].describe_security_groups.return_value = {"SecurityGroups": [group]}
     clients["ssm"].describe_instance_information.return_value = {
@@ -114,7 +105,7 @@ def test_actual_child_birth_registration_finishes_before_shutdown_fence(  # noqa
 ):
     transport, clients, _, _ = transport_world
     transport.pin = None
-    monkeypatch.setattr(transport, "_bootstrap", lambda: "fixture authenticated pin")
+    monkeypatch.setattr(transport, "_bootstrap", transport.validate_owner)
     monkeypatch.setattr("stelvio.tunnel.transport.installed_plugin", lambda: Path("/usr/bin/true"))
     clients["ssm"].start_session.return_value = {"SessionId": "owned-fixture"}
     clients["ssm"].meta.endpoint_url = "https://ssm.us-east-1.amazonaws.com"
@@ -326,7 +317,7 @@ def test_invalid_private_plugin_is_terminal_at_transport_boundary(
 ):
     transport, clients, *_ = transport_world
     transport.pin = None
-    monkeypatch.setattr(transport, "_bootstrap", lambda: "fixture authenticated pin")
+    monkeypatch.setattr(transport, "_bootstrap", transport.validate_owner)
 
     def missing_plugin():
         from stelvio.tunnel.plugin import PluginAssetError
@@ -363,7 +354,7 @@ def test_partial_start_failure_terminates_session_and_cleans_temporary_key(
 ):
     transport, clients, *_ = transport_world
     transport.pin = None
-    monkeypatch.setattr(transport, "_bootstrap", lambda: "fixture authenticated pin")
+    monkeypatch.setattr(transport, "_bootstrap", transport.validate_owner)
     monkeypatch.setattr("stelvio.tunnel.transport.installed_plugin", lambda: Path("/usr/bin/true"))
     clients["ssm"].start_session.return_value = {"SessionId": "owned-fixture"}
     instance_connect = Mock()
@@ -392,7 +383,7 @@ def test_lost_start_session_reply_recovers_only_one_exact_owned_session(
 ):
     transport, clients, *_ = transport_world
     transport.pin = None
-    monkeypatch.setattr(transport, "_bootstrap", lambda: "fixture authenticated pin")
+    monkeypatch.setattr(transport, "_bootstrap", transport.validate_owner)
     monkeypatch.setattr("stelvio.tunnel.transport.installed_plugin", lambda: Path("/usr/bin/true"))
     clients["ssm"].start_session.side_effect = ClientError(
         {"Error": {"Code": "InternalError", "Message": "response lost"}}, "StartSession"
@@ -837,3 +828,46 @@ def test_valid_termination_records_completion_and_releases_owner(transport_world
     assert transport.session_id is None
     assert transport._reason is None
     assert transport._receipt is None
+
+
+def test_transport_discovers_actual_bastion_placement_and_groups(transport_world):
+    transport, clients, node, group = transport_world
+    node["Placement"]["AvailabilityZone"] = "us-east-1b"
+    node["SubnetId"] = "subnet-new-public"
+    node["SecurityGroups"].append({"GroupId": "sg-second"})
+    second = dict(group, GroupId="sg-second")
+    clients["ec2"].describe_security_groups.return_value = {"SecurityGroups": [second, group]}
+    assert transport.validate_owner() == BastionInventory(
+        "i-12345678", "us-east-1b", ("sg-12345678", "sg-second"), "subnet-new-public"
+    )
+    clients["ec2"].describe_security_groups.assert_called_once_with(
+        GroupIds=["sg-12345678", "sg-second"]
+    )
+
+
+def test_ec2_instance_connect_uses_aws_availability_zone(ssh_world, transport_world):
+    transport, *_ = ssh_world
+    _, clients, *_ = transport_world
+    node = clients["ec2"].describe_instances.return_value["Reservations"][0]["Instances"][0]
+    node["Placement"]["AvailabilityZone"] = "us-east-1b"
+    connector = transport.start()
+    try:
+        assert connector.proxy_port > 0
+        assert (
+            clients["ec2-instance-connect"].send_ssh_public_key.call_args.kwargs[
+                "AvailabilityZone"
+            ]
+            == "us-east-1b"
+        )
+    finally:
+        transport.close()
+
+
+def test_transport_refuses_ssh_ingress_in_an_additional_group(transport_world):
+    transport, clients, node, group = transport_world
+    node["SecurityGroups"].append({"GroupId": "sg-extra"})
+    extra = dict(group, GroupId="sg-extra", IpPermissions=[{"IpProtocol": "-1"}])
+    clients["ec2"].describe_security_groups.return_value = {"SecurityGroups": [group, extra]}
+    with raises(TransportAuthorizationError, match="admits inbound SSH"):
+        transport.start()
+    clients["ssm"].start_session.assert_not_called()

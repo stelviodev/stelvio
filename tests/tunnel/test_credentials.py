@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from pytest import mark, raises
 
@@ -10,6 +11,7 @@ from stelvio.tunnel.credentials import AwsExecutionContext
 
 WORKER = r"""
 import os,sys
+sys.path.insert(0,sys.argv.pop(1))
 from types import MappingProxyType
 from botocore.stub import Stubber
 from stelvio.tunnel import credentials as module
@@ -103,6 +105,7 @@ def test_actual_child_sdk_uses_startup_source_after_handler_environment_changes(
             "-I",
             "-c",
             WORKER,
+            str(Path(__file__).resolve().parents[2]),
             str(os.getpid()),
             profile or "-",
             expected,

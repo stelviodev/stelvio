@@ -21,7 +21,7 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 
-from stelvio.tunnel.bastion import SSH_USER
+from stelvio.network import SSH_USER
 from stelvio.tunnel.credentials import AWS_IO
 from stelvio.tunnel.host_trust import (
     HostIdentity,
@@ -32,6 +32,7 @@ from stelvio.tunnel.host_trust import (
 )
 from stelvio.tunnel.plugin import PluginAssetError, installed_plugin
 from stelvio.tunnel.processes import identity, process_group_empty, unreaped_child
+from stelvio.tunnel.runtime_models import BastionInventory
 from stelvio.tunnel.socks import SocksConnector, TransportInterruptedError
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from botocore.client import BaseClient
 
     from stelvio.tunnel.host_trust import LockedHostTrust
-    from stelvio.tunnel.manifest import VpcNetwork
+    from stelvio.tunnel.runtime_models import VpcInventory
 
 SSH_PORT = 22
 ONLINE_SECONDS = 300
@@ -125,9 +126,9 @@ def terminate_owned_session(
 
 
 class SshTransport:
-    def __init__(  # noqa: PLR0913 - explicit identity, provider and ownership boundaries
+    def __init__(  # noqa: PLR0913  # explicit identity, provider and ownership boundaries
         self,
-        network: VpcNetwork,
+        network: VpcInventory,
         session: boto3.Session,
         stop: Event,
         *,
@@ -153,6 +154,7 @@ class SshTransport:
         self._terminated = False
         self._session_start_attempted = False
         self._temporary: tempfile.TemporaryDirectory | None = None
+        self._bastion: BastionInventory | None = None
         self.ssm = session.client("ssm", config=AWS_IO)
         self.ec2 = session.client("ec2", config=AWS_IO)
 
@@ -161,24 +163,23 @@ class SshTransport:
             raise TransportInterruptedError("VPC transport attempt cancelled")
 
     def _owned(self, tags: dict[str, str]) -> bool:
-        return (
-            self.network.access.owner == self.network.identity
-            and bool(self.ownership)
-            and all(tags.get(key) == value for key, value in self.ownership.items())
+        return bool(self.ownership) and all(
+            tags.get(key) == value for key, value in self.ownership.items()
         )
 
-    def validate_owner(self) -> None:  # noqa: C901 - independent owned-resource boundaries
-        access = self.network.access
-        if access is None or self.session.region_name != self.network.region:
+    def validate_owner(self) -> BastionInventory:  # noqa: C901  # independent AWS boundaries
+        record = self.network.record
+        instance_id = record.bastion_instance_id
+        if instance_id is None or self.session.region_name != record.region:
             raise TransportAuthorizationError("VPC transport is missing its resolved access owner")
         if (
             self.session.client("sts", config=AWS_IO).get_caller_identity()["Account"]
-            != self.network.account
+            != record.account
         ):
             raise TransportAuthorizationError("VPC transport AWS account changed")
         instances = [
             node
-            for reservation in self.ec2.describe_instances(InstanceIds=[access.instance_id])[
+            for reservation in self.ec2.describe_instances(InstanceIds=[instance_id])[
                 "Reservations"
             ]
             for node in reservation["Instances"]
@@ -187,25 +188,31 @@ class SshTransport:
             raise TransportAuthorizationError("VPC access instance identity is ambiguous")
         node = instances[0]
         tags = {tag["Key"]: tag["Value"] for tag in node.get("Tags", [])}
+        az = node.get("Placement", {}).get("AvailabilityZone")
+        subnet_id = node.get("SubnetId")
+        group_ids = tuple(group.get("GroupId") for group in node.get("SecurityGroups", []))
         if (
-            node.get("VpcId") != self.network.vpc_id
-            or node.get("Placement", {}).get("AvailabilityZone") != access.availability_zone
-            or access.security_group_id not in {g["GroupId"] for g in node["SecurityGroups"]}
+            node.get("InstanceId") != instance_id
+            or node.get("VpcId") != record.vpc_id
+            or not isinstance(az, str)
+            or not az
+            or not isinstance(subnet_id, str)
+            or not subnet_id
+            or not group_ids
+            or any(not isinstance(group, str) or not group for group in group_ids)
+            or len(set(group_ids)) != len(group_ids)
             or not self._owned(tags)
         ):
             raise TransportAuthorizationError("VPC access instance ownership changed")
         if node.get("State", {}).get("Name") != "running":
             raise TransportRetryError("VPC access instance is not running")
-        groups = self.ec2.describe_security_groups(
-            GroupIds=[group["GroupId"] for group in node["SecurityGroups"]]
-        )["SecurityGroups"]
-        if len(groups) != len(node["SecurityGroups"]):
+        groups = self.ec2.describe_security_groups(GroupIds=list(group_ids))["SecurityGroups"]
+        if len(groups) != len(group_ids) or {group.get("GroupId") for group in groups} != set(
+            group_ids
+        ):
             raise TransportAuthorizationError("VPC access security group inventory is incomplete")
         for group in groups:
-            if (
-                group.get("VpcId") != self.network.vpc_id
-                or group.get("OwnerId") != self.network.account
-            ):
+            if group.get("VpcId") != record.vpc_id or group.get("OwnerId") != record.account:
                 raise TransportAuthorizationError("VPC access security group ownership changed")
             for rule in group.get("IpPermissions", []):
                 if rule["IpProtocol"] == "-1" or (
@@ -215,10 +222,13 @@ class SshTransport:
                     raise TransportAuthorizationError(
                         "VPC access admits inbound SSH; redeploy before dev"
                     )
+        access = BastionInventory(instance_id, az, group_ids, subnet_id)
+        self._bastion = access
+        return access
 
     def _bootstrap(self) -> None:
         self.validate_owner()
-        access = self.network.access
+        access = self._bastion
         deadline = time.monotonic() + ONLINE_SECONDS
         while time.monotonic() < deadline:
             self._pause(0)
@@ -266,11 +276,11 @@ class SshTransport:
             plugin = installed_plugin()
         except PluginAssetError as error:
             raise TransportArtifactError(str(error)) from None
-        access = self.network.access
+        access = self._bastion
         target = HostIdentity(
-            self.session.get_partition_for_region(self.network.region),
-            self.network.account,
-            self.network.region,
+            self.session.get_partition_for_region(self.network.record.region),
+            self.network.record.account,
+            self.network.record.region,
             access.instance_id,
         )
         with locked_host_trust(target, self.stop) as trust:
@@ -292,7 +302,7 @@ class SshTransport:
             stderr=subprocess.DEVNULL,
             timeout=15,
         )
-        access = self.network.access
+        access = self._bastion
         hosts = directory / "known_hosts"
         hosts.write_text(f"{trust.identity.alias} {trust.key}\n" if trust.key else "")
         hosts.chmod(0o600)
@@ -327,7 +337,7 @@ class SshTransport:
         environment.update(
             STLV_SSM_SESSION=json.dumps(result),
             STLV_SSM_PLUGIN=str(plugin),
-            STLV_SSM_REGION=self.network.region,
+            STLV_SSM_REGION=self.network.record.region,
             STLV_SSM_ENDPOINT=self.ssm.meta.endpoint_url,
             STLV_SSM_TARGET=access.instance_id,
         )
@@ -540,7 +550,7 @@ class SshTransport:
     def _recover_session_id(self) -> str:
         pages = self.ssm.get_paginator("describe_sessions").paginate(
             State="Active",
-            Filters=[{"key": "Target", "value": self.network.access.instance_id}],
+            Filters=[{"key": "Target", "value": self.network.record.bastion_instance_id}],
             PaginationConfig={"MaxItems": 1000, "PageSize": 50},
         )
         found = [
@@ -551,7 +561,7 @@ class SshTransport:
         ]
         if (
             len(found) != 1
-            or found[0].get("Target") != self.network.access.instance_id
+            or found[0].get("Target") != self.network.record.bastion_instance_id
             or not found[0].get("SessionId")
         ):
             raise TransportCleanupError(
@@ -564,7 +574,7 @@ class SshTransport:
             return
         if not self._terminated:
             terminate_owned_session(
-                self.ssm, self.session_id, self.network.access.instance_id, self._reason
+                self.ssm, self.session_id, self.network.record.bastion_instance_id, self._reason
             )
             self._terminated = True
         if self.record:

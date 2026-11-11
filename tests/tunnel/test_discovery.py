@@ -2,74 +2,30 @@
 
 from copy import deepcopy
 from dataclasses import replace
-from ipaddress import IPv4Network
 from types import SimpleNamespace
 
 import pytest
 
+from stelvio.network import NetworkManifest, ResourceNetwork, VpcNetwork
 from stelvio.tunnel.discovery import DiscoveryError, DiscoveryPendingError, ResourceDiscovery
-from stelvio.tunnel.manifest import (
-    EndpointNetwork,
-    NetworkManifest,
-    ResourceNetwork,
-    SubnetNetwork,
-    VpcNetwork,
-)
-from stelvio.tunnel.policy import BastionPolicy
 
 
 @pytest.fixture
 def deployed():
-    def vpc(name, cidr):
-        cidr = IPv4Network(cidr)
+    def vpc(name):
         return VpcNetwork(
-            identity=name,
-            account="123456789012",
-            region="us-east-1",
-            vpc_id="vpc-" + name,
-            provider="provider-" + name,
-            cidrs=(cidr,),
-            policy=BastionPolicy.PERSISTENT,
-            dns_domains=(),
-            public_subnets=(
-                SubnetNetwork(
-                    f"subnet-{name}",
-                    "us-east-1a",
-                    IPv4Network((cidr.network_address, 24)),
-                ),
-            ),
-            private_subnets=(
-                SubnetNetwork(
-                    f"subnet-{name}-private",
-                    "us-east-1a",
-                    IPv4Network((cidr.network_address + 256, 24)),
-                ),
-            ),
-            isolated_subnets=(
-                SubnetNetwork(
-                    f"subnet-{name}-isolated",
-                    "us-east-1a",
-                    IPv4Network((cidr.network_address + 512, 24)),
-                ),
-            ),
-            access=None,
-        )
-
-    def resource(name):
-        return ResourceNetwork(
-            "db-" + name,
             name,
-            "documentdb",
-            "cluster-" + name,
-            (27017,),
-            (f"cluster-{name}.cluster-token.us-east-1.docdb.amazonaws.com",),
-            ("sg-" + name,),
+            "123456789012",
+            "us-east-1",
+            "vpc-" + name,
+            "provider-" + name,
+            ("subnet-" + name,),
+            "i-" + name,
         )
 
     return NetworkManifest(
-        (vpc("a", "10.1.0.0/16"), vpc("b", "10.2.0.0/16")),
-        (resource("a"), resource("b")),
-        (EndpointNetwork("fn", "fn", ("a", "b")),),
+        (vpc("a"), vpc("b")),
+        (ResourceNetwork("db-a", "a", "cluster-a"), ResourceNetwork("db-b", "b", "cluster-b")),
     )
 
 
@@ -143,17 +99,17 @@ def test_two_vpcs_get_exact_cluster_reader_and_member_names(deployed):
             {"DBInstanceIdentifier": "instance-" + owner},
             {"DBClusterIdentifier": "cluster-" + owner},
         ]
-    assert discovery.manifest.resources[0].hostnames == (
+    assert discovery.resources_for("a")[0].hostnames == (
         "cluster-a.cluster-token.us-east-1.docdb.amazonaws.com",
         "cluster-a.cluster-ro-token.us-east-1.docdb.amazonaws.com",
         "instance-a.token.us-east-1.docdb.amazonaws.com",
     )
-    assert discovery.manifest.resources[1].hostnames == (
+    assert discovery.resources_for("b")[0].hostnames == (
         "cluster-b.cluster-token.us-east-1.docdb.amazonaws.com",
         "cluster-b.cluster-ro-token.us-east-1.docdb.amazonaws.com",
         "instance-b.token.us-east-1.docdb.amazonaws.com",
     )
-    assert discovery.manifest.resources[0].ports == (27017,)
+    assert discovery.resources_for("a")[0].port == 27017
 
 
 @pytest.mark.parametrize(
@@ -166,7 +122,7 @@ def test_two_vpcs_get_exact_cluster_reader_and_member_names(deployed):
             "account/region/identity",
         ),
         ("cluster", "Engine", "aurora", "identity or engine"),
-        ("cluster", "Port", 27018, "port changed"),
+        ("cluster", "Port", 27018, "member port differs"),
         ("subnet", "VpcId", "vpc-b", "another VPC"),
         ("member", "DBClusterIdentifier", "cluster-b", "another cluster"),
         (
@@ -185,7 +141,7 @@ def test_two_vpcs_get_exact_cluster_reader_and_member_names(deployed):
             "member",
             "VpcSecurityGroups",
             [{"VpcSecurityGroupId": "sg-b", "Status": "active"}],
-            "security groups changed",
+            "member security groups differ",
         ),
     ],
 )
@@ -198,7 +154,7 @@ def test_foreign_or_changed_resource_never_commits_partial_discovery(
     getattr(client, target)[field] = value
     with pytest.raises(DiscoveryError, match=message):
         discovery.refresh("a", 1, client)
-    assert discovery.manifest is deployed
+    assert discovery.resources_for("a") == ()
 
 
 @pytest.mark.parametrize("target", ["cluster", "member"])
@@ -210,23 +166,24 @@ def test_extra_security_group_never_commits_partial_discovery(deployed, target):
         {"VpcSecurityGroupId": "sg-unexpected", "Status": "active"}
     )
 
-    with pytest.raises(DiscoveryError, match="security groups changed"):
+    with pytest.raises(DiscoveryError, match="member security groups differ"):
         discovery.refresh("a", 1, client)
 
-    assert discovery.manifest is deployed
+    assert discovery.resources_for("a") == ()
 
 
 def test_membership_change_is_retryable_and_preserves_other_vpc(deployed):
     discovery = ResourceDiscovery(deployed)
     discovery.begin("b", 1)
     discovery.refresh("b", 1, Client("b"))
-    previous = discovery.manifest
+    previous = discovery.resources_for("b")
     discovery.begin("a", 1)
     client = Client("a")
     client.changing = True
     with pytest.raises(DiscoveryPendingError, match="changed during discovery"):
         discovery.refresh("a", 1, client)
-    assert discovery.manifest is previous
+    assert discovery.resources_for("b") is previous
+    assert discovery.resources_for("a") == ()
 
 
 def test_superseded_generation_cannot_commit_late_sdk_result(deployed):
@@ -235,28 +192,32 @@ def test_superseded_generation_cannot_commit_late_sdk_result(deployed):
     client = Client("a")
     client.on_instance = lambda: discovery.begin("a", 2)
     assert not discovery.refresh("a", 1, client)
-    assert discovery.manifest is deployed
+    assert discovery.resources_for("a") == ()
     assert not discovery.refresh("a", 1, Client("a"))
     assert discovery.refresh("a", 2, Client("a"))
 
 
-def test_discovered_host_cannot_be_captured_by_another_vpc_custom_domain(deployed):
-    network = replace(deployed.vpcs[1], dns_domains=("token.us-east-1.docdb.amazonaws.com",))
-    deployed = replace(deployed, vpcs=(deployed.vpcs[0], network))
+def test_exact_discovered_hostname_cannot_belong_to_two_vpcs(deployed):
     discovery = ResourceDiscovery(deployed)
     discovery.begin("a", 1)
+    assert discovery.refresh("a", 1, Client("a"))
+    previous = discovery.resources_for("a")
+    client = Client("b")
+    client.cluster["Endpoint"] = previous[0].hostnames[0]
+    discovery.begin("b", 1)
     with pytest.raises(ValueError, match="DNS ownership conflict"):
-        discovery.refresh("a", 1, Client("a"))
-    assert discovery.manifest is deployed
+        discovery.refresh("b", 1, client)
+    assert discovery.resources_for("a") is previous
+    assert discovery.resources_for("b") == ()
 
 
 def test_second_database_failure_rolls_back_entire_vpc_refresh(deployed):
-    second = replace(deployed.resources[0], identity="db-second", resource_id="cluster-second")
+    second = replace(deployed.resources[0], identity="db-second", cluster_id="cluster-second")
     deployed = replace(deployed, resources=(*deployed.resources, second))
     discovery = ResourceDiscovery(deployed)
     discovery.begin("b", 1)
     assert discovery.refresh("b", 1, Client("b"))
-    previous = discovery.manifest
+    previous = discovery.resources_for("b")
     client = Client("a")
     describe = client.describe_db_clusters
 
@@ -275,4 +236,57 @@ def test_second_database_failure_rolls_back_entire_vpc_refresh(deployed):
         {"DBInstanceIdentifier": "instance-a"},
         {"DBClusterIdentifier": "cluster-a"},
     ]
-    assert discovery.manifest is previous
+    assert discovery.resources_for("b") is previous
+    assert discovery.resources_for("a") == ()
+
+
+@pytest.mark.parametrize("port", [None, True, 0, 65536, 27017.0])
+def test_invalid_aws_port_does_not_commit_discovery(deployed, port):
+    discovery = ResourceDiscovery(deployed)
+    discovery.begin("a", 1)
+    client = Client("a")
+    client.cluster["Port"] = port
+    with pytest.raises(DiscoveryError, match="service port must be an integer"):
+        discovery.refresh("a", 1, client)
+    assert discovery.resources_for("a") == ()
+
+
+def test_current_cluster_configuration_is_read_from_aws(deployed):
+    discovery = ResourceDiscovery(deployed)
+    discovery.begin("a", 1)
+    client = Client("a")
+    client.cluster["Port"] = client.member["Endpoint"]["Port"] = 27018
+    client.cluster["Endpoint"] = "new-cluster.internal.example"
+    groups = [{"VpcSecurityGroupId": "sg-new", "Status": "active"}]
+    client.cluster["VpcSecurityGroups"] = deepcopy(groups)
+    client.member["VpcSecurityGroups"] = deepcopy(groups)
+    assert discovery.refresh("a", 1, client)
+    resource = discovery.resources_for("a")[0]
+    assert resource.record == deployed.resources[0]
+    assert resource.port == 27018
+    assert resource.hostnames == (
+        "new-cluster.internal.example",
+        "cluster-a.cluster-ro-token.us-east-1.docdb.amazonaws.com",
+        "instance-a.token.us-east-1.docdb.amazonaws.com",
+    )
+
+
+@pytest.mark.parametrize("hostname", ["*.example", "127.0.0.1", "with whitespace"])
+def test_invalid_aws_hostname_does_not_commit_discovery(deployed, hostname):
+    discovery = ResourceDiscovery(deployed)
+    discovery.begin("a", 1)
+    client = Client("a")
+    client.cluster["Endpoint"] = hostname
+    with pytest.raises(DiscoveryError, match="Invalid DNS name"):
+        discovery.refresh("a", 1, client)
+    assert discovery.resources_for("a") == ()
+
+
+def test_vpc_without_databases_requires_no_docdb_calls(deployed):
+    manifest = replace(deployed, resources=())
+    discovery = ResourceDiscovery(manifest)
+    discovery.begin("a", 1)
+    client = Client("a")
+    assert discovery.refresh("a", 1, client)
+    assert client.calls == []
+    assert discovery.resources_for("a") == ()
