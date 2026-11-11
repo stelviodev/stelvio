@@ -180,6 +180,9 @@ Functions that join the same Vpc with the default app group (`Function(vpc=vpc)`
 can reach the cluster. See
 [Lambda Functions in VPC](vpc.md#lambda-functions-in-vpc).
 
+With `bastion=True`, the cluster also admits the bastion's security group on
+its port. Deployment adds this rule to the DocumentDb's security group.
+
 With your own `security_groups` on `VpcAttachment`, the cluster still admits
 only the app security group. Add an ingress rule on
 `db.resources.security_group` yourself:

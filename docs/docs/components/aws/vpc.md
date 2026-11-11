@@ -232,10 +232,45 @@ not add a network grant. So a Function that links a datastore must join the same
 Vpc with `vpc=`, or Stelvio raises `ValueError` when you create the Function. See
 [Linking a DocumentDB cluster](document-db.md#linking) for an example.
 
+## Bastion resources
+
+!!! warning "Experimental"
+    Bastion support is experimental. Local access through `stlv dev` and
+    `stlv tunnel` is not available yet.
+
+Keep the bastion off in production. Enable it for development environments:
+
+```python
+from stelvio import context
+from stelvio.aws.vpc import Vpc
+
+Vpc("main", bastion=context().env != "prod")
+```
+
+`bastion` is a bool and defaults to `False`. Functions in this Vpc work as before.
+
+With `bastion=True`, deployment creates a persistent EC2 instance, an IAM role
+and instance profile, and a security group. The instance runs in a public subnet
+for outbound AWS connectivity. Its security group has no inbound rules by
+default, and its SSH server listens on loopback. Disable `bastion` and deploy,
+or destroy the Vpc, to remove these resources and their [costs](#cost).
+
+By default, anyone allowed to start a Session Manager shell on the bastion can
+obtain root access through `ssm-user`'s sudo permissions. Restrict
+`ssm:StartSession` access to the instance and session documents accordingly.
+
+The default image is Amazon Linux 2023 for ARM64, with a `t4g.nano` instance.
+If you customize the instance type, choose one compatible with the image's ARM64
+architecture.
+
+A Stelvio upgrade that changes the boot script replaces the bastion and drops
+open sessions. Image updates alone do not replace it. To get a newer image,
+deploy once with `bastion=False` and then with `bastion=True`.
+
 ## Cost
 
-The VPC itself — subnets, route tables, Internet Gateway — is free. NAT is what
-costs money:
+The VPC itself — subnets, route tables, Internet Gateway — is free. NAT and
+optional bastion resources have ongoing costs:
 
 - A managed NAT Gateway costs **~$33/month** ($0.045/hour, always on) plus
   **$0.045 per GB** of data processed.
@@ -245,9 +280,14 @@ costs money:
   before data charges.
 - `NatConfig(type="managed", single=True)` cuts that to one NAT — **~$37/month**.
   Good enough for dev, staging, and many small production apps.
+- A bastion costs **~$7.40/month**: about $3.07 for `t4g.nano`, $3.65 for its
+  public IPv4 address and $0.64 for its 8 GB gp3 disk, before data transfer and
+  any surplus CPU credit charges.
 
-Prices are for `us-east-1`; check [AWS VPC pricing](https://aws.amazon.com/vpc/pricing/)
-for your region.
+Prices are for `us-east-1`, using 730 hours per month. Check
+[AWS VPC pricing](https://aws.amazon.com/vpc/pricing/),
+[EC2 pricing](https://aws.amazon.com/ec2/pricing/on-demand/) and
+[EBS pricing](https://aws.amazon.com/ebs/pricing/) for your region.
 
 <!-- Future (ec2 NAT, PR5) — cost comparison, restore when it ships:
 
@@ -275,6 +315,12 @@ Pulumi resource properties. For an overview of how customization works, see the
 | `isolated_route_table`  | [RouteTableArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/routetable/#inputs)                      | Isolated route tables (all AZs) |
 | `elastic_ip`            | [EipArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/eip/#inputs)                                    | NAT Elastic IPs                 |
 | `nat_gateway`           | [NatGatewayArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/natgateway/#inputs)                      | NAT Gateways                    |
+| `bastion`               | [InstanceArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/instance/#inputs)                           | Persistent access instance      |
+| `bastion_security_group` | [SecurityGroupArgs](https://www.pulumi.com/registry/packages/aws/api-docs/ec2/securitygroup/#inputs)                 | Bastion security group           |
+| `bastion_role`          | [RoleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/#inputs)                                   | Bastion IAM role                 |
+| `bastion_profile`       | [InstanceProfileArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/instanceprofile/#inputs)             | Bastion IAM instance profile     |
+| `bastion_egress`        | [SecurityGroupEgressRuleArgs](https://www.pulumi.com/registry/packages/aws/api-docs/vpc/securitygroupegressrule/#inputs) | Bastion outbound traffic rule |
+| `bastion_policy`        | [RolePolicyArgs](https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/#inputs)                         | Bastion SSM permissions          |
 
 ### Example
 

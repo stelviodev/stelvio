@@ -127,6 +127,13 @@ STLV_TEST_AWS_PROFILE=<profile> uv run pytest tests/integration/ --integration -
 ```
 
 Never combine tier flags in one pytest run: it opens too many files and the run collapses.
+
+The bastion test in the VPC tier waits for SSM registration, then uses Run Command to
+verify cloud-init, the running SSH listener and forwarding as the tunnel user. Its AWS
+caller needs `ssm:SendCommand` for `AWS-RunShellScript` and the test instance, plus
+`ssm:GetCommandInvocation` and `ssm:CancelCommand`. These are test-runner permissions;
+the test does not add them to the bastion role. The probe runs inside the instance and
+needs no local Session Manager plugin, helper installation or host networking changes.
 Don't interrupt after `[100%]` — teardown is still destroying stacks. Wait for the summary
 line.
 

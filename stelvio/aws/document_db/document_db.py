@@ -28,6 +28,7 @@ from stelvio.component import (
     resource_name,
 )
 from stelvio.link import LinkableMixin, LinkConfig
+from stelvio.network import OUTPUT_KEY, VERSION
 from stelvio.project import get_dot_stelvio_dir
 from stelvio.provider import ProviderStore
 
@@ -208,6 +209,15 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
         instances = self._create_instances(cluster)
         if manage_password:
             self._create_secret_rotation(cluster, instances)
+        self.register_outputs(
+            {
+                OUTPUT_KEY: {
+                    "version": VERSION,
+                    "vpc": self.config.vpc.urn,
+                    "cluster_id": cluster.id,
+                }
+            }
+        )
         return DocumentDbResources(cluster=cluster, security_group=security_group)
 
     def _create_subnet_group(self) -> SubnetGroup:
@@ -335,6 +345,18 @@ class DocumentDb(Component[DocumentDbResources, DocumentDbCustomizationDict], Li
             tags=self.tags or None,
             opts=self._resource_opts(),
         )
+        bastion_group = self.config.vpc.resources.bastion_security_group
+        if bastion_group is not None:
+            SecurityGroupIngressRule(
+                self._resource_name("-bastion-ingress"),
+                security_group_id=security_group.id,
+                referenced_security_group_id=bastion_group.id,
+                ip_protocol="tcp",
+                from_port=cluster.port,
+                to_port=cluster.port,
+                tags=self.tags or None,
+                opts=self._resource_opts(),
+            )
         return cluster, cluster_props.get("manage_master_user_password") is True
 
     def _create_instances(self, cluster: Cluster) -> list[ClusterInstance]:

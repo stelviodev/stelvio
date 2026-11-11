@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, final
 
 from rich.markup import escape
 
+from stelvio.network import OUTPUT_KEY, NetworkManifest, manifest_from_records
 from stelvio.rich_deployment_format import short_name
 
 if TYPE_CHECKING:
@@ -68,6 +69,29 @@ def _state_resources(state: dict | None) -> list[dict]:
         return []
     deployment = state.get("checkpoint", state).get("latest", {})
     return deployment.get("resources", [])
+
+
+def read_network_manifest(state: dict | None) -> NetworkManifest:
+    """Read private component metadata without exposing it in CLI output.
+
+    A VPC deployment with incomplete metadata must be redeployed before local
+    access. Applications without VPC components need no networking data.
+    """
+    network_types = {"stelvio:aws:Vpc", "stelvio:aws:DocumentDb"}
+    records = []
+    for resource in _state_resources(state):
+        component_type = resource.get("type")
+        if component_type not in network_types:
+            continue
+        outputs = resource.get("outputs") or {}
+        metadata = outputs.get(OUTPUT_KEY)
+        if metadata is None:
+            raise ValueError(
+                f"Missing network metadata for {resource.get('urn')!r}, "
+                f"field {OUTPUT_KEY!r}; redeploy the app with this Stelvio version"
+            )
+        records.append((component_type, resource["urn"], metadata))
+    return manifest_from_records(records)
 
 
 def get_deployed_components(state: dict | None) -> list[DeployedComponent]:

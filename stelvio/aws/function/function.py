@@ -340,6 +340,7 @@ class Function(
 
         # Create function URL if configured
         function_url = None
+        outputs = {}
         if self.config.url is not None:
             url_config = _normalize_url_config(self.config.url)
             function_url = _create_function_url(
@@ -349,7 +350,8 @@ class Function(
                 self._resource_opts(),
                 customizer=self._customizer,
             )
-            self.register_outputs({"url": function_url.function_url})
+            outputs["url"] = function_url.function_url
+        self.register_outputs(outputs)
 
         return FunctionResources(function_resource, lambda_role, function_policy, function_url)
 
