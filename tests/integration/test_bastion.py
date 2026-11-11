@@ -7,7 +7,11 @@ from stelvio.aws.document_db import DocumentDb
 from stelvio.aws.vpc import Vpc
 from stelvio.stack_outputs import read_network_manifest
 
-from .assert_bastion import assert_bastion_online, assert_document_db_ingress_from_bastion
+from .assert_bastion import (
+    assert_bastion_bootstrap,
+    assert_bastion_online,
+    assert_document_db_ingress_from_bastion,
+)
 from .assert_helpers import _boto3_session
 from .assert_vpc import get_security_group
 from .export_helpers import export_document_db, export_vpc
@@ -55,6 +59,7 @@ def test_deployed_bastion_document_db_and_network_metadata(stelvio_env):
         outputs["bastion_security_group_id"]
     }
     assert_bastion_online(vpc.bastion_instance_id)
+    assert_bastion_bootstrap(vpc.bastion_instance_id)
 
     assert len(manifest.resources) == 1
     database = manifest.resources[0]
