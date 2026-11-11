@@ -218,7 +218,17 @@ class VpcWorker:
         value["ssh_fingerprint"] = fingerprint(self.transport.pin) if self.transport.pin else None
         value["ssh_trust"] = "verified" if self.transport.pin else "unavailable"
         value["ranges"] = [str(cidr) for cidr in self.network.route_cidrs]
-        value["resources"] = [asdict(resource) for resource in self._resources()]
+        value["resources"] = [
+            {
+                "identity": resource.record.identity,
+                "vpc": resource.record.vpc,
+                "service": "documentdb",
+                "resource_id": resource.record.cluster_id,
+                "ports": [resource.port],
+                "hostnames": list(resource.hostnames),
+            }
+            for resource in self._resources()
+        ]
         return value
 
     def start(self) -> None:
