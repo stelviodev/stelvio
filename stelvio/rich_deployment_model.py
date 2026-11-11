@@ -90,7 +90,6 @@ RESOURCE_TYPE_NAMES: dict[str, str] = {
     "aws:acm/certificate:Certificate": "ACM Certificate",
     "aws:acm/certificateValidation:CertificateValidation": "ACM Validation",
     "aws:route53/record:Record": "DNS Record",
-    "aws:ssm/document:Document": "SSM Document",
     "cloudflare:index/record:Record": "DNS Record",
     "aws:appconfig/application:Application": "AppConfig Application",
     "aws:appconfig/environment:Environment": "AppConfig Environment",

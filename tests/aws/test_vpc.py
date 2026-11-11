@@ -1,3 +1,4 @@
+import json
 import re
 from dataclasses import dataclass, field, replace
 from importlib import import_module
@@ -8,14 +9,14 @@ from pulumi_aws.ec2 import VpcArgs
 from pytest import mark, param, raises
 
 from stelvio.aws.vpc import (
-    BastionConfig,
-    BastionConfigDict,
     NatConfig,
     NatConfigDict,
     Vpc,
     VpcAttachment,
     VpcAttachmentDict,
 )
+from stelvio.aws.vpc.bastion import assume_role_policy, ssm_policy, user_data
+from stelvio.context import context
 from tests.aws.pulumi_mocks import TP, R, tid
 from tests.test_utils import assert_config_dict_matches_dataclass
 
@@ -529,63 +530,129 @@ def test_vpc_app_security_group(pulumi_mocks):
     )
 
 
-# key → all instances of that resource kind; dict-form applies the same customization
-# to every one of them (the documented same-for-all behavior; callable is per-instance)
+# Resource routing is the contract here; merge semantics belong to test_component.
 CUSTOMIZE_KEY_RESOURCES = [
-    ("vpc", R.VPC, ["main_vpc"]),
-    ("internet_gateway", R.INTERNET_GATEWAY, ["main_vpc-igw"]),
-    ("public_subnet", R.SUBNET, ["main_vpc-public-subnet-a", "main_vpc-public-subnet-b"]),
-    ("private_subnet", R.SUBNET, ["main_vpc-private-subnet-a", "main_vpc-private-subnet-b"]),
-    ("isolated_subnet", R.SUBNET, ["main_vpc-isolated-subnet-a", "main_vpc-isolated-subnet-b"]),
+    *[
+        (key, typ, names, {"tags": {"customized": key}}, {"tags": {"customized": key}}, False)
+        for key, typ, names in [
+            ("vpc", R.VPC, ["main_vpc"]),
+            ("internet_gateway", R.INTERNET_GATEWAY, ["main_vpc-igw"]),
+            ("public_subnet", R.SUBNET, ["main_vpc-public-subnet-a", "main_vpc-public-subnet-b"]),
+            (
+                "private_subnet",
+                R.SUBNET,
+                ["main_vpc-private-subnet-a", "main_vpc-private-subnet-b"],
+            ),
+            (
+                "isolated_subnet",
+                R.SUBNET,
+                ["main_vpc-isolated-subnet-a", "main_vpc-isolated-subnet-b"],
+            ),
+            (
+                "public_route_table",
+                R.ROUTE_TABLE,
+                ["main_vpc-public-subnet-a-rt", "main_vpc-public-subnet-b-rt"],
+            ),
+            (
+                "private_route_table",
+                R.ROUTE_TABLE,
+                ["main_vpc-private-subnet-a-rt", "main_vpc-private-subnet-b-rt"],
+            ),
+            (
+                "isolated_route_table",
+                R.ROUTE_TABLE,
+                ["main_vpc-isolated-subnet-a-rt", "main_vpc-isolated-subnet-b-rt"],
+            ),
+            ("elastic_ip", R.EIP, ["main_vpc-nat-eip-a", "main_vpc-nat-eip-b"]),
+            ("nat_gateway", R.NAT_GATEWAY, ["main_vpc-nat-a", "main_vpc-nat-b"]),
+        ]
+    ],
     (
-        "public_route_table",
-        R.ROUTE_TABLE,
-        ["main_vpc-public-subnet-a-rt", "main_vpc-public-subnet-b-rt"],
+        "bastion",
+        R.EC2_INSTANCE,
+        ["main_vpc-bastion"],
+        {"instance_type": "t4g.micro"},
+        {"instanceType": "t4g.micro"},
+        True,
     ),
     (
-        "private_route_table",
-        R.ROUTE_TABLE,
-        ["main_vpc-private-subnet-a-rt", "main_vpc-private-subnet-b-rt"],
+        "bastion_security_group",
+        R.SECURITY_GROUP,
+        ["main_vpc-bastion-sg"],
+        {"description": "customized bastion group"},
+        {"description": "customized bastion group"},
+        True,
     ),
     (
-        "isolated_route_table",
-        R.ROUTE_TABLE,
-        ["main_vpc-isolated-subnet-a-rt", "main_vpc-isolated-subnet-b-rt"],
+        "bastion_role",
+        R.ROLE,
+        ["main_vpc-bastion-role"],
+        {"description": "customized bastion role"},
+        {"description": "customized bastion role"},
+        True,
     ),
-    ("elastic_ip", R.EIP, ["main_vpc-nat-eip-a", "main_vpc-nat-eip-b"]),
-    ("nat_gateway", R.NAT_GATEWAY, ["main_vpc-nat-a", "main_vpc-nat-b"]),
+    (
+        "bastion_profile",
+        R.INSTANCE_PROFILE,
+        ["main_vpc-bastion-profile"],
+        {"path": "/customized-bastion/"},
+        {"path": "/customized-bastion/"},
+        True,
+    ),
+    (
+        "bastion_egress",
+        R.SECURITY_GROUP_EGRESS_RULE,
+        ["main_vpc-bastion-egress"],
+        {"description": "customized bastion egress"},
+        {"description": "customized bastion egress"},
+        True,
+    ),
+    (
+        "bastion_policy",
+        R.ROLE_POLICY,
+        ["main_vpc-bastion-ssm"],
+        {"name": "customized-bastion-policy"},
+        {"name": "customized-bastion-policy"},
+        True,
+    ),
 ]
 
 
-# Which resource(s) each customize key lands on is the contract here; merge semantics
-# are owned by tests/test_component.py, hence partial asserts.
 @mark.parametrize(
-    ("key", "customization", "typ", "resource_names"),
+    ("key", "typ", "resource_names", "customization", "expected", "bastion"),
     [
-        *(
-            param(key, {"tags": {"customized": key}}, typ, names, id=key)
-            for key, typ, names in CUSTOMIZE_KEY_RESOURCES
+        *(param(*case, id=case[0]) for case in CUSTOMIZE_KEY_RESOURCES),
+        param(
+            "vpc",
+            R.VPC,
+            ["main_vpc"],
+            VpcArgs(tags={"customized": "vpc"}),
+            {"tags": {"customized": "vpc"}},
+            False,
+            id="vpc-args",
         ),
-        # Args-form: normalized to a dict of its set fields, then routed identically
-        param("vpc", VpcArgs(tags={"customized": "vpc"}), R.VPC, ["main_vpc"], id="vpc-args"),
     ],
 )
-def test_vpc_customize_targets_resource(pulumi_mocks, key, customization, typ, resource_names):
+def test_vpc_customize_targets_resource(  # noqa: PLR0913  # routing table and Pulumi fixture
+    pulumi_mocks, key, typ, resource_names, customization, expected, bastion
+):
     @pulumi.runtime.test
     def deploy():
-        # reading the app SG creates it (and the whole Vpc); nothing else does
-        return Vpc("main_vpc", nat="managed", customize={key: customization})._app_security_group
+        return Vpc(
+            "main_vpc", nat="managed", bastion=bastion, customize={key: customization}
+        )._app_security_group
 
     deploy()
 
-    # shallow merge replaces the whole tags dict → exact value proves it landed
     for name in resource_names:
-        pulumi_mocks.assert_res(name, typ, {"tags": {"customized": key}}, partial=True)
-    # ...and nowhere else: routing is exclusive to the targeted kind
+        resource = pulumi_mocks.assert_res(name, typ)
+        assert {field: resource.inputs.get(field) for field in expected} == expected
     targeted = {TP + name for name in resource_names}
-    for r in pulumi_mocks.created_resources:
-        if r.name not in targeted:
-            assert "customized" not in (r.inputs.get("tags") or {}), r.name
+    for resource in pulumi_mocks.created_resources:
+        if resource.name not in targeted:
+            assert {field: resource.inputs.get(field) for field in expected} != expected, (
+                resource.name
+            )
 
 
 def test_vpc_customize_callable_receives_per_subnet_props(pulumi_mocks):
@@ -713,10 +780,6 @@ def test_nat_config_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(NatConfig, NatConfigDict)
 
 
-def test_bastion_config_dict_matches_dataclass():
-    assert_config_dict_matches_dataclass(BastionConfig, BastionConfigDict)
-
-
 def test_bastion_waits_for_public_route_associations(pulumi_mocks, monkeypatch):
     vpc_module = import_module("stelvio.aws.vpc.vpc")
     create_bastion = vpc_module.create_bastion
@@ -735,7 +798,8 @@ def test_bastion_waits_for_public_route_associations(pulumi_mocks, monkeypatch):
     deploy()
 
     dependency_names = {dependency._name.removeprefix(TP) for dependency in captured["depends_on"]}
-    assert dependency_names >= {
+    assert dependency_names == {
+        "main_vpc-igw",
         "main_vpc-public-subnet-a-rt",
         "main_vpc-public-subnet-b-rt",
         "main_vpc-public-subnet-a-rta",
@@ -745,3 +809,225 @@ def test_bastion_waits_for_public_route_associations(pulumi_mocks, monkeypatch):
 
 def test_vpc_attachment_dict_matches_dataclass():
     assert_config_dict_matches_dataclass(VpcAttachment, VpcAttachmentDict)
+
+
+@mark.parametrize(
+    "bastion",
+    [
+        param(None, id="none"),
+        param(0, id="zero"),
+        param(1, id="one"),
+        param("yes", id="string"),
+        param({}, id="dict"),
+        param([], id="list"),
+    ],
+)
+def test_bastion_rejects_non_boolean_values(bastion):
+    with raises(TypeError, match=re.escape(f"'bastion' must be a bool, got {bastion!r}")):
+        Vpc("main_vpc", bastion=bastion)
+
+
+def test_bastion_bootstrap_disables_shell_sessions():
+    assert (
+        user_data()
+        == """#!/bin/bash
+set -euo pipefail
+useradd --create-home --shell /sbin/nologin --password '*' stlv-tunnel
+cat > /etc/ssh/sshd_config.d/05-stelvio-tunnel.conf <<'SSH'
+ListenAddress 127.0.0.1
+Match User stlv-tunnel
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PermitTTY no
+    MaxSessions 0
+    AllowTcpForwarding local
+    PermitOpen any
+    AllowAgentForwarding no
+    X11Forwarding no
+    PermitTunnel no
+    GatewayPorts no
+SSH
+/usr/sbin/sshd -t
+systemctl restart sshd
+"""
+    )
+
+
+def test_bastion_instance_defaults(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", bastion=True).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "main_vpc-bastion",
+        R.EC2_INSTANCE,
+        {
+            "ami": "ami-test-arm64",
+            "instanceType": "t4g.nano",
+            "subnetId": tid(TP + "main_vpc-public-subnet-a"),
+            "associatePublicIpAddress": True,
+            "vpcSecurityGroupIds": [tid(TP + "main_vpc-bastion-sg")],
+            "iamInstanceProfile": TP + "main_vpc-bastion-profile-test-name",
+            "metadataOptions": {"httpTokens": "required"},
+            "rootBlockDevice": {
+                "volumeSize": 8,
+                "volumeType": "gp3",
+                "encrypted": True,
+                "deleteOnTermination": True,
+            },
+            "userData": user_data(),
+            "userDataReplaceOnChange": True,
+            "tags": {"Name": TP + "main_vpc-bastion"},
+            "volumeTags": {"Name": TP + "main_vpc-bastion"},
+        },
+    )
+
+
+def test_bastion_security_group_has_no_inbound_rules(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", bastion=True).resources
+
+    deploy()
+
+    pulumi_mocks.assert_res(
+        "main_vpc-bastion-sg",
+        R.SECURITY_GROUP,
+        {
+            "vpcId": tid(TP + "main_vpc"),
+            "description": "Stelvio SSM access: no inbound SSH",
+            "tags": {"Name": TP + "main_vpc-bastion-sg"},
+        },
+    )
+    assert pulumi_mocks.created(R.SECURITY_GROUP_INGRESS_RULE) == []
+    pulumi_mocks.assert_res(
+        "main_vpc-bastion-egress",
+        R.SECURITY_GROUP_EGRESS_RULE,
+        {
+            "securityGroupId": tid(TP + "main_vpc-bastion-sg"),
+            "ipProtocol": "-1",
+            "cidrIpv4": "0.0.0.0/0",
+        },
+    )
+
+
+def test_bastion_role_trusts_ec2(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", bastion=True).resources
+
+    deploy()
+
+    role = pulumi_mocks.assert_res(
+        "main_vpc-bastion-role", R.ROLE, {"assumeRolePolicy": assume_role_policy()}
+    )
+    assert json.loads(role.inputs["assumeRolePolicy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": "ec2.amazonaws.com"},
+                "Action": "sts:AssumeRole",
+            }
+        ],
+    }
+    pulumi_mocks.assert_res(
+        "main_vpc-bastion-profile",
+        R.INSTANCE_PROFILE,
+        {"role": TP + "main_vpc-bastion-role-test-name"},
+    )
+
+
+def test_bastion_policy_allows_ssm_agent_actions(pulumi_mocks):
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", bastion=True).resources
+
+    deploy()
+
+    policy = pulumi_mocks.assert_res(
+        "main_vpc-bastion-ssm",
+        R.ROLE_POLICY,
+        {"role": tid(TP + "main_vpc-bastion-role"), "policy": ssm_policy()},
+    )
+    assert json.loads(policy.inputs["policy"]) == {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Resource": "*",
+                "Action": [
+                    "ssm:UpdateInstanceInformation",
+                    "ssm:DescribeDocument",
+                    "ssm:GetDocument",
+                    "ssm:GetManifest",
+                    "ssm:ListAssociations",
+                    "ssm:ListInstanceAssociations",
+                    "ssm:UpdateAssociationStatus",
+                    "ssm:UpdateInstanceAssociationStatus",
+                    "ssm:PutInventory",
+                    "ssm:PutComplianceItems",
+                    "ssm:PutConfigurePackageResult",
+                    "ssmmessages:CreateControlChannel",
+                    "ssmmessages:CreateDataChannel",
+                    "ssmmessages:OpenControlChannel",
+                    "ssmmessages:OpenDataChannel",
+                ],
+            }
+        ],
+    }
+
+
+def test_bastion_keeps_ami_and_waits_for_access_resources(pulumi_mocks, monkeypatch):
+    bastion_module = import_module("stelvio.aws.vpc.bastion")
+    original_instance = bastion_module.aws.ec2.Instance
+    captured = {}
+
+    def create_instance(*args, **kwargs):
+        captured["opts"] = kwargs["opts"]
+        return original_instance(*args, **kwargs)
+
+    monkeypatch.setattr(bastion_module.aws.ec2, "Instance", create_instance)
+    vpc = Vpc("main_vpc", bastion=True)
+
+    @pulumi.runtime.test
+    def deploy():
+        return vpc.resources
+
+    deploy()
+
+    opts = captured["opts"]
+    assert opts.ignore_changes == ["ami"]
+    assert opts.parent is vpc
+    assert opts.provider is vpc._provider
+    assert {dependency._name.removeprefix(TP) for dependency in opts.depends_on} == {
+        "main_vpc-igw",
+        "main_vpc-public-subnet-a-rt",
+        "main_vpc-public-subnet-b-rt",
+        "main_vpc-public-subnet-a-rta",
+        "main_vpc-public-subnet-b-rta",
+        "main_vpc-bastion-ssm",
+        "main_vpc-bastion-egress",
+    }
+
+
+@mark.parametrize(
+    ("key", "typ", "resource_names", "customization", "expected"),
+    [param(*case[:-1], id=case[0]) for case in CUSTOMIZE_KEY_RESOURCES if case[-1]],
+)
+def test_bastion_app_customization_overrides_defaults(  # noqa: PLR0913  # routing table and mock
+    pulumi_mocks, key, typ, resource_names, customization, expected
+):
+    context().customize[Vpc] = {key: customization}
+
+    @pulumi.runtime.test
+    def deploy():
+        return Vpc("main_vpc", bastion=True).resources
+
+    deploy()
+
+    for name in resource_names:
+        resource = pulumi_mocks.assert_res(name, typ)
+        assert {field: resource.inputs.get(field) for field in expected} == expected

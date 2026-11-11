@@ -31,7 +31,6 @@ class R(StrEnum):
     INTERNET_GATEWAY = "aws:ec2/internetGateway:InternetGateway"
     EC2_INSTANCE = "aws:ec2/instance:Instance"
     INSTANCE_PROFILE = "aws:iam/instanceProfile:InstanceProfile"
-    SSM_DOCUMENT = "aws:ssm/document:Document"
     ROUTE_TABLE = "aws:ec2/routeTable:RouteTable"
     ROUTE_TABLE_ASSOCIATION = "aws:ec2/routeTableAssociation:RouteTableAssociation"
     ROUTE = "aws:ec2/route:Route"

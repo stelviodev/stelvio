@@ -14,22 +14,18 @@ import pulumi
 import pulumi_aws as aws
 
 from stelvio.component import resource_name
+from stelvio.network import SSH_USER
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-SSH_USER = "stlv-tunnel"
 AMI_PARAMETER = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
-_READY = "/run/stelvio-tunnel/ready"
 
 
 def user_data() -> str:
-    # Cloud-init runs this once; /run is recreated at boot. The enabled service
-    # revalidates provisioning and republishes the receipt after every reboot.
     return f"""#!/bin/bash
 set -euo pipefail
-useradd --create-home --shell /bin/bash --password '*' {SSH_USER}
-install -d -m 0755 /run/stelvio-tunnel
+useradd --create-home --shell /sbin/nologin --password '*' {SSH_USER}
 cat > /etc/ssh/sshd_config.d/05-stelvio-tunnel.conf <<'SSH'
 ListenAddress 127.0.0.1
 Match User {SSH_USER}
@@ -46,33 +42,6 @@ Match User {SSH_USER}
 SSH
 /usr/sbin/sshd -t
 systemctl restart sshd
-cat > /usr/local/sbin/stelvio-tunnel-ready <<'READY'
-#!/bin/bash
-set -euo pipefail
-/usr/sbin/sshd -t
-systemctl is-active --quiet sshd
-test "$(id -u {SSH_USER})" -ne 0
-! id -nG {SSH_USER} | grep -qw wheel
-printf 'stelvio-tunnel-ready\\n' > {_READY}.next
-mv -- {_READY}.next {_READY}
-READY
-chmod 0755 /usr/local/sbin/stelvio-tunnel-ready
-cat > /etc/systemd/system/stelvio-tunnel-ready.service <<'SERVICE'
-[Unit]
-Description=Stelvio tunnel bootstrap readiness
-Wants=sshd.service
-After=sshd.service
-[Service]
-Type=oneshot
-RuntimeDirectory=stelvio-tunnel
-RuntimeDirectoryMode=0755
-ExecStart=/usr/local/sbin/stelvio-tunnel-ready
-RemainAfterExit=yes
-[Install]
-WantedBy=multi-user.target
-SERVICE
-systemctl daemon-reload
-systemctl enable --now stelvio-tunnel-ready.service
 """
 
 
@@ -129,7 +98,7 @@ class BastionResources:
     security_group: aws.ec2.SecurityGroup
 
 
-def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network inputs
+def create_bastion(  # noqa: PLR0913  # explicit deployment ownership and network inputs
     *,
     name: str,
     vpc_id: pulumi.Input[str],
@@ -137,8 +106,6 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
     tags: dict[str, str],
     opts: pulumi.ResourceOptions,
     customize: Callable[..., dict[str, Any]],
-    ami: pulumi.Input[str] | None = None,
-    ssm_permissions: str | None = None,
 ) -> BastionResources:
     """Build SSM-only access in a public subnet, without any SSH ingress."""
 
@@ -149,48 +116,59 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
         label("-bastion-sg", 255),
         **customize(
             "bastion_security_group",
-            {"vpc_id": vpc_id, "description": "Stelvio SSM access: no inbound SSH"},
+            {"tags": {"Name": label("-bastion-sg", 255)}},
+            default_props={"vpc_id": vpc_id, "description": "Stelvio SSM access: no inbound SSH"},
             inject_tags=True,
         ),
         opts=opts,
     )
     egress = aws.vpc.SecurityGroupEgressRule(
         label("-bastion-egress"),
-        security_group_id=group.id,
-        ip_protocol="-1",
-        cidr_ipv4="0.0.0.0/0",
-        tags=tags or None,
+        **customize(
+            "bastion_egress",
+            {},
+            default_props={
+                "security_group_id": group.id,
+                "ip_protocol": "-1",
+                "cidr_ipv4": "0.0.0.0/0",
+            },
+            inject_tags=True,
+        ),
         opts=opts,
     )
     role = aws.iam.Role(
         label("-bastion-role"),
         **customize(
             "bastion_role",
-            {"assume_role_policy": assume_role_policy()},
+            {},
+            default_props={"assume_role_policy": assume_role_policy()},
             inject_tags=True,
         ),
         opts=opts,
     )
     policy = aws.iam.RolePolicy(
         label("-bastion-ssm"),
-        role=role.id,
-        policy=ssm_policy() if ssm_permissions is None else ssm_permissions,
+        **customize(
+            "bastion_policy",
+            {},
+            default_props={"role": role.id, "policy": ssm_policy()},
+        ),
         opts=opts,
     )
     profile = aws.iam.InstanceProfile(
         label("-bastion-profile", 128),
-        **customize("bastion_profile", {"role": role.name}, inject_tags=True),
+        **customize("bastion_profile", {}, default_props={"role": role.name}, inject_tags=True),
         opts=opts,
     )
-    if ami is None:
-        ami = aws.ssm.get_parameter_output(
-            name=AMI_PARAMETER, opts=pulumi.InvokeOutputOptions(provider=opts.provider)
-        ).value
+    ami = aws.ssm.get_parameter_output(
+        name=AMI_PARAMETER, opts=pulumi.InvokeOutputOptions(provider=opts.provider)
+    ).value
     instance = aws.ec2.Instance(
         label("-bastion"),
         **customize(
             "bastion",
-            {
+            {"tags": {"Name": label("-bastion")}},
+            default_props={
                 "ami": ami,
                 "instance_type": "t4g.nano",
                 "subnet_id": subnet_id,
@@ -206,12 +184,12 @@ def create_bastion(  # noqa: PLR0913 - explicit deployment ownership and network
                     "encrypted": True,
                     "delete_on_termination": True,
                 },
-                "volume_tags": tags or None,
+                "volume_tags": {"Name": label("-bastion")} | tags,
             },
             inject_tags=True,
         ),
         opts=pulumi.ResourceOptions.merge(
-            opts, pulumi.ResourceOptions(depends_on=[policy, egress])
+            opts, pulumi.ResourceOptions(depends_on=[policy, egress], ignore_changes=["ami"])
         ),
     )
     return BastionResources(instance, group)

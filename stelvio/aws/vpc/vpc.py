@@ -29,16 +29,16 @@ from pulumi_aws.ec2 import Vpc as PulumiVpc
 from pulumi_aws.vpc import SecurityGroupEgressRule
 
 from stelvio import context
+from stelvio.aws.vpc.bastion import create_bastion
 from stelvio.component import Component, child_label, resource_name
+from stelvio.network import OUTPUT_KEY, VERSION
 from stelvio.provider import ProviderStore, aws_region_of
-from stelvio.tunnel.bastion import create_bastion
-from stelvio.tunnel.manifest import OUTPUT_KEY, VERSION
-from stelvio.tunnel.policy import BastionPolicy, normalize_dns_domains
 
 if TYPE_CHECKING:
     from pulumi import Input
     from pulumi_aws.ec2 import InstanceArgs, SecurityGroupArgs
-    from pulumi_aws.iam import InstanceProfileArgs, RoleArgs
+    from pulumi_aws.iam import InstanceProfileArgs, RoleArgs, RolePolicyArgs
+    from pulumi_aws.vpc import SecurityGroupEgressRuleArgs
 
     from stelvio.customize import Customization
 
@@ -102,40 +102,6 @@ class NatConfigDict(TypedDict, total=False):
 
 @final
 @dataclass(frozen=True)
-class BastionConfig:
-    """Persistent dev access, with optional domains resolved through this VPC."""
-
-    dns_domains: tuple[str, ...] | list[str] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "dns_domains", normalize_dns_domains(self.dns_domains))
-
-
-class BastionConfigDict(TypedDict, total=False):
-    dns_domains: tuple[str, ...] | list[str]
-
-
-def _normalize_bastion(
-    value: bool | BastionConfig | BastionConfigDict,
-) -> tuple[BastionPolicy, BastionConfig]:
-    if value is False:
-        return BastionPolicy.DISABLED, BastionConfig()
-    if value is True:
-        return BastionPolicy.PERSISTENT, BastionConfig()
-    if isinstance(value, dict):
-        if any(not isinstance(key, str) for key in value):
-            raise TypeError("'bastion' dictionary keys must be strings")
-        unknown = value.keys() - {"dns_domains"}
-        if unknown:
-            raise ValueError("Unknown bastion configuration keys: " + ", ".join(sorted(unknown)))
-        value = BastionConfig(**value)
-    if isinstance(value, BastionConfig):
-        return BastionPolicy.PERSISTENT, value
-    raise TypeError("'bastion' must be a bool, a BastionConfig, or a dict")
-
-
-@final
-@dataclass(frozen=True)
 class VpcResources:
     """Pulumi resources created by a Vpc.
 
@@ -177,6 +143,8 @@ class VpcCustomizationDict(TypedDict, total=False):
     bastion_security_group: Customization[SecurityGroupArgs]
     bastion_role: Customization[RoleArgs]
     bastion_profile: Customization[InstanceProfileArgs]
+    bastion_egress: Customization[SecurityGroupEgressRuleArgs]
+    bastion_policy: Customization[RolePolicyArgs]
 
 
 @final
@@ -195,17 +163,16 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
 
     _az: int | list[str]
     _nat_config: NatConfig | None
-    _bastion_policy: BastionPolicy
-    _bastion_config: BastionConfig
+    _bastion: bool
 
-    def __init__(  # noqa: PLR0913 - the existing VPC API plus its dev access policy
+    def __init__(  # noqa: PLR0913  # the existing VPC API plus its dev access policy
         self,
         name: str,
         /,
         az: int | list[str] = 2,
         nat: Literal["managed"] | NatConfig | NatConfigDict | None = None,
         *,
-        bastion: bool | BastionConfig | BastionConfigDict = False,
+        bastion: bool = False,
         tags: dict[str, str] | None = None,
         customize: VpcCustomizationDict | None = None,
     ):
@@ -215,7 +182,9 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
         _validate_az(az)
         self._az = az
         self._nat_config = _normalize_nat(nat)
-        self._bastion_policy, self._bastion_config = _normalize_bastion(bastion)
+        if not isinstance(bastion, bool):
+            raise TypeError(f"'bastion' must be a bool, got {bastion!r}")
+        self._bastion = bastion
         _validate_nat_config(self._nat_config, self._az)
 
     def _create_resources(self) -> VpcResources:
@@ -244,8 +213,7 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
             )
 
         bastion = None
-        access = None
-        if self._bastion_policy == BastionPolicy.PERSISTENT:
+        if self._bastion:
             bastion = create_bastion(
                 name=self.name,
                 vpc_id=vpc.id,
@@ -261,42 +229,23 @@ class Vpc(Component[VpcResources, VpcCustomizationDict]):
                 ),
                 customize=self._customizer,
             )
-            access = {
-                "instance_id": bastion.instance.id,
-                "security_group_id": bastion.security_group.id,
-                "az": bastion.instance.availability_zone,
-                "owner": self.urn,
-            }
-
         # Private outputs are consumed after deployment, never rendered as user URLs.
         self.register_outputs(
             {
                 OUTPUT_KEY: {
                     "version": VERSION,
-                    "kind": "vpc",
-                    "identity": self.urn,
                     "account": get_caller_identity_output(
                         opts=InvokeOutputOptions(provider=self._provider)
                     ).account_id,
                     "region": aws_region_of(self),
                     "vpc_id": vpc.id,
                     "provider": self._provider.urn,
-                    "cidrs": [vpc.cidr_block],
-                    "policy": self._bastion_policy.value,
-                    "dns_domains": list(self._bastion_config.dns_domains),
-                    # Named tiers encode classification without duplicating subnet records.
-                    **{
-                        f"{tier.value}_subnets": [
-                            {
-                                "id": subnet.id,
-                                "az": subnet.availability_zone,
-                                "cidr": subnet.cidr_block,
-                            }
-                            for subnet in subnets_dict[tier]
-                        ]
-                        for tier in SubnetType
-                    },
-                    "access": access,
+                    "route_subnet_ids": [
+                        subnet.id
+                        for tier in (SubnetType.PRIVATE, SubnetType.ISOLATED)
+                        for subnet in subnets_dict[tier]
+                    ],
+                    "bastion_instance_id": bastion.instance.id if bastion else None,
                 }
             }
         )
