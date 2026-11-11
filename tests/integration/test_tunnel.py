@@ -45,9 +45,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     initial_pins = session.host_pins()
     assert len(initial_pins) == 2
     assert len(session.manifest.resources) == 2
-    cluster_by_vpc = {
-        resource.vpc: resource.resource_id for resource in session.manifest.resources
-    }
+    cluster_by_vpc = {resource.vpc: resource.cluster_id for resource in session.manifest.resources}
     first_vpc, second_vpc = session.manifest.enabled_vpcs
     first_cluster = cluster_by_vpc[first_vpc.identity]
     second_cluster = cluster_by_vpc[second_vpc.identity]
@@ -67,7 +65,7 @@ def test_standalone_tls_reconnect_sigint_and_owner_death(standalone_cli_session)
     assert ports_before
 
     ec2 = session.aws.client("ec2")
-    bastion_id = first_vpc.access.instance_id
+    bastion_id = first_vpc.bastion_instance_id
     ec2.stop_instances(InstanceIds=[bastion_id])
     ec2.get_waiter("instance_stopped").wait(
         InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}

@@ -8,6 +8,15 @@
 
     → [DocumentDB Guide](components/aws/document-db.md)
 
+### Dev Mode
+
+- **Experimental private VPC access.** Enable `Vpc(bastion=True)` outside production,
+  then use `stlv tunnel start [ENV]` to open every bastion Vpc, including Vpcs with
+  DocumentDB and no Functions. Stelvio discovers AWS inventory and routes the
+  deployed private and isolated subnets through Session Manager.
+
+    → [Managed VPC transport](concepts/dev-mode.md#managed-vpc-transport)
+
 ### Bug Fixes
 
 - **`Ctrl+C` stops `stlv dev` even while a handler is running.** Before, it could hang for up to 5 minutes.

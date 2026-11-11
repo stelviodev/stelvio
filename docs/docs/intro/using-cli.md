@@ -329,7 +329,10 @@ ownership evidence for status checks; do not remove resolver files or helper sta
 
 ### Standalone access to deployed VPC resources
 
-After deploying an app with enabled VPC dependencies and installing the helper, start
+!!! warning "Experimental"
+    Tunnel support is experimental. Keep bastions off in production.
+
+After deploying an app with `Vpc(bastion=True)` and installing the helper, start
 a foreground networking session without entering dev mode:
 
 ```bash
@@ -341,7 +344,8 @@ The command reads the existing deployment, then releases its state context befor
 waits for networking readiness. It does not deploy the app, start the AppSync bridge,
 or create a bastion. It uses the same per-VPC discovery, DNS, readiness, and cleanup
 rules as `stlv dev`. Press `Ctrl+C` to close the session; the deployment and its
-bastion remain in place. If the app has no enabled VPC dependencies, the command
+bastion remain in place. Every deployed Vpc with a bastion is opened, including those without Functions.
+If the app has no bastions, the command
 reports that networking is unnecessary and exits successfully.
 
 Only VPCs linked by deployed handler dependencies are selected. Each selected VPC

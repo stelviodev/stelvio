@@ -13,7 +13,7 @@ from botocore.exceptions import ClientError
 from pytest import fixture, mark, raises
 
 from stelvio.tunnel.processes import ProcessIdentity, identity
-from stelvio.tunnel.runtime_models import BastionInventory, SubnetInventory, VpcInventory
+from stelvio.tunnel.runtime_models import BastionInventory
 from stelvio.tunnel.socks import TransportInterruptedError
 from stelvio.tunnel.transport import (
     SshTransport,

@@ -25,6 +25,7 @@ import pytest
 from botocore.config import Config
 
 from stelvio.stack_outputs import read_network_manifest
+from stelvio.tunnel.aws_inventory import resolve_vpc_network
 from stelvio.tunnel.credentials import AWS_IO
 from stelvio.tunnel.helper_client import (
     HelperBusyError,
@@ -231,7 +232,7 @@ def run():
         partition = self.aws.get_partition_for_region(self.region)
         for network in self.manifest.enabled_vpcs:
             target = HostIdentity(
-                partition, network.account, network.region, network.access.instance_id
+                partition, network.account, network.region, network.bastion_instance_id
             )
             with locked_host_trust(target, Event()) as entry:
                 if entry.key is not None:
@@ -314,11 +315,13 @@ def run():
 
     def assert_selected_routes(self) -> None:
         """Prove exact subnet routes and exclusion of public/unused/resolver space."""
+        ec2 = self.aws.client("ec2", config=AWS_IO)
+        inventories = [resolve_vpc_network(record, ec2) for record in self.manifest.enabled_vpcs]
         interfaces = set()
-        for network in self.manifest.enabled_vpcs:
-            assert network.route_cidrs, "Proof VPC has no private or isolated subnets"
+        for inventory in inventories:
+            assert inventory.route_cidrs, "Proof VPC has no private or isolated subnets"
             unit_interfaces = set()
-            for cidr in network.route_cidrs:
+            for cidr in inventory.route_cidrs:
                 route = self._route_to(cidr.network_address + 1)
                 assert "destination" in route, route
                 assert "mask" in route, route
@@ -329,14 +332,20 @@ def run():
             assert not (unit_interfaces & interfaces), "VPCs share a routed interface"
             interfaces.update(unit_interfaces)
 
-        for network in self.manifest.enabled_vpcs:
-            excluded = {network.cidrs[0].network_address + 2}
-            excluded.update(subnet.cidr.network_address + 1 for subnet in network.public_subnets)
-            for block in network.cidrs:
+        for inventory in inventories:
+            subnets = ec2.describe_subnets(
+                Filters=[{"Name": "vpc-id", "Values": [inventory.record.vpc_id]}]
+            )["Subnets"]
+            selected = set(inventory.record.route_subnet_ids)
+            excluded = {inventory.cidrs[0].network_address + 2}
+            excluded.update(
+                IPv4Network(subnet["CidrBlock"]).network_address + 1
+                for subnet in subnets
+                if subnet["SubnetId"] not in selected
+            )
+            for block in inventory.cidrs:
                 unused = block.broadcast_address - 1
-                assert not any(unused in subnet.cidr for subnet in network.subnets), (
-                    "Proof must leave unused address space for route exclusion checks"
-                )
+                assert not any(unused in IPv4Network(subnet["CidrBlock"]) for subnet in subnets)
                 excluded.add(unused)
             for address in excluded:
                 route = self._route_to(address)
@@ -364,7 +373,7 @@ def run():
         if not 30 <= timeout <= 600:
             raise ValueError("SSM fault command timeout must be between 30 and 600 seconds")
         networks = [
-            vpc for vpc in self.manifest.enabled_vpcs if vpc.access.instance_id == instance_id
+            vpc for vpc in self.manifest.enabled_vpcs if vpc.bastion_instance_id == instance_id
         ]
         if len(networks) != 1:
             raise RuntimeError("Refuse SSM fault command outside the proof deployment")
@@ -582,7 +591,7 @@ finally:
         values = []
         for vpc in self.manifest.enabled_vpcs:
             sessions = ssm.describe_sessions(
-                State="Active", Filters=[{"key": "Target", "value": vpc.access.instance_id}]
+                State="Active", Filters=[{"key": "Target", "value": vpc.bastion_instance_id}]
             )["Sessions"]
             owned = [item for item in sessions if _SSM_REASON.fullmatch(item.get("Reason", ""))]
             assert len(owned) <= 1
@@ -599,7 +608,7 @@ finally:
                 for vpc in self.manifest.enabled_vpcs
                 for item in ssm.describe_sessions(
                     State="Active",
-                    Filters=[{"key": "Target", "value": vpc.access.instance_id}],
+                    Filters=[{"key": "Target", "value": vpc.bastion_instance_id}],
                 )["Sessions"]
                 if item["SessionId"] in expected
             }
@@ -620,9 +629,18 @@ finally:
         )
 
     def resolver_ports(self) -> dict[str, int]:
-        domains = {
-            hostname for resource in self.manifest.resources for hostname in resource.hostnames
-        }
+        domains = set()
+        client = self.aws.client("docdb", config=AWS_IO)
+        for resource in self.manifest.resources:
+            cluster = client.describe_db_clusters(DBClusterIdentifier=resource.cluster_id)[
+                "DBClusters"
+            ][0]
+            domains.update((cluster["Endpoint"], cluster["ReaderEndpoint"]))
+            for member in cluster["DBClusterMembers"]:
+                instance = client.describe_db_instances(
+                    DBInstanceIdentifier=member["DBInstanceIdentifier"]
+                )["DBInstances"][0]
+                domains.add(instance["Endpoint"]["Address"])
         ports = {}
         directory = Path("/etc/resolver")
         for path in directory.glob("stelvio.*"):

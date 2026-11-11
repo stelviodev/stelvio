@@ -9,6 +9,7 @@ from stelvio.tunnel.helper_client import HelperError, NativeHelper
 from stelvio.tunnel.host_trust import HostIdentity, HostTrustError, fingerprint, locked_host_trust
 from stelvio.tunnel.installation import SYSTEM_CHANGES, install_helper, uninstall_helper
 from stelvio.tunnel.plugin import PluginAssetError
+from stelvio.tunnel.session import NetworkSession
 
 
 @click.group()
@@ -119,7 +120,9 @@ def start(env: str | None) -> None:
                 raise click.ClickException(
                     f"No deployed environment '{environment}'; run stlv deploy first"
                 )
-            session = run.capture_network_session(click.echo)
+            session = NetworkSession(
+                state=run.load_state(), app=run.app_name, env=run.env, report=click.echo
+            )
 
         session.start()
         if session.description is not None:

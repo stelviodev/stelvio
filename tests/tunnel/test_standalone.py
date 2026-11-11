@@ -1,8 +1,10 @@
 """Standalone tunnel command lifecycle and state capture."""
 
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import click
 from click.testing import CliRunner
 from pytest import fixture, mark
 
@@ -14,6 +16,11 @@ def _install_command_run(monkeypatch, *, deployed=True, session=None, events=Non
 
     class Run:
         has_deployed = deployed
+        app_name = "app"
+        env = "staging"
+
+        def load_state(self):
+            return {}
 
         def __enter__(self):
             events.append("enter")
@@ -23,15 +30,16 @@ def _install_command_run(monkeypatch, *, deployed=True, session=None, events=Non
             events.append("release")
             return False
 
-        def capture_network_session(self, report):
-            events.append("capture")
-            self.report = report
-            return capture(report) if capture is not None else session
-
     factory = Mock(
         side_effect=lambda env, **kwargs: (events.append(("command", env, kwargs)) or Run())
     )
     monkeypatch.setattr("stelvio.command_run.CommandRun", factory)
+
+    def make_session(**kwargs):
+        events.append("capture")
+        return capture(kwargs["report"]) if capture is not None else session
+
+    monkeypatch.setattr(import_module("stelvio.cli.tunnel"), "NetworkSession", make_session)
     return factory, events
 
 
@@ -172,31 +180,22 @@ def test_start_uses_cli_default_environment_resolution(monkeypatch):
     factory.assert_called_once_with("personal", state_only=True)
 
 
-def test_command_run_captures_state_and_identity_inputs(monkeypatch):
-    from stelvio.command_run import CommandRun
+def test_start_captures_state_and_identity_inputs_in_cli(monkeypatch):
+    network = SimpleNamespace(description=None, start=Mock(), close=Mock())
+    _install_command_run(monkeypatch, session=network)
+    constructor = Mock(return_value=network)
+    monkeypatch.setattr(import_module("stelvio.cli.tunnel"), "NetworkSession", constructor)
+    monkeypatch.setattr("stelvio.cli.determine_env", lambda env, **kwargs: env)
 
-    created = []
-    monkeypatch.setattr(
-        "stelvio.command_run.NetworkSession",
-        lambda **kwargs: created.append(kwargs) or object(),
-    )
-    run = object.__new__(CommandRun)
-    run.env = "staging"
-    run._app_name = "payments"
-    run.load_state = lambda: {"checkpoint": {"latest": {"resources": []}}}
-    report = Mock()
+    result = CliRunner().invoke(tunnel, ["start", "staging"])
 
-    result = run.capture_network_session(report)
-
-    assert result is not None
-    assert created == [
-        {
-            "state": {"checkpoint": {"latest": {"resources": []}}},
-            "app": "payments",
-            "env": "staging",
-            "report": report,
-        }
-    ]
+    assert result.exit_code == 0, result.output
+    assert constructor.call_args.kwargs == {
+        "state": {},
+        "app": "app",
+        "env": "staging",
+        "report": click.echo,
+    }
 
 
 @fixture
@@ -207,20 +206,17 @@ def standalone_host_world(ssh_world, monkeypatch):
     from dataclasses import asdict
     from threading import Event
 
+    from stelvio.network import NetworkManifest
     from stelvio.tunnel.host_trust import HostIdentity, locked_host_trust
-    from stelvio.tunnel.manifest import (
-        EndpointNetwork,
-        NetworkManifest,
-        SessionDescription,
-    )
     from stelvio.tunnel.session import NetworkSession
+    from stelvio.tunnel.session_types import SessionDescription
     from stelvio.tunnel.supervisor import VpcStatus
     from stelvio.tunnel.transport import ServerIdentityError, SshTransport
     from stelvio.tunnel.wire import session_to_wire
 
     original, server, key = ssh_world
-    network = original.network
-    manifest = NetworkManifest((network,), (), (EndpointNetwork("fn", "fn", (network.identity,)),))
+    network = original.network.record
+    manifest = NetworkManifest((network,), ())
     description = SessionDescription(
         "11111111-1111-4111-8111-111111111111", "app", "staging", os.geteuid(), manifest
     )
@@ -230,11 +226,9 @@ def standalone_host_world(ssh_world, monkeypatch):
             "latest": {
                 "resources": [
                     {
-                        "urn": record["identity"],
-                        "type": "stelvio:aws:Vpc"
-                        if record["kind"] == "vpc"
-                        else "stelvio:aws:Function",
-                        "outputs": {"_stelvio_network": record},
+                        "urn": record["urn"],
+                        "type": record["type"],
+                        "outputs": {"_stelvio_network": record["metadata"]},
                     }
                     for record in records
                 ]
@@ -248,7 +242,7 @@ def standalone_host_world(ssh_world, monkeypatch):
         def __init__(self, description, contexts):
             assert len(contexts) == 1
             self.transport = SshTransport(
-                network, original.session, Event(), ownership=original.ownership
+                original.network, original.session, Event(), ownership=original.ownership
             )
             self.closed = False
             runtimes.append(self)
@@ -289,7 +283,7 @@ def standalone_host_world(ssh_world, monkeypatch):
             state=state, app="app", env="staging", report=report
         ),
     )
-    target = HostIdentity("aws", network.account, network.region, network.access.instance_id)
+    target = HostIdentity("aws", network.account, network.region, network.bastion_instance_id)
 
     def pinned():
         with locked_host_trust(target, Event()) as entry:
@@ -374,11 +368,14 @@ def proof_pin_world(transport_world):
 
     transport, *_ = transport_world
     session = object.__new__(StandaloneCliSession)
-    session._manifest = SimpleNamespace(enabled_vpcs=(transport.network,))
+    session._manifest = SimpleNamespace(enabled_vpcs=(transport.network.record,))
     session.aws = transport.session
-    session.region = transport.network.region
+    session.region = transport.network.record.region
     target = HostIdentity(
-        "aws", transport.network.account, session.region, transport.network.access.instance_id
+        "aws",
+        transport.network.record.account,
+        session.region,
+        transport.network.record.bastion_instance_id,
     )
     key = "ssh-ed25519 " + base64.b64encode(HOST_KEY_PREFIX + bytes(range(32))).decode()
     return session, target, key
@@ -428,43 +425,22 @@ def standalone_routing_world(transport_world, monkeypatch):
     import time
     from copy import deepcopy
     from dataclasses import replace
-    from ipaddress import IPv4Network
 
-    from stelvio.tunnel.manifest import (
-        EndpointNetwork,
-        NetworkManifest,
-        SessionDescription,
-    )
+    from stelvio.network import NetworkManifest
     from stelvio.tunnel.session import NetworkSession
+    from stelvio.tunnel.session_types import SessionDescription
     from stelvio.tunnel.wire import session_from_wire, session_to_wire
 
     transport, *_ = transport_world
-    first = transport.network
+    first = transport.network.record
 
     def other_network(identity, octet, suffix):
-        subnets = {
-            tier: tuple(
-                replace(
-                    subnet,
-                    subnet_id=f"{subnet.subnet_id}-{identity}",
-                    cidr=IPv4Network(str(subnet.cidr).replace("10.254.", f"10.{octet}.")),
-                )
-                for subnet in getattr(first, tier)
-            )
-            for tier in ("public_subnets", "private_subnets", "isolated_subnets")
-        }
         return replace(
             first,
             identity=identity,
             vpc_id=f"vpc-{suffix}",
-            cidrs=(IPv4Network(f"10.{octet}.0.0/16"),),
-            access=replace(
-                first.access,
-                owner=identity,
-                instance_id=f"i-{suffix}",
-                security_group_id=f"sg-{suffix}",
-            ),
-            **subnets,
+            bastion_instance_id=f"i-{suffix}",
+            route_subnet_ids=tuple(f"{subnet}-{octet}" for subnet in first.route_subnet_ids),
         )
 
     second = other_network("network-two", 253, "87654321")
@@ -478,7 +454,6 @@ def standalone_routing_world(transport_world, monkeypatch):
             NetworkManifest(
                 (first, second, unused),
                 (),
-                (EndpointNetwork("fn", "fn", (first.identity, second.identity)),),
             ),
         )
     )["records"]
@@ -487,11 +462,9 @@ def standalone_routing_world(transport_world, monkeypatch):
             "latest": {
                 "resources": [
                     {
-                        "urn": record["identity"],
-                        "type": "stelvio:aws:Vpc"
-                        if record["kind"] == "vpc"
-                        else "stelvio:aws:Function",
-                        "outputs": {"_stelvio_network": record},
+                        "urn": record["urn"],
+                        "type": record["type"],
+                        "outputs": {"_stelvio_network": record["metadata"]},
                     }
                     for record in records
                 ]
@@ -502,7 +475,7 @@ def standalone_routing_world(transport_world, monkeypatch):
     events, captured, closed = [], [], []
     statuses = [
         {"identity": network.identity, "state": "ready", "attempt": 1, "cause": None}
-        for network in (first, second)
+        for network in (first, second, unused)
     ]
 
     class Runtime:
@@ -550,23 +523,20 @@ def standalone_routing_world(transport_world, monkeypatch):
     )
 
 
-def test_standalone_preserves_selected_subnets_and_excludes_unused_vpcs(standalone_routing_world):
+def test_standalone_opens_every_bastion_and_preserves_selected_subnet_ids(
+    standalone_routing_world,
+):
     world = standalone_routing_world
     result = world.run()
     assert result.exit_code == 0, result.output
     assert "Network READY" in result.output
     assert "Tunnel stopped." in result.output
     networks = world.captured[0].manifest.enabled_vpcs
-    assert [network.identity for network in networks] == ["vpc-owner", "network-two"]
-    assert [tuple(map(str, n.route_cidrs)) for n in networks] == [
-        ("10.254.1.0/24", "10.254.2.0/24"),
-        ("10.253.1.0/24", "10.253.2.0/24"),
+    assert [network.identity for network in networks] == ["vpc-owner", "network-two", "unused"]
+    records = world.state["checkpoint"]["latest"]["resources"][:-1]
+    assert [network.route_subnet_ids for network in networks] == [
+        tuple(record["outputs"]["_stelvio_network"]["route_subnet_ids"]) for record in records
     ]
-    assert [tuple(map(str, n.cidrs)) for n in networks] == [("10.254.0.0/16",), ("10.253.0.0/16",)]
-    assert all(
-        not any(n.cidrs[0].network_address + 2 in route for route in n.route_cidrs)
-        for n in networks
-    )
     assert world.closed == [True]
 
 

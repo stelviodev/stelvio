@@ -23,17 +23,19 @@ Your public entrypoint (API Gateway URL / Function URL) stays the same — you h
 
 ### Managed VPC transport
 
+!!! warning "Experimental"
+    Managed networking is experimental. Keep bastions off in production.
+
 For a VPC with an enabled bastion, Stelvio uses the deployed networking metadata
 to identify the AWS account, provider, region, VPC, and owned access instance.
 It checks the complete VPC CIDR and subnet inventory and requires VPC DNS support
 and hostnames to be enabled before using private DNS. Handler changes to AWS
 environment variables cannot redirect the captured AWS session.
 
-VPC CIDRs describe AWS ownership. Inventory includes the primary block and all
-associated IPv4 blocks, and verifies every declared public, private, and isolated
-subnet by ID, account, VPC, Availability Zone, CIDR, and availability. Missing,
-duplicate, or changed records are refused. Subnet tiers come from the deployment
-metadata, not API response order or public IPv4 auto-assignment settings.
+VPC CIDRs describe AWS ownership. Deployment records select private and isolated
+subnets by ID. Stelvio reads their availability zones and CIDRs from AWS and
+validates ownership and availability before installing routes. It checks the
+primary VPC block and all associated IPv4 blocks for overlap.
 
 Only the declared private and isolated subnet CIDRs are eligible resource routes.
 Public subnets, unused VPC space, and newly associated blocks do not implicitly
@@ -73,8 +75,8 @@ environment. It starts networking in a separate nonroot Python process with that
 captured environment. Later handler changes to AWS variables cannot redirect the
 session's clients. The parent and runtime exchange bounded messages over a private
 local socket; an independent lease pipe lets the runtime detect parent exit.
-The session metadata preserves the VPC ownership ranges and each public, private,
-and isolated subnet's ID, availability zone, and CIDR across that process boundary.
+The session sends the deployed resource IDs across that boundary. The isolated
+runtime discovers networking details from AWS.
 
 Each eligible VPC has its own worker, transport attempt, helper generation, DNS
 revision, discovery state, and retry schedule. A failure in one VPC leaves workers
@@ -125,8 +127,8 @@ does not make a VPC ready. New invocations that depend on an unready VPC are
 rejected before handler execution; unrelated VPCs and handlers without a VPC can
 continue.
 
-With no enabled VPC dependencies, Stelvio skips helper activation. A VPC whose
-bastion policy is disabled is reported and left to the developer's local network.
+With no deployed bastions, Stelvio skips helper activation. Access to a Vpc
+without a bastion uses the developer's existing local network.
 On normal shutdown, each worker stops its owned SSH/SSM transport and retires its
 helper generation before the lease is released. If the parent exits unexpectedly,
 the lease closes and the helper recovers host state from its durable journal. A
@@ -137,12 +139,12 @@ local helper ownership state and does not verify AWS or database connectivity.
 
 ### Standalone access
 
-Use `stlv tunnel start [ENV]` to use the same networking session from a deployed
+Use `stlv tunnel start [ENV]` to open every bastion Vpc from a deployed
 environment without running the local handler or AppSync bridge. Stelvio reads the
-deployed Function dependencies and captures their AWS provider settings before it
+deployed Vpc records and captures their AWS provider settings before it
 starts the session. The command does not deploy resources or replace the persistent
 bastion. It stays in the foreground until you press `Ctrl+C`; a deployment with no
-enabled VPC dependencies exits successfully without activating the helper.
+bastions exits successfully without activating the helper.
 Standalone commands reuse the same persistent host trust as dev mode. A key
 mismatch produces a nonzero exit after session cleanup; repeating the command
 does not bypass the pin. See the [standalone CLI guide](../intro/using-cli.md#standalone-access-to-deployed-vpc-resources)

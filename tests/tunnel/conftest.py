@@ -10,44 +10,28 @@ from unittest.mock import Mock
 
 from pytest import fixture
 
-from stelvio.tunnel.manifest import AccessDescriptor, SubnetNetwork, VpcNetwork
-from stelvio.tunnel.policy import BastionPolicy
+from stelvio.network import VpcNetwork
+from stelvio.tunnel.runtime_models import SubnetInventory, VpcInventory
 from stelvio.tunnel.transport import SshTransport
 
 
 @fixture
 def transport_world(tmp_path, monkeypatch):
-    network = VpcNetwork(
-        identity="vpc-owner",
-        account="123456789012",
-        region="us-east-1",
-        vpc_id="vpc-12345678",
-        provider="provider",
-        cidrs=(IPv4Network("10.254.0.0/16"),),
-        policy=BastionPolicy.PERSISTENT,
-        dns_domains=(),
-        public_subnets=(
-            SubnetNetwork(
-                "subnet-public",
-                "us-east-1a",
-                IPv4Network("10.254.0.0/24"),
-            ),
+    network = VpcInventory(
+        VpcNetwork(
+            identity="vpc-owner",
+            account="123456789012",
+            region="us-east-1",
+            vpc_id="vpc-12345678",
+            provider="provider",
+            route_subnet_ids=("subnet-private", "subnet-isolated"),
+            bastion_instance_id="i-12345678",
         ),
-        private_subnets=(
-            SubnetNetwork(
-                "subnet-private",
-                "us-east-1a",
-                IPv4Network("10.254.1.0/24"),
-            ),
+        (IPv4Network("10.254.0.0/16"),),
+        (
+            SubnetInventory("subnet-private", "us-east-1a", IPv4Network("10.254.1.0/24")),
+            SubnetInventory("subnet-isolated", "us-east-1a", IPv4Network("10.254.2.0/24")),
         ),
-        isolated_subnets=(
-            SubnetNetwork(
-                "subnet-isolated",
-                "us-east-1a",
-                IPv4Network("10.254.2.0/24"),
-            ),
-        ),
-        access=AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
     )
     session = Mock(region_name="us-east-1")
     session.get_partition_for_region.return_value = "aws"
@@ -64,13 +48,20 @@ def transport_world(tmp_path, monkeypatch):
     clients["sts"].get_caller_identity.return_value = {"Account": "123456789012"}
     tags = [{"Key": "stelvio:app", "Value": "app"}]
     node = {
+        "InstanceId": "i-12345678",
+        "SubnetId": "subnet-public",
         "VpcId": "vpc-12345678",
         "Placement": {"AvailabilityZone": "us-east-1a"},
         "SecurityGroups": [{"GroupId": "sg-12345678"}],
         "Tags": tags,
         "State": {"Name": "running"},
     }
-    group = {"VpcId": "vpc-12345678", "OwnerId": "123456789012", "IpPermissions": []}
+    group = {
+        "GroupId": "sg-12345678",
+        "VpcId": "vpc-12345678",
+        "OwnerId": "123456789012",
+        "IpPermissions": [],
+    }
     clients["ec2"].describe_instances.return_value = {"Reservations": [{"Instances": [node]}]}
     clients["ec2"].describe_security_groups.return_value = {"SecurityGroups": [group]}
     clients["ssm"].describe_instance_information.return_value = {

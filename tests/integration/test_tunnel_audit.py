@@ -468,9 +468,7 @@ def _fault_session():
     )
     session = object.__new__(cli_session.StandaloneCliSession)
     session._manifest = SimpleNamespace(
-        enabled_vpcs=(
-            SimpleNamespace(access=SimpleNamespace(instance_id="i-proof"), vpc_id="vpc-proof"),
-        )
+        enabled_vpcs=(SimpleNamespace(bastion_instance_id="i-proof", vpc_id="vpc-proof"),)
     )
     session.aws = _Session({"ec2": ec2, "ssm": ssm})
     session.account = "123456789012"
@@ -589,33 +587,89 @@ def test_standalone_route_acceptance_requires_exact_subnets_and_exclusions(
 ):
     from ipaddress import IPv4Address, IPv4Network
 
+    from stelvio.network import NetworkManifest, VpcNetwork
+
     session = object.__new__(cli_session.StandaloneCliSession)
     session.project = tmp_path
-    networks = []
+    records = []
+    vpcs = {}
+    subnets = {}
+    blocks = {}
+    destinations = {}
     for octet in (252, 253):
-        public = SimpleNamespace(cidr=IPv4Network(f"10.{octet}.0.0/24"))
-        private = SimpleNamespace(cidr=IPv4Network(f"10.{octet}.1.0/24"))
-        isolated = SimpleNamespace(cidr=IPv4Network(f"10.{octet}.2.0/24"))
-        networks.append(
-            SimpleNamespace(
-                cidrs=(IPv4Network(f"10.{octet}.0.0/16"),),
-                route_cidrs=(private.cidr, isolated.cidr),
-                public_subnets=(public,),
-                subnets=(public, private, isolated),
+        vpc_id = f"vpc-{octet}"
+        blocks[vpc_id] = IPv4Network(f"10.{octet}.0.0/16")
+        destinations[vpc_id] = (
+            IPv4Network(f"10.{octet}.1.0/24"),
+            IPv4Network(f"10.{octet}.2.0/24"),
+        )
+        records.append(
+            VpcNetwork(
+                identity=f"urn:vpc-{octet}",
+                account="123456789012",
+                region="us-east-1",
+                vpc_id=vpc_id,
+                provider="provider",
+                route_subnet_ids=(f"subnet-private-{octet}", f"subnet-isolated-{octet}"),
+                bastion_instance_id=f"i-{octet}",
             )
         )
-    session._manifest = SimpleNamespace(enabled_vpcs=tuple(networks))
+        vpcs[vpc_id] = {
+            "VpcId": vpc_id,
+            "OwnerId": "123456789012",
+            "State": "available",
+            "CidrBlock": str(blocks[vpc_id]),
+        }
+        for index, tier in enumerate(("public", "private", "isolated")):
+            subnet_id = f"subnet-{tier}-{octet}"
+            subnets[subnet_id] = {
+                "SubnetId": subnet_id,
+                "VpcId": vpc_id,
+                "OwnerId": "123456789012",
+                "AvailabilityZone": "us-east-1a",
+                "State": "available",
+                "CidrBlock": f"10.{octet}.{index}.0/24",
+            }
+
+    def describe_subnets(**kwargs):
+        if "SubnetIds" in kwargs:
+            assert kwargs.keys() == {"SubnetIds"}
+            return {"Subnets": [subnets[identity] for identity in kwargs["SubnetIds"]]}
+        vpc_id = kwargs["Filters"][0]["Values"][0]
+        assert kwargs == {"Filters": [{"Name": "vpc-id", "Values": [vpc_id]}]}
+        return {"Subnets": [subnet for subnet in subnets.values() if subnet["VpcId"] == vpc_id]}
+
+    def describe_vpc_attribute(VpcId, Attribute):  # noqa: N803  # matches the AWS request
+        field = {
+            "enableDnsSupport": "EnableDnsSupport",
+            "enableDnsHostnames": "EnableDnsHostnames",
+        }[Attribute]
+        return {"VpcId": VpcId, field: {"Value": True}}
+
+    ec2 = _Client(
+        direct={
+            "describe_vpcs": lambda **kwargs: {
+                "Vpcs": [vpcs[identity] for identity in kwargs["VpcIds"]]
+            },
+            "describe_vpc_attribute": describe_vpc_attribute,
+            "describe_subnets": describe_subnets,
+        }
+    )
+    ec2.meta = SimpleNamespace(region_name="us-east-1")
+    session.aws = _Session({"ec2": ec2})
+    session._manifest = NetworkManifest(tuple(records), ())
     queries = []
 
     def lookup(*args):
         assert args[:4] == ("/sbin/route", "-n", "get", "-inet")
         address = IPv4Address(args[4])
         queries.append(address)
-        network = next(n for n in networks if address in n.cidrs[0])
-        selected = next((c for c in network.route_cidrs if address in c), None)
-        interface = "utun21" if address in networks[0].cidrs[0] else "utun22"
+        vpc_id = next(identity for identity, cidr in blocks.items() if address in cidr)
+        block = blocks[vpc_id]
+        selected = next((cidr for cidr in destinations[vpc_id] if address in cidr), None)
+        interface = "utun21" if vpc_id == records[0].vpc_id else "utun22"
         if selected:
-            destination = network.cidrs[0] if fault == "whole-vpc" else selected
+            destination = block if fault == "whole-vpc" else selected
             if fault == "shared-interface":
                 interface = "utun21"
             return SimpleNamespace(
@@ -623,9 +677,9 @@ def test_standalone_route_acceptance_requires_exact_subnets_and_exclusions(
                 + ("" if fault == "missing-interface" else f"interface: {interface}\n")
             )
         bad = (
-            (fault == "public" and address == network.cidrs[0].network_address + 1)
-            or (fault == "resolver" and address == network.cidrs[0].network_address + 2)
-            or (fault == "unused" and address == network.cidrs[0].broadcast_address - 1)
+            (fault == "public" and address == block.network_address + 1)
+            or (fault == "resolver" and address == block.network_address + 2)
+            or (fault == "unused" and address == block.broadcast_address - 1)
         )
         return SimpleNamespace(
             stdout=f"destination: default\ninterface: {interface if bad else 'en0'}\n"
