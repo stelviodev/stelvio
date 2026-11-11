@@ -4,6 +4,64 @@ Python tests validate helper requests, reply framing, descriptor handling,
 installation transactions, and forwarder control messages. They do not compile Go.
 The Go module owns the forwarder and helper implementations.
 
+## AWS transport and discovery
+
+The transport tests use deterministic AWS SDK responses and local loopback SOCKS
+peers. They verify captured credential isolation, deployed VPC and bastion
+ownership, persistent first-connect SSH host identity,
+DocumentDB cluster/member discovery, error classification, and cleanup of partial
+SSM/SSH startup. They do not deploy AWS resources or change host routes, resolver
+files, or helper state.
+
+Run the focused suite with:
+
+```bash
+uv run pytest \
+  tests/tunnel/test_aws_inventory.py \
+  tests/tunnel/test_credentials.py \
+  tests/tunnel/test_discovery.py \
+  tests/tunnel/test_socks.py \
+  tests/tunnel/test_transport.py \
+  tests/tunnel/test_host_trust.py -q
+```
+
+The inventory regressions require an exact response for all declared public,
+private, and isolated subnet IDs. They reject missing, duplicate, extra, changed,
+or unavailable records and subnets outside the live VPC associations. Tests also
+cover changing associations, secondary-block subnets, reversed API order, a
+ten-AZ layout with 30 subnet records and 20 route destinations, and public-only
+metadata with no route fallback. Disabled and unused VPCs request no inventory.
+
+`VpcNetwork.cidrs` retains full AWS ownership blocks, with the verified primary
+block first for resolver selection. `route_cidrs` preserves only the deployed
+private and isolated subnet CIDRs. Tests keep full-VPC overlap rejection even
+when the selected routes are disjoint. They use Botocore Stubber with exact
+request parameters, not live AWS calls. Session wiring must use `route_cidrs` for
+helper and packet configuration while keeping the owning resolver separate.
+
+The Session Manager plugin must already be available through the verified private
+cache for a live connection. Tests stub its selected path and never download or
+run the plugin. A missing or unsafe plugin is a terminal local artifact error;
+repair it through the existing installation command before retrying AWS transport.
+
+The host-trust tests use isolated temporary caches. They cover independent AWS
+identities, persistence, concurrent first connections, rejected key changes,
+unsafe files, failed atomic publication, bounded locking, and explicit reset.
+Transport tests verify that failed authentication does not publish a pin and that
+new transport objects reuse it. No custom SSM Command document or Run Command
+permission is required. The Session Manager plugin remains required.
+
+Run real OpenSSH interoperability on macOS without AWS or privileged host changes:
+
+```bash
+STLV_TEST_SSH_INTEROP=1 uv run pytest tests/tunnel/test_transport.py -k actual_openssh -q
+```
+
+The test starts a temporary loopback-only sshd and a test-owned replacement for the
+SSM byte stream. It checks successful authentication, persistent key reuse,
+key-change rejection by a new transport, and explicit trust reset. It restores
+its processes and temporary files. It does not establish live SSM acceptance.
+
 ## Unit tests
 
 Run the Python tunnel suite with the normal repository checks:
@@ -112,8 +170,9 @@ STLV_TEST_STELVIO_SDIST="$(find "$DIST_DIR" -name '*.tar.gz' -print -quit)" \
 The suite checks archive contents and installs the wheel into a clean virtual
 environment outside the checkout. It verifies the installed CLI command set,
 checks `tunnel status --help`, and rejects the unsupported `tunnel inspect`
-command. These CLI checks do not contact the helper or AWS. Pytest does not build
-Go or Python artifacts.
+command. It also checks `tunnel trust --help` and the identity selectors in
+`tunnel trust reset --help`. These CLI checks do not reset trust, contact the
+helper, or access AWS. Pytest does not build Go or Python artifacts.
 Distinct-candidate upgrade acceptance remains pending until its candidate and the
 required native authorization are available.
 
@@ -135,3 +194,15 @@ without root access or Go compilation. The 100-cycle lifecycle and scoped-DNS
 scenarios still require the privileged lane above. Record the tested commit,
 platform, binary digest, commands, skips and host restoration for each run;
 nonprivileged success alone does not certify native or AWS acceptance.
+
+## SSM termination acknowledgements
+
+Transport cleanup validates that a successful `TerminateSession` response names
+the exact owned session. Missing or mismatched responses retain ownership and do
+not produce a completion receipt. An invalid-session response requires an exact
+owned `Terminated` history record. Local transport shutdown and an acknowledged
+termination do not assert that AWS history immediately displays `Terminated`.
+
+Run the local response and ownership regressions with
+`uv run pytest tests/tunnel/test_transport.py -q`. Live AWS acceptance is a
+separate opt-in check; unit results do not certify it.
