@@ -9,14 +9,22 @@ import subprocess
 import time
 from contextlib import contextmanager
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     import socket
     from collections.abc import Iterator
+    from ipaddress import IPv4Network
     from pathlib import Path
 
-    from stelvio.tunnel.manifest import VpcNetwork
+
+class _Network(Protocol):
+    @property
+    def cidrs(self) -> tuple[IPv4Network, ...]: ...
+
+    @property
+    def route_cidrs(self) -> tuple[IPv4Network, ...]: ...
+
 
 MAX_REPLY = 32768
 CONTROL_VERSION = 2
@@ -152,8 +160,10 @@ class Forwarding:
         generation: int,
         attempt: int,
         revision: int,
-        network: VpcNetwork,
+        network: _Network,
         hostnames: tuple[str, ...],
+        *,
+        domains: tuple[str, ...] = (),
     ) -> int:
         from ipaddress import IPv4Address  # noqa: PLC0415 - DNS control boundary
 
@@ -164,8 +174,8 @@ class Forwarding:
                 self._identity(unit, generation, attempt, revision),
                 operation="dns-configure",
                 resolver=str(IPv4Address(int(network.cidrs[0].network_address) + 2)),
-                domains=list(network.dns_domains),
-                hostnames=[name for name in hostnames if name not in network.dns_domains],
+                domains=list(domains),
+                hostnames=[name for name in hostnames if name not in domains],
             )
         )
         port = reply.get("port")
@@ -202,7 +212,7 @@ class Forwarding:
         )
 
     def add(
-        self, unit: str, host_generation: int, attempt: int, network: VpcNetwork, port: int
+        self, unit: str, host_generation: int, attempt: int, network: _Network, port: int
     ) -> None:
         if type(port) is not int or not MIN_PORT <= port <= MAX_PORT:
             raise ValueError("Forwarder SOCKS proxy requires an unprivileged port")

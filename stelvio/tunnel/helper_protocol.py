@@ -9,7 +9,7 @@ from enum import IntEnum
 from ipaddress import IPv4Network
 from uuid import UUID
 
-from stelvio.tunnel.policy import normalize_dns_name
+from stelvio.network import normalize_dns_name
 
 MAGIC = b"STLVTUN1"
 HEADER = struct.Struct("!8sBBHI16s16sQ")

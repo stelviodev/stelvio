@@ -196,7 +196,9 @@ def test_hundred_two_unit_dns_route_cycles(macos_host):
                 network = native_network(octet, domain)
                 unit = f"{index:08x}"
                 forwarding.add(unit, 1, 1, packet_network(network), proxy.port)
-                port = forwarding.configure_dns(unit, 1, 1, 1, network, ())
+                port = forwarding.configure_dns(
+                    unit, 1, 1, 1, network, (), domains=network.resolver_scopes
+                )
                 lease.configure(
                     unit=unit,
                     generation=1,

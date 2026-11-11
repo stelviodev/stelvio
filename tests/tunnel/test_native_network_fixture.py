@@ -21,7 +21,7 @@ def test_native_network_preserves_ownership_and_selects_same_helper_packet_route
     expected_route = f"10.{octet}.9.0/24"
     assert network.cidrs == (IPv4Network(f"10.{octet}.0.0/16"),)
     assert network.route_cidrs == (IPv4Network(expected_route),)
-    assert network.dns_domains == (domain,)
+    assert network.resolver_scopes == (domain,)
     assert network.route_cidrs[0].subnet_of(network.cidrs[0])
     assert IPv4Address(f"10.{octet}.9.19") in network.route_cidrs[0]
     assert IPv4Address(f"10.{octet}.0.2") not in network.route_cidrs[0]
@@ -32,7 +32,9 @@ def test_native_network_preserves_ownership_and_selects_same_helper_packet_route
     packet_request = forwarding._command.call_args.args[0]
     assert packet_request["cidrs"] == [expected_route]
 
-    forwarding.configure_dns("00000001", generation, 1, 1, network, ())
+    forwarding.configure_dns(
+        "00000001", generation, 1, 1, network, (), domains=network.resolver_scopes
+    )
     dns_request = forwarding._command.call_args.args[0]
     assert dns_request["resolver"] == f"10.{octet}.0.2"
     assert dns_request["domains"] == [domain]

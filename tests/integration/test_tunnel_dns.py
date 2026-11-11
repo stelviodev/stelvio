@@ -82,7 +82,9 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
         scope.callback(forwarding.close)
         network = native_network(254, domain, private_domain)
         forwarding.add("00000019", 1, 1, packet_network(network), proxy.port)
-        port = forwarding.configure_dns("00000019", 1, 1, 1, network, ())
+        port = forwarding.configure_dns(
+            "00000019", 1, 1, 1, network, (), domains=network.resolver_scopes
+        )
         lease.configure(
             unit="00000019",
             generation=1,
@@ -124,7 +126,12 @@ def test_native_os_dns_outage_rejects_public_fallback_and_restores_baseline(tmp_
             "upstream_queries_unchanged": True,
         }
 
-        assert forwarding.configure_dns("00000019", 1, 1, 2, network, ()) == port
+        assert (
+            forwarding.configure_dns(
+                "00000019", 1, 1, 2, network, (), domains=network.resolver_scopes
+            )
+            == port
+        )
         assert _scoped_resolver(private_domain, port) == resolver_identity
         recovered = f"recovered-{uuid4().hex}.{private_domain}"
         forwarding.dns("arm", "00000019", 1, 1, 2, name=recovered)
@@ -186,7 +193,9 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
             network = native_network(octet, domain)
             unit = f"{index:08x}"
             forwarding.add(unit, 1, 1, packet_network(network), proxy.port)
-            port = forwarding.configure_dns(unit, 1, 1, 1, network, ())
+            port = forwarding.configure_dns(
+                unit, 1, 1, 1, network, (), domains=network.resolver_scopes
+            )
             lease.configure(
                 unit=unit,
                 generation=1,
@@ -208,7 +217,7 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
         if during_session is not None:
             during_session()
             for _, network, _, address in networks:
-                assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == {address}
+                assert _os_lookup(uuid4().hex + "." + network.resolver_scopes[0]) == {address}
                 with socket.create_connection((address, 27017), timeout=3) as connection:
                     connection.sendall(b"healthy after refused upgrade")
                     assert connection.recv(256) == b"healthy after refused upgrade"
@@ -218,8 +227,10 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
         # Retain scoped DNS during the outage, then retire that generation before
         # configuring the helper and carrier with a fresh shared generation.
         lease.remove(unit=unit, generation=2, keep_dns=True)
-        assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == set()
-        assert _os_lookup(uuid4().hex + "." + networks[1][1].dns_domains[0]) == {networks[1][3]}
+        assert _os_lookup(uuid4().hex + "." + network.resolver_scopes[0]) == set()
+        assert _os_lookup(uuid4().hex + "." + networks[1][1].resolver_scopes[0]) == {
+            networks[1][3]
+        }
         with raises(ConnectionError, match="Forwarder rejected operation"):
             forwarding.add(unit, 1, 2, packet_network(network), proxy.port)
         lease.remove(unit=unit, generation=3)
@@ -231,17 +242,20 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
                 cidrs=tuple(str(cidr) for cidr in network.route_cidrs),
             )
         forwarding.add(unit, 4, 2, packet_network(network), proxy.port)
-        assert forwarding.configure_dns(unit, 4, 2, 2, network, ()) == ports[0]
+        assert (
+            forwarding.configure_dns(unit, 4, 2, 2, network, (), domains=network.resolver_scopes)
+            == ports[0]
+        )
         lease.configure(
             unit=unit,
             generation=4,
             vpc_id="vpc-12345671",
             cidrs=tuple(str(cidr) for cidr in network.route_cidrs),
-            resolvers=(ResolverEndpoint(network.dns_domains[0], ports[0]),),
+            resolvers=(ResolverEndpoint(network.resolver_scopes[0], ports[0]),),
         )
         with raises(ConnectionError, match="Forwarder rejected operation"):
             forwarding.dns("reject", unit, 1, 1, 1)
-        assert _os_lookup(uuid4().hex + "." + network.dns_domains[0]) == {address}
+        assert _os_lookup(uuid4().hex + "." + network.resolver_scopes[0]) == {address}
     final = helper.status()
     assert not final.owned
     assert not final.uncertain

@@ -8,12 +8,12 @@ from threading import Thread
 from types import SimpleNamespace
 
 
-def native_network(octet, *domains):
+def native_network(octet, *resolver_scopes):
     """Keep VPC ownership separate from the subnet carrying fixture traffic."""
     return SimpleNamespace(
         cidrs=(IPv4Network(f"10.{octet}.0.0/16"),),
         route_cidrs=(IPv4Network(f"10.{octet}.9.0/24"),),
-        dns_domains=domains,
+        resolver_scopes=resolver_scopes,
     )
 
 

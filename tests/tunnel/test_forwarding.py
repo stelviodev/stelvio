@@ -85,7 +85,7 @@ def test_invalid_dns_listener_port_is_not_published(control_peer):
     from types import SimpleNamespace
 
     with closing(control_peer("port")) as forwarding:
-        network = SimpleNamespace(cidrs=(IPv4Network("10.254.0.0/16"),), dns_domains=())
+        network = SimpleNamespace(cidrs=(IPv4Network("10.254.0.0/16"),))
         with raises(ConnectionError, match="listener port"):
             forwarding.configure_dns("00000001", 1, 1, 1, network, ())
 
@@ -95,7 +95,7 @@ def test_controls_preserve_explicit_generation_attempt_and_revision():
 
     forwarding = object.__new__(Forwarding)
     forwarding._command = Mock(return_value={"port": 53053})
-    network = SimpleNamespace(cidrs=(IPv4Network("10.254.0.0/16"),), dns_domains=())
+    network = SimpleNamespace(cidrs=(IPv4Network("10.254.0.0/16"),))
 
     forwarding.add("00000001", 7, 12, network, 12000)
     forwarding.configure_dns("00000001", 7, 12, 19, network, ())
@@ -111,6 +111,26 @@ def test_controls_preserve_explicit_generation_attempt_and_revision():
     ]
     assert requests[1]["revision"] == requests[2]["revision"] == 19
     assert requests[0]["revision"] == requests[3]["revision"] == 0
+
+
+def test_dns_scopes_are_explicit_and_separate_from_network_inventory():
+    forwarding = object.__new__(Forwarding)
+    forwarding._command = Mock(return_value={"port": 53053})
+    network = SimpleNamespace(cidrs=(IPv4Network("10.254.0.0/16"),))
+
+    forwarding.configure_dns(
+        "00000001",
+        1,
+        1,
+        1,
+        network,
+        ("private.example", "database.private.example"),
+        domains=("private.example",),
+    )
+
+    request = forwarding._command.call_args.args[0]
+    assert request["domains"] == ["private.example"]
+    assert request["hostnames"] == ["database.private.example"]
 
 
 @mark.parametrize(
@@ -143,7 +163,7 @@ def test_verified_nonroot_forwarder_exchanges_private_dns_when_opted_in():
     from tests.integration.tunnel_dns_fixture import SocksDnsFixture
 
     network = SimpleNamespace(
-        cidrs=(IPv4Network("10.254.0.0/16"),), dns_domains=("forwarder.test",)
+        cidrs=(IPv4Network("10.254.0.0/16"),), resolver_scopes=("forwarder.test",)
     )
     socks = SocksDnsFixture()
     carrier, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -152,7 +172,9 @@ def test_verified_nonroot_forwarder_exchanges_private_dns_when_opted_in():
         with packaged_forwarder() as binary:
             forwarding = Forwarding(binary, carrier)
             forwarding.add("00000001", 7, 12, network, socks.port)
-            forwarding.configure_dns("00000001", 7, 12, 19, network, ())
+            forwarding.configure_dns(
+                "00000001", 7, 12, 19, network, (), domains=network.resolver_scopes
+            )
             result = forwarding.dns(
                 "probe",
                 "00000001",
@@ -189,7 +211,7 @@ def test_verified_nonroot_forwarder_dns_reject_servfail_and_reconfigure_when_opt
     )
 
     network = SimpleNamespace(
-        cidrs=(IPv4Network("10.254.0.0/16"),), dns_domains=("forwarder.test",)
+        cidrs=(IPv4Network("10.254.0.0/16"),), resolver_scopes=("forwarder.test",)
     )
     socks = SocksDnsFixture()
     carrier, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -198,7 +220,9 @@ def test_verified_nonroot_forwarder_dns_reject_servfail_and_reconfigure_when_opt
         with packaged_forwarder() as binary:
             forwarding = Forwarding(binary, carrier)
             forwarding.add("00000001", 7, 12, network, socks.port)
-            port = forwarding.configure_dns("00000001", 7, 12, 19, network, ())
+            port = forwarding.configure_dns(
+                "00000001", 7, 12, 19, network, (), domains=network.resolver_scopes
+            )
 
             for transport in ("udp", "tcp"):
                 wire = dns_query_wire(f"before-{transport}.forwarder.test", 0x4A40)
@@ -213,7 +237,9 @@ def test_verified_nonroot_forwarder_dns_reject_servfail_and_reconfigure_when_opt
                 assert dns_response(wire, response) == (2, 0)
             assert tuple(socks.server.queries) == upstream_before
 
-            recovered_port = forwarding.configure_dns("00000001", 7, 12, 20, network, ())
+            recovered_port = forwarding.configure_dns(
+                "00000001", 7, 12, 20, network, (), domains=network.resolver_scopes
+            )
             assert recovered_port == port
             for index, transport in enumerate(("udp", "tcp"), start=1):
                 name = f"recovered-{transport}.forwarder.test"
