@@ -202,7 +202,7 @@ def run():
 """
         else:
             source += """
-    for number, octet, bastion in ((1, 252, True), (2, 253, {})):
+    for number, octet, bastion in ((1, 252, True), (2, 253, True)):
         vpc = Vpc(f'net{number}', az=2, bastion=bastion, customize=relocate(octet))
         database = DocumentDb(f'docdb{number}', vpc=vpc, replicas=1 if number == 1 else 0)
         function = Function(
@@ -322,7 +322,7 @@ def run():
         self._state_hash = hashlib.sha256(state).hexdigest()
         self._manifest = read_network_manifest(json.loads(state))
         assert len(self._manifest.enabled_vpcs) == (0 if self.no_vpc else 2)
-        assert len(self._manifest.used_vpcs) == (0 if self.no_vpc else 3)
+        assert len(self._manifest.vpcs) == (0 if self.no_vpc else 3)
         assert len(self._manifest.resources) == (0 if self.no_vpc else 2)
         self._initialize_proof_host_trust()
 

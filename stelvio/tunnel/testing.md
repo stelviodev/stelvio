@@ -145,7 +145,7 @@ uv run pytest \
 ## Dev mode AWS acceptance
 
 The opt-in dev scenario uses public Function URLs to reach local handlers. Its proof
-app combines `bastion=True`, `bastion={}`, a disabled-bastion VPC, and a non-VPC
+app combines two Vpcs with `bastion=True`, a disabled-bastion Vpc, and a non-VPC
 Function. The DocumentDB handlers verify TLS, member discovery, and reads/writes
 using distinct markers that are checked against both databases. The test stops one
 bastion, requires the structured `VpcUnavailableError` before handler import,

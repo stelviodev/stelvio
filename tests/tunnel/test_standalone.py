@@ -367,6 +367,7 @@ def test_dev_commands_share_pins_and_reject_changed_keys_before_dispatch(  # noq
     import time
     from unittest.mock import AsyncMock
 
+    from stelvio.aws.function import Function
     from stelvio.bridge.local import listener
     from stelvio.bridge.local.dtos import BridgeInvocationResult
     from stelvio.tunnel.host_trust import fingerprint
@@ -378,27 +379,31 @@ def test_dev_commands_share_pins_and_reject_changed_keys_before_dispatch(  # noq
     assert world.run().exit_code == 0
     captured = []
 
-    class Run(FakeCommandRun):
-        def capture_network_session(self, report):
-            network = world.new_session(report)
-            captured.append(network)
-            return network
-
-    cli_commands.CommandRun.side_effect = lambda *args, **kwargs: Run(
+    cli_commands.CommandRun.side_effect = lambda *args, **kwargs: FakeCommandRun(
         {"checkpoint": {"latest": {"resources": []}}}
     )
+
+    def capture(**options):
+        network = world.new_session(options["report"])
+        captured.append(network)
+        handler._vpc_attachment.vpc.name = network.manifest.vpcs[0].identity.split("::", 3)[-1]
+        return network
+
+    monkeypatch.setattr(cli_commands, "NetworkSession", capture)
     monkeypatch.setattr(cli_commands.ProviderStore, "region", lambda: "us-east-1")
     monkeypatch.setattr(cli_commands, "_clean_stale_caches", lambda: None)
-    handler = SimpleNamespace(
-        handle_bridge_event=AsyncMock(
-            return_value=BridgeInvocationResult(
-                success_result={"statusCode": 200},
-                error_result=None,
-                request_path="/",
-                request_method="GET",
-                process_time_local=1.0,
-                status_code=200,
-            )
+    handler = Mock(spec=Function)
+    handler.name = "fn"
+    handler._dev_endpoint_id = "fn"
+    handler._vpc_attachment = SimpleNamespace(vpc=SimpleNamespace(name="pending"))
+    handler.handle_bridge_event = AsyncMock(
+        return_value=BridgeInvocationResult(
+            success_result={"statusCode": 200},
+            error_result=None,
+            request_path="/",
+            request_method="GET",
+            process_time_local=1.0,
+            status_code=200,
         )
     )
     publish = AsyncMock()

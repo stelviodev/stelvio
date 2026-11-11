@@ -1,6 +1,7 @@
 import logging
 import os
 import traceback
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from typing import NoReturn
 
@@ -11,6 +12,8 @@ from rich.status import Status
 
 from stelvio import context
 from stelvio.aws._packaging.dependencies import clean_stale_dependency_caches
+from stelvio.aws.function import Function
+from stelvio.bridge.local.handlers import WebsocketHandlers
 from stelvio.bridge.local.listener import run_bridge_server
 from stelvio.cli.json_output import (
     emit_stream_start,
@@ -22,7 +25,7 @@ from stelvio.cli.json_output import (
 )
 from stelvio.cli.state_rendering import format_state_tree_lines
 from stelvio.command_run import CommandRun, force_unlock
-from stelvio.exceptions import StelvioProjectError
+from stelvio.exceptions import StelvioProjectError, StelvioValidationError
 from stelvio.provider import ProviderStore
 from stelvio.pulumi import _show_simple_error, print_operation_header
 from stelvio.rich_deployment_handler import RichDeploymentHandler
@@ -40,6 +43,7 @@ from stelvio.state_ops import (
     remove_resource,
     repair_state,
 )
+from stelvio.tunnel.session import NetworkSession
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -300,6 +304,47 @@ def run_deploy(
         )
 
 
+def _dev_network_admission(
+    network: NetworkSession, report: Callable[[str], None]
+) -> Callable[[str], BaseException | None]:
+    by_name = {}
+    for vpc in network.manifest.vpcs:
+        by_name.setdefault(vpc.identity.split("::", 3)[-1], []).append(vpc)
+    dependencies = {}
+    disabled = set()
+    for function in WebsocketHandlers.all():
+        if not isinstance(function, Function):
+            continue
+        endpoint = function._dev_endpoint_id  # noqa: SLF001
+        if endpoint in dependencies:
+            raise StelvioValidationError(
+                f"Duplicate dev endpoint {endpoint!r} for Function {function.name!r}; "
+                "restart stlv dev"
+            )
+        attachment = function._vpc_attachment  # noqa: SLF001
+        dependencies[endpoint] = ()
+        if attachment is None:
+            continue
+        matches = by_name.get(attachment.vpc.name, [])
+        if len(matches) != 1:
+            raise StelvioValidationError(
+                f"Function {function.name!r} requires Vpc {attachment.vpc.name!r}, "
+                "but its deployed network record is missing or ambiguous; redeploy the app"
+            )
+        vpc = matches[0]
+        if vpc.bastion_instance_id is None:
+            disabled.add(vpc.identity)
+        else:
+            dependencies[endpoint] = (vpc.identity,)
+    for identity in sorted(disabled):
+        report(f"VPC access disabled: {identity}; local networking is your responsibility.")
+
+    def admit(endpoint: str) -> BaseException | None:
+        return network.admit_vpcs(dependencies.get(endpoint, ()))
+
+    return admit
+
+
 def run_dev(env: str, show_unchanged: bool = False) -> None:
     network = None
     try:
@@ -333,9 +378,16 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
 
             grouped = group_outputs(run.load_state(), run.stack.outputs())
             display_handler.show_completion(output_lines=format_outputs(grouped))
+
             # Capture the deployed manifest and AWS provider context before CommandRun removes
             # its temporary working directory. The session itself starts after that context exits.
-            network = run.capture_network_session(lambda message: console.print(escape(message)))
+            def report(message: str) -> None:
+                console.print(escape(message))
+
+            network = NetworkSession(
+                state=run.load_state(), app=run.app_name, env=env, report=report
+            )
+            admission = _dev_network_admission(network, report)
             bridge_region = ProviderStore.region()
             bridge_profile = context().aws.profile
             bridge_app_name = run.app_name
@@ -354,7 +406,7 @@ def run_dev(env: str, show_unchanged: bool = False) -> None:
             profile=bridge_profile,
             app_name=bridge_app_name,
             env=env,
-            admission=network.admit,
+            admission=admission,
         )
     finally:
         if network is not None:

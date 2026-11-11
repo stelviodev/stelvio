@@ -158,9 +158,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     second_vpc = next(
         vpc for vpc in session.manifest.enabled_vpcs if vpc.identity.endswith("net2")
     )
-    cluster_by_vpc = {
-        resource.vpc: resource.resource_id for resource in session.manifest.resources
-    }
+    cluster_by_vpc = {resource.vpc: resource.cluster_id for resource in session.manifest.resources}
     first_cluster = cluster_by_vpc[first_vpc.identity]
     second_cluster = cluster_by_vpc[second_vpc.identity]
 
@@ -197,7 +195,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
         assert isinstance(response, dict)
         assert response["plain"] is True
         assert response["marker"] == session.app
-    disabled_vpc = next(vpc for vpc in session.manifest.used_vpcs if vpc.identity.endswith("net3"))
+    disabled_vpc = next(vpc for vpc in session.manifest.vpcs if vpc.identity.endswith("net3"))
     assert "VPC access disabled:" in session.log()
     assert disabled_vpc.identity in session.log()
 
@@ -206,7 +204,7 @@ def test_dev_function_url_gates_and_recovers_documentdb(standalone_cli_session):
     assert ports_before
 
     ec2 = session.aws.client("ec2")
-    bastion_id = first_vpc.access.instance_id
+    bastion_id = first_vpc.bastion_instance_id
     ec2.stop_instances(InstanceIds=[bastion_id])
     ec2.get_waiter("instance_stopped").wait(
         InstanceIds=[bastion_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60}
@@ -307,9 +305,12 @@ def test_dev_host_key_rotation_is_terminal_until_a_new_session(standalone_cli_se
     marker = f"{session.app}-host-key-proof"
     assert session.wait_function_marker(1, marker)["read_write"]
     resource = next(item for item in session.manifest.resources if item.vpc == vpc.identity)
-    hostname = resource.hostnames[0]
+    cluster = session.aws.client("docdb").describe_db_clusters(
+        DBClusterIdentifier=resource.cluster_id
+    )["DBClusters"][0]
+    hostname = cluster["Endpoint"]
     port = session.resolver_ports()[hostname]
-    instance_id = vpc.access.instance_id
+    instance_id = vpc.bastion_instance_id
     initial_pins = session.host_pins()
 
     with session.rotated_host_key(instance_id) as changed_key:

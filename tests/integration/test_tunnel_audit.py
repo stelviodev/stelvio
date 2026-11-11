@@ -29,7 +29,7 @@ def _write_cli_session_project(tmp_path, *, no_vpc: bool = False) -> str:
 def test_mixed_dev_proof_project_covers_enabled_disabled_and_plain_functions(tmp_path):
     source = _write_cli_session_project(tmp_path)
 
-    assert "((1, 252, True), (2, 253, {}))" in source
+    assert "((1, 252, True), (2, 253, True))" in source
     assert "bastion=False" in source
     assert "disabled-client" in source
     assert "plain_function = Function('plain'" in source

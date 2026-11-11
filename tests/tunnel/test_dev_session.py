@@ -217,11 +217,11 @@ def test_terminal_vpc_failure_blocks_only_its_dependents_and_reports_guidance(
     session = world.make(network_state)
     session.start()
     try:
-        wait_for(lambda: session.admit("both") is None)
+        wait_for(lambda: session.admit_vpcs(("vpc-0", "vpc-1")) is None)
         world.statuses[0].update(state="failed", cause=cause)
-        wait_for(lambda: isinstance(session.admit("both"), VpcUnavailableError))
-        assert session.admit("healthy") is None
-        assert session.admit("plain") is None
+        wait_for(lambda: isinstance(session.admit_vpcs(("vpc-0", "vpc-1")), VpcUnavailableError))
+        assert session.admit_vpcs(("vpc-1",)) is None
+        assert session.admit_vpcs(()) is None
         wait_for(lambda: any(guidance in message for message in world.messages))
     finally:
         session.close()
@@ -579,15 +579,17 @@ def test_host_report_survives_dev_console_rendering():
 @mark.parametrize(
     "failure", [None, "host-uncertain-configure-20", "cleanup-incomplete", "invalid-detail"]
 )
-def test_dev_subnet_selection_and_conflict_admission_through_bridge(  # noqa: PLR0915 - command/session/bridge boundary
+def test_dev_subnet_selection_and_conflict_admission_through_bridge(  # noqa: C901, PLR0915  # command/session/bridge boundary
     world, network_state, cli_commands, monkeypatch, failure
 ):
     import asyncio
     import json
     from unittest.mock import AsyncMock
 
+    from stelvio.aws.function import Function
     from stelvio.bridge.local import listener
     from stelvio.bridge.local.dtos import BridgeInvocationResult
+    from stelvio.component import BridgeableMixin
     from tests.cli_test_helpers import FakeCommandRun
 
     detail = (
@@ -612,14 +614,14 @@ def test_dev_subnet_selection_and_conflict_admission_through_bridge(  # noqa: PL
             events.append("release-context")
             return False
 
-        def capture_network_session(self, report):
-            session = NetworkSession(
-                state=network_state, app=self.app_name, env="dev", report=report
-            )
-            sessions.append(session)
-            return session
-
     cli_commands.CommandRun.side_effect = lambda *a, **kw: Run(network_state)
+
+    def capture(**options):
+        session = NetworkSession(**options)
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(cli_commands, "NetworkSession", capture)
     monkeypatch.setattr(cli_commands.ProviderStore, "region", lambda: "us-east-1")
     monkeypatch.setattr(cli_commands, "_clean_stale_caches", lambda: None)
     dispatch = AsyncMock(
@@ -632,7 +634,20 @@ def test_dev_subnet_selection_and_conflict_admission_through_bridge(  # noqa: PL
             status_code=200,
         )
     )
-    lookup = Mock(return_value=[SimpleNamespace(handle_bridge_event=dispatch)])
+    functions = []
+    for endpoint, attachment in (
+        ("both", SimpleNamespace(vpc=SimpleNamespace(name="vpc-0"))),
+        ("healthy", SimpleNamespace(vpc=SimpleNamespace(name="vpc-1"))),
+        ("plain", None),
+    ):
+        function = Mock(spec=Function)
+        function.name = endpoint
+        function._dev_endpoint_id = endpoint
+        function._vpc_attachment = attachment
+        function._handle_bridge_event = dispatch
+        function.handle_bridge_event = BridgeableMixin.handle_bridge_event.__get__(function)
+        functions.append(function)
+    lookup = Mock(return_value=functions)
     publish = AsyncMock()
     monkeypatch.setattr(listener.WebsocketHandlers, "all", lookup)
     monkeypatch.setattr(listener, "publish", publish)
@@ -641,7 +656,6 @@ def test_dev_subnet_selection_and_conflict_admission_through_bridge(  # noqa: PL
     def bridge(*, admission, **_options):
         assert events[-1] == "release-context"
         session = sessions[-1]
-        assert admission.__self__ is session
         wait_for(lambda: session._observed or session._runtime_error)
         for endpoint in ("both", "healthy", "plain"):
             blocked = (failure == "invalid-detail" and endpoint != "plain") or (
@@ -680,13 +694,9 @@ def test_dev_subnet_selection_and_conflict_admission_through_bridge(  # noqa: PL
     assert events == ["capture-context", "release-context", "bridge-finished"]
     assert world.closed == [True]
     description = world.launches[0][0]
-    assert [tuple(map(str, n.route_cidrs)) for n in description.manifest.enabled_vpcs] == [
-        ("10.0.1.0/24", "10.0.2.0/24"),
-        ("10.1.1.0/24", "10.1.2.0/24"),
-    ]
-    assert [tuple(map(str, n.cidrs)) for n in description.manifest.enabled_vpcs] == [
-        ("10.0.0.0/16",),
-        ("10.1.0.0/16",),
+    assert [n.route_subnet_ids for n in description.manifest.enabled_vpcs] == [
+        ("subnet-private-0", "subnet-isolated-0"),
+        ("subnet-private-1", "subnet-isolated-1"),
     ]
     output = "\n".join(cli_commands.console.lines)
     assert "SECRET" not in output

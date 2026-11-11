@@ -15,7 +15,7 @@ When you run `stlv dev`, Stelvio deploys your app in **dev mode**:
 
 - Your Lambdas get replaced with a small stub Lambda.
 - The stub forwards each invocation over an AppSync Events channel.
-- The `stlv dev` process captures deployed networking state, starts managed VPC access when a handler needs it, then starts the AppSync bridge.
+- The `stlv dev` process captures deployed networking state, starts managed access to every deployed Vpc with a bastion, then starts the AppSync bridge.
 - The bridge admits each invocation after its enabled VPC dependencies are ready. It executes the local handler and sends the result back to AWS.
 
 This covers every Lambda function that runs your code: each `Function` you create and each one a component creates from a [handler](../components/aws/lambda.md#handler-forms), such as API routes and authorizers, `Cron`, queue, topic and table subscriptions, bucket notifications, AppSync data sources and authorizers, and `UserPool` triggers.
@@ -32,6 +32,11 @@ to identify the AWS account, provider, region, VPC, and owned access instance.
 It checks the complete VPC CIDR and subnet inventory and requires VPC DNS support
 and hostnames to be enabled before using private DNS. Handler changes to AWS
 environment variables cannot redirect the captured AWS session.
+
+`stlv dev` opens every deployed Vpc with a bastion, including Vpcs with DocumentDB
+and no Functions. It takes each Function's Vpc from the loaded app to check access
+before importing that Function's handler. A Function whose Vpc has no bastion
+keeps running with one warning per Vpc; provide its local network access yourself.
 
 VPC CIDRs describe AWS ownership. Deployment records select private and isolated
 subnets by ID. Stelvio reads their availability zones and CIDRs from AWS and
@@ -173,12 +178,12 @@ The standalone command instead exits with an error on a terminal VPC failure.
 
 ### Standalone access
 
-Use `stlv tunnel start [ENV]` to open every bastion Vpc from a deployed
-environment without running the local handler or AppSync bridge. Stelvio reads the
-deployed Vpc records and captures their AWS provider settings before it
-starts the session. The command does not deploy resources or replace the persistent
-bastion. It stays in the foreground until you press `Ctrl+C`; a deployment with no
-bastions exits successfully without activating the helper.
+Use `stlv tunnel start [ENV]` to open every bastion Vpc in a deployed environment
+without running the local handler or AppSync bridge. Stelvio captures the Vpcs'
+AWS provider settings before it starts the session. The command does not deploy
+resources or replace the persistent bastion. It stays in the foreground until you
+press `Ctrl+C`; a deployment with no bastions exits successfully without activating
+the helper.
 Standalone commands reuse the same persistent host trust as dev mode. A key
 mismatch produces a nonzero exit after session cleanup; repeating the command
 does not bypass the pin. See the [standalone CLI guide](../intro/using-cli.md#standalone-access-to-deployed-vpc-resources)
