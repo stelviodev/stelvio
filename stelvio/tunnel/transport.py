@@ -144,6 +144,7 @@ class SshTransport:
         self.owner_id = owner_id or network.identity
         self._receipt: str | None = None
         self._reason: str | None = None
+        self.partition: str | None = None
         self.pin: str | None = None
         self.process: subprocess.Popen | None = None
         self._process_identity = None
@@ -283,6 +284,7 @@ class SshTransport:
             self.network.record.region,
             access.instance_id,
         )
+        self.partition = target.partition
         with locked_host_trust(target, self.stop) as trust:
             if self.pin is not None and trust.key != self.pin:
                 raise ServerIdentityError(

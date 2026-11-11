@@ -795,3 +795,24 @@ def test_no_resource_dns_process_without_linked_resources(monkeypatch):
 
     monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", unexpected)
     world.worker._probe_resource_dns()
+
+
+def test_diagnostics_projects_discovered_resource_details(monkeypatch):
+    world = _worker_world(monkeypatch)
+    world.worker.transport.process = None
+    world.worker.transport.partition = "aws"
+    world.worker.transport.pin = None
+
+    snapshot = world.worker.diagnostics()
+
+    assert snapshot["resources"] == [
+        {
+            "identity": "db",
+            "vpc": "network-a",
+            "service": "documentdb",
+            "resource_id": "cluster",
+            "ports": [27017],
+            "hostnames": ["db.private.example.com"],
+        }
+    ]
+    assert snapshot["ranges"] == ["10.254.16.0/20", "10.254.64.0/20"]
