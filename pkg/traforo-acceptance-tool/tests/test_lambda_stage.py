@@ -436,9 +436,7 @@ def observed(run_root, proof, api_sdk, monkeypatch):
                 api.create()
             self.command("deploy", self.environment_name, "--yes")
             self._manifest = SimpleNamespace(
-                used_vpcs=[
-                    SimpleNamespace(identity=f"aws::net{n}", vpc_id=f"vpc{n}") for n in (1, 2, 3)
-                ]
+                vpcs=[SimpleNamespace(identity=f"aws::net{n}", vpc_id=f"vpc{n}") for n in (1, 2, 3)]
             )
             prefix = f"{self.app}-{self.environment_name}"
             for number in self.apis:
@@ -463,9 +461,7 @@ def observed(run_root, proof, api_sdk, monkeypatch):
             pass
 
         def network(self, number):
-            return SimpleNamespace(
-                vpc_id=f"vpc{number}", access=SimpleNamespace(instance_id=f"i{number}")
-            )
+            return SimpleNamespace(vpc_id=f"vpc{number}", bastion_instance_id=f"i{number}")
 
         @contextmanager
         def stopped_bastion(self, number):
@@ -524,7 +520,7 @@ def test_subclass_registration_and_shared_deployment_are_not_duplicated(run_root
         "vpc_id": None,
         "networking": "none",
     }
-    # Only the two managed targets require access metadata.
+    # Only the two managed targets require a bastion instance ID.
     assert set(topology) == {"1", "2"}
 
 

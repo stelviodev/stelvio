@@ -1,11 +1,18 @@
 """Non-AWS checks for the additive private-Lambda acceptance fixture."""
 
 import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
+import pulumi
 import pytest
 
+from stelvio.app import StelvioApp
+from stelvio.aws.function import Function
+from stelvio.aws.vpc import Vpc
+from stelvio.component import ComponentRegistry
+from tests.aws.pulumi_mocks import tid
 from tests.integration import lambda_tunnel_session as fixture
 
 
@@ -37,6 +44,88 @@ def test_api_receipt_survives_later_failure(api):
     assert api.evidence.is_file()
     policy = api.client.update_rest_api.call_args.kwargs["patchOperations"][0]["value"]
     assert '"aws:SourceVpce": "vpce-owned"' in policy
+
+
+def test_private_api_uses_publicly_resolvable_endpoint_alias(api):
+    api.create()
+    api.client.get_resources.return_value = {"items": [{"path": "/", "id": "root"}]}
+
+    api.configure("vpce-owned", "arn:aws:lambda:us-east-1:123456789012:function:owned")
+
+    assert api.url == "https://api123-vpce-owned.execute-api.us-east-1.amazonaws.com/proof/"
+    assert api.client.update_rest_api.call_args.kwargs["patchOperations"][1] == {
+        "op": "add",
+        "path": "/endpointConfiguration/vpcEndpointIds",
+        "value": "vpce-owned",
+    }
+
+
+def test_generated_lambda_app_uses_endpoint_alias_without_custom_domains(
+    pulumi_mocks, monkeypatch
+):
+    source = Path(fixture.__file__).parent / "handlers/tunnel_lambda_app.py.txt"
+    settings = {
+        "app": "proof-app",
+        "env": "proof",
+        "region": "us-east-1",
+        "account": "123456789012",
+        "targets": [{"api_id": "api1"}, {"api_id": "api2"}],
+    }
+    exports = {}
+    monkeypatch.setattr(StelvioApp, "_StelvioApp__instance", None)
+    monkeypatch.setattr("stelvio.export_output", lambda key, value: exports.update({key: value}))
+    monkeypatch.setattr(
+        "pulumi_aws.ec2.VpcEndpoint",
+        lambda name, **kwargs: SimpleNamespace(id=pulumi.Output.from_input(tid(name))),
+    )
+    monkeypatch.setattr(
+        Vpc,
+        "_create_resources",
+        lambda self: SimpleNamespace(
+            vpc=SimpleNamespace(id=self.name),
+            bastion=SimpleNamespace(id=f"{self.name}-bastion"),
+            bastion_security_group=SimpleNamespace(id=f"{self.name}-bastion-sg"),
+            private_subnets=[SimpleNamespace(id=f"{self.name}-private")],
+        ),
+    )
+    monkeypatch.setattr(
+        Function,
+        "_create_resources",
+        lambda self: SimpleNamespace(
+            function=SimpleNamespace(name=self.name),
+            function_url=SimpleNamespace(function_url=f"https://{self.name}.example.test"),
+        ),
+    )
+
+    @pulumi.runtime.test
+    def deploy():
+        namespace = {}
+        exec(  # noqa: S102  # generated test-owned infrastructure with mocked providers
+            compile(
+                source.read_text().replace("SETTINGS_LITERAL", repr(settings)), str(source), "exec"
+            ),
+            namespace,
+        )
+        namespace["run"]()
+        clients = {
+            function.name: function for function in ComponentRegistry.instances_of(Function)
+        }
+        return pulumi.Output.all(
+            exports["private_api1_url"],
+            exports["private_api2_url"],
+            clients["client1"].config.environment["PRIVATE_API_URL"],
+            clients["client2"].config.environment["PRIVATE_API_URL"],
+        ).apply(check)
+
+    def check(values):
+        expected = [
+            f"https://api{number}-{tid(f'api-endpoint{number}')}.execute-api."
+            "us-east-1.amazonaws.com/proof/"
+            for number in (1, 2)
+        ]
+        assert values == expected * 2
+
+    deploy()
 
 
 @pytest.mark.parametrize(
@@ -205,20 +294,24 @@ def test_cross_vpc_backend_response_is_rejected():
         fixture.assert_echo(response, app="app:net1", nonce="nonce", payload="x")
 
 
-def test_dns_views_refuse_peer_hostname():
+def test_dns_views_refuse_peer_probe_domain():
     session = object.__new__(fixture.LambdaTunnelSession)
-    session.apis = {
-        1: SimpleNamespace(hostname="api1.example"),
-        2: SimpleNamespace(hostname="api2.example"),
+    session.apis = {1: object(), 2: object()}
+    session.network = lambda number: SimpleNamespace(identity=f"vpc-{number}")
+    domains = {
+        number: f"probe-{'1' * 32}-{hashlib.sha256(f'vpc-{number}'.encode()).hexdigest()[:8]}"
+        ".stelvio.test"
+        for number in (1, 2)
     }
-    session.resolver_ports = Mock(return_value={"api1.example": 41001, "api2.example": 41002})
+    session.resolver_ports = Mock(return_value={domains[1]: 41001, domains[2]: 41002})
     session.wait_dns_rcode = Mock()
     session.dns_rcode = Mock(return_value=5)
     assert session.assert_dns_isolation() == session.resolver_ports.return_value
     assert session.dns_rcode.call_args_list == [
-        (("api2.example", 41001),),
-        (("api1.example", 41002),),
+        ((domains[2], 41001),),
+        ((domains[1], 41002),),
     ]
+    assert all(call.args[2] == 3 for call in session.wait_dns_rcode.call_args_list)
     session.dns_rcode.return_value = 0
     with pytest.raises(AssertionError, match="Wrong VPC"):
         session.assert_dns_isolation()
@@ -228,9 +321,7 @@ def test_stopped_bastion_is_restored_after_failed_assertion():
     session = object.__new__(fixture.LambdaTunnelSession)
     session.account, session.app, session.environment_name = "123", "proof-app", "proof"
     session.network = Mock(
-        return_value=SimpleNamespace(
-            vpc_id="vpc-owned", access=SimpleNamespace(instance_id="i-owned")
-        )
+        return_value=SimpleNamespace(vpc_id="vpc-owned", bastion_instance_id="i-owned")
     )
     ec2 = Mock()
     ec2.describe_instances.return_value = {
@@ -337,8 +428,8 @@ def test_parallel_access_keeps_sdk_probes_on_owner_thread(monkeypatch):
 @pytest.mark.parametrize("bad_field", [None, "plain", "app", "nonce", "local", "pid"])
 def test_plain_clients_require_current_local_invocations(bad_field):
     session = object.__new__(fixture.LambdaTunnelSession)
-    disabled = SimpleNamespace(identity="aws:net3", policy=fixture.BastionPolicy.DISABLED)
-    session._manifest = SimpleNamespace(used_vpcs=[disabled])
+    disabled = SimpleNamespace(identity="aws:net3", bastion_instance_id=None)
+    session._manifest = SimpleNamespace(vpcs=[disabled])
     session.app = "proof-app"
     session.log = Mock(return_value="VPC access disabled: aws:net3; local networking")
     entries = []
@@ -363,7 +454,7 @@ def test_plain_clients_require_current_local_invocations(bad_field):
 def test_plain_clients_require_one_disabled_vpc_warning():
     session = object.__new__(fixture.LambdaTunnelSession)
     session._manifest = SimpleNamespace(
-        used_vpcs=[SimpleNamespace(identity="aws:net3", policy=fixture.BastionPolicy.DISABLED)]
+        vpcs=[SimpleNamespace(identity="aws:net3", bastion_instance_id=None)]
     )
     session.log = Mock(return_value="VPC access disabled: aws:net3\n" * 2)
     session.invoke_function = Mock()

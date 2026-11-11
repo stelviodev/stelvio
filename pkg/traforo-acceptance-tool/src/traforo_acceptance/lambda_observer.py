@@ -92,13 +92,13 @@ def install(root, session_class, api_class, base_class, registration):
         manifest = getattr(session, "_manifest", None)
         targets, vpcs, clients = {}, [], {}
         if manifest is not None:
-            for network in manifest.used_vpcs:
+            for network in manifest.vpcs:
                 vpcs.append({"id": network.vpc_id, "identity": network.identity})
             for number in session.apis:
                 network = session.network(number)
                 targets[str(number)] = {
                     "vpc_id": network.vpc_id,
-                    "instance_id": network.access.instance_id,
+                    "instance_id": network.bastion_instance_id,
                     "endpoint_id": outputs.get(f"endpoint{number}_id"),
                     "functions": [
                         outputs[f"{kind}{number}_name"]
@@ -217,7 +217,7 @@ def install(root, session_class, api_class, base_class, registration):
     session_class.stopped_bastion = fault_wrapper(
         session_class.stopped_bastion,
         "bastion-stop",
-        lambda session, number: session.network(number).access.instance_id,
+        lambda session, number: session.network(number).bastion_instance_id,
     )
     session_class.rotated_host_key = fault_wrapper(
         session_class.rotated_host_key, "host-key-rotation", lambda session, instance: instance

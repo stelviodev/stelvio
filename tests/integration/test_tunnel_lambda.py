@@ -97,11 +97,11 @@ def recover_transport(session, number=1):
     ports = session.assert_dns_isolation()
     receipts = session.active_ssm_sessions()
     assert len(receipts) == 2
-    retired = [item for item in receipts if item["Target"] == network.access.instance_id]
-    peer = [item for item in receipts if item["Target"] == healthy.access.instance_id]
+    retired = [item for item in receipts if item["Target"] == network.bastion_instance_id]
+    peer = [item for item in receipts if item["Target"] == healthy.bastion_instance_id]
     assert len(retired) == len(peer) == 1
     offset = len(session.log())
-    session.terminate_transport(network.access.instance_id)
+    session.terminate_transport(network.bastion_instance_id)
     session.wait_network_ready(after=offset)
     recovered = session.wait_unit(
         network.identity,
@@ -117,7 +117,7 @@ def recover_transport(session, number=1):
     assert [
         item["SessionId"]
         for item in session.active_ssm_sessions()
-        if item["Target"] == healthy.access.instance_id
+        if item["Target"] == healthy.bastion_instance_id
     ] == [item["SessionId"] for item in peer]
     session.assert_sessions_terminated(retired)
 
@@ -131,8 +131,10 @@ def partial_failure(session, failed, *, dev=False):
     ports = session.assert_dns_isolation()
     sessions_before = session.active_ssm_sessions()
     assert len(sessions_before) == 2
-    retired = [item for item in sessions_before if item["Target"] == network.access.instance_id]
-    peer_sessions = [item for item in sessions_before if item["Target"] == peer.access.instance_id]
+    retired = [item for item in sessions_before if item["Target"] == network.bastion_instance_id]
+    peer_sessions = [
+        item for item in sessions_before if item["Target"] == peer.bastion_instance_id
+    ]
     assert len(retired) == len(peer_sessions) == 1
     pins = session.host_pins()
     with session.stopped_bastion(failed):
@@ -142,7 +144,7 @@ def partial_failure(session, failed, *, dev=False):
         assert retained.generation == initial.generation + 1
         assert session.resolver_ports() == ports
         session.wait_dns_rcode(
-            session.apis[failed].hostname, ports[session.apis[failed].hostname], expected=2
+            session.probe_domain(failed), ports[session.probe_domain(failed)], expected=2
         )
         session.assert_private_unavailable(failed)
         for _ in range(2):
@@ -157,7 +159,7 @@ def partial_failure(session, failed, *, dev=False):
         assert [
             item["SessionId"]
             for item in session.active_ssm_sessions()
-            if item["Target"] == peer.access.instance_id
+            if item["Target"] == peer.bastion_instance_id
         ] == [item["SessionId"] for item in peer_sessions]
         offset = len(session.log())
     session.wait_recovered_unit(
@@ -242,14 +244,14 @@ def test_lambda_host_key_rejection_and_peer_isolation(lambda_session):
     session.check_plain_clients()
     network = session.network(1)
     pins = session.host_pins()
-    with session.rotated_host_key(network.access.instance_id) as changed:
-        session.terminate_transport(network.access.instance_id)
+    with session.rotated_host_key(network.bastion_instance_id) as changed:
+        session.terminate_transport(network.bastion_instance_id)
         session.wait_worker_cause(network.identity, "ssh-host-key", timeout=240)
         output = session.log()
         assert fingerprint(changed) in output
         assert any(fingerprint(key) in output for key in pins.values())
         assert "stlv tunnel trust reset" in output
-        session.wait_dns_rcode(session.apis[1].hostname, ports[session.apis[1].hostname], 2)
+        session.wait_dns_rcode(session.probe_domain(1), ports[session.probe_domain(1)], 2)
         session.wait_admission_rejected(1)
         session.check_dev(uuid4().hex, 2)
         session.check_plain_clients()
@@ -319,7 +321,7 @@ def test_lambda_standalone_host_key_startup_refusal(lambda_session):
     assert session.terminate(signal.SIGINT) == 0
     assert_stopped(session, receipts)
 
-    instance = session.network(1).access.instance_id
+    instance = session.network(1).bastion_instance_id
     with session.rotated_host_key(instance) as changed:
         for _ in range(2):
             session.start()

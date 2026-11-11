@@ -33,7 +33,7 @@ def create_target(number, target):
     vpc = Vpc(
         f"net{number}",
         az=1,
-        bastion={"dns_domains": [target["hostname"]]},
+        bastion=True,
         customize=dict.fromkeys(
             ("vpc", "public_subnet", "private_subnet", "isolated_subnet"), relocate(252 - number)
         ),
@@ -60,6 +60,13 @@ def create_target(number, target):
         private_dns_enabled=True,
         security_group_ids=[sg.id],
         subnet_ids=[subnet.id for subnet in vpc.resources.private_subnets],
+    )
+    # The associated API alias resolves publicly to the endpoint's private IPs.
+    api_url = endpoint.id.apply(
+        lambda endpoint_id: (
+            f"https://{target['api_id']}-{endpoint_id}.execute-api."
+            f"{settings['region']}.amazonaws.com/proof/"
+        )
     )
     prefix = f"{settings['app']}-{settings['env']}"
     backend_name = prefix + f"-echo{number}"
@@ -136,12 +143,13 @@ def handler(event, context):
         vpc=vpc,
         url="public",
         timeout=30,
-        environment={"PRIVATE_API_URL": target["api_url"], "TUNNEL_VPC": str(number)},
+        environment={"PRIVATE_API_URL": api_url, "TUNNEL_VPC": str(number)},
     )
     export_output(f"function{number}_name", client.resources.function.name)
     export_output(f"function{number}_url", client.url)
     export_output(f"bastion{number}_id", vpc.resources.bastion.id)
     export_output(f"endpoint{number}_id", endpoint.id)
+    export_output(f"private_api{number}_url", api_url)
     export_output(f"backend{number}_name", backend.name)
     export_output(f"backend{number}_arn", backend.arn)
 

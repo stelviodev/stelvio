@@ -164,7 +164,7 @@ traforo-acceptance run COMMIT --skip aws-lambda-vpc
 Alternatively, select `49eafd2a` itself as the candidate. Its delta alone is
 insufficient on the original stack: it builds on `ea1d9144` and `e196a31d`.
 
-The suite checks simultaneous private HTTPS access, distinct DNS views and
+The suite checks simultaneous private HTTPS access, distinct synthetic DNS probe views and
 interfaces, SIGINT/SIGKILL, transport recovery, and a stopped bastion with a
 healthy peer. Dev invocations must be rejected before handler entry for the
 failed VPC. The host-key case checks persistent rejection across runtime restarts
@@ -195,6 +195,11 @@ EC2 stop/start for proof bastions, and SSM Run Command for the host-key fault.
 Costs include two bastions, two interface endpoints, six Functions, and the
 third VPC’s associated resources until application teardown. There is no third
 bastion or API.
+
+Private API calls use the publicly resolvable API/VPC-endpoint alias, whose
+addresses remain private and require the tunnel routes. The fixture uses
+`bastion=True` and needs no custom DNS-domain option. The per-VPC synthetic
+probe domains check DNS isolation; DocumentDB stages verify discovered-resource DNS.
 The same account confirmation, private plugin checks, local Traforo override,
 and exclusive host requirements apply.
 

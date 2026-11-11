@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import socket
 import time
 from contextlib import contextmanager
-from ipaddress import ip_address
+from ipaddress import IPv4Network, ip_address
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urlparse
@@ -17,7 +18,6 @@ from urllib.request import ProxyHandler, Request, build_opener
 from botocore.exceptions import ClientError
 
 from stelvio.stack_outputs import read_network_manifest
-from stelvio.tunnel.manifest import BastionPolicy
 
 from .assert_tunnel import (
     capture_proof_lambda_log_groups,
@@ -38,6 +38,7 @@ class PrivateApi:
         self.name = name or app
         self.evidence = evidence
         self.api_id = None
+        self.endpoint_id = None
 
     def create(self):
         response = retry_api_throttling(
@@ -61,7 +62,9 @@ class PrivateApi:
 
     @property
     def hostname(self):
-        return f"{self.api_id}.execute-api.{self.region}.amazonaws.com"
+        if self.endpoint_id is None:
+            raise RuntimeError("Private API must be associated with its VPC endpoint first")
+        return f"{self.api_id}-{self.endpoint_id}.execute-api.{self.region}.amazonaws.com"
 
     @property
     def url(self):
@@ -89,6 +92,7 @@ class PrivateApi:
                 {"op": "add", "path": "/endpointConfiguration/vpcEndpointIds", "value": endpoint},
             ],
         )
+        self.endpoint_id = endpoint
         root = self.client.get_resources(restApiId=self.api_id)["items"]
         root_id = next(item["id"] for item in root if item["path"] == "/")
         self.client.put_method(
@@ -244,10 +248,7 @@ class LambdaTunnelSession(StandaloneCliSession):
             "env": self.environment_name,
             "region": self.region,
             "account": self.account,
-            "targets": [
-                {"api_id": api.api_id, "api_url": api.url, "hostname": api.hostname}
-                for api in self.apis.values()
-            ],
+            "targets": [{"api_id": api.api_id} for api in self.apis.values()],
         }
         (self.project / "stlv_app.py").write_text(
             template.replace("SETTINGS_LITERAL", repr(settings))
@@ -277,6 +278,7 @@ class LambdaTunnelSession(StandaloneCliSession):
             api.configure(
                 self._outputs[f"endpoint{number}_id"], self._outputs[f"backend{number}_arn"]
             )
+            assert api.url == self._outputs[f"private_api{number}_url"]
         self.timings["deploy_seconds"] = time.monotonic() - started
         self.write_evidence()
 
@@ -326,9 +328,12 @@ class LambdaTunnelSession(StandaloneCliSession):
         }
         assert addresses, "The API did not resolve to IPv4 addresses"
         assert addresses <= endpoint_addresses, addresses
-        private = network.private_subnets
-        assert all(any(address in subnet.cidr for subnet in private) for address in addresses)
-        expected_interface = self._route_to(private[0].cidr.network_address + 1)["interface"]
+        subnets = ec2.describe_subnets(SubnetIds=list(network.route_subnet_ids))["Subnets"]
+        assert {subnet["SubnetId"] for subnet in subnets} == set(network.route_subnet_ids)
+        assert {subnet["VpcId"] for subnet in subnets} == {network.vpc_id}
+        routes = [IPv4Network(subnet["CidrBlock"]) for subnet in subnets]
+        assert all(any(address in route for route in routes) for address in addresses)
+        expected_interface = self._route_to(routes[0].network_address + 1)["interface"]
         assert expected_interface.startswith("utun")
         for address in addresses:
             assert self._route_to(address)["interface"] == expected_interface
@@ -351,19 +356,32 @@ class LambdaTunnelSession(StandaloneCliSession):
 
     def resolver_ports(self):
         ports = {}
-        domains = {api.hostname for api in self.apis.values()}
+        units = {
+            hashlib.sha256(network.identity.encode()).hexdigest()[:8]
+            for network in self.manifest.enabled_vpcs
+        }
         for path in Path("/etc/resolver").glob("stelvio.*"):
             entries = dict(
                 line.split(maxsplit=1)
                 for line in path.read_text().splitlines()
                 if len(line.split(maxsplit=1)) == 2
             )
-            if entries.get("domain") in domains and "port" in entries:
-                ports[entries["domain"]] = int(entries["port"])
+            domain = entries.get("domain", "")
+            match = re.fullmatch(r"probe-[0-9a-f]{32}-([0-9a-f]{8})\.stelvio\.test", domain)
+            if match and match[1] in units and "port" in entries:
+                ports[domain] = int(entries["port"])
         return ports
 
+    def probe_domain(self, number: int):
+        unit = hashlib.sha256(self.network(number).identity.encode()).hexdigest()[:8]
+        domains = [
+            domain for domain in self.resolver_ports() if domain.endswith(f"-{unit}.stelvio.test")
+        ]
+        assert len(domains) == 1, domains
+        return domains[0]
+
     def assert_bastions_running(self):
-        identifiers = [self.network(number).access.instance_id for number in self.apis]
+        identifiers = [self.network(number).bastion_instance_id for number in self.apis]
         reservations = self.aws.client("ec2", config=FAULT_IO).describe_instances(
             InstanceIds=identifiers
         )["Reservations"]
@@ -393,8 +411,8 @@ class LambdaTunnelSession(StandaloneCliSession):
         self.check_private(nonce + "-host", number)
 
     def check_plain_clients(self):
-        disabled = next(vpc for vpc in self.manifest.used_vpcs if vpc.identity.endswith("net3"))
-        assert disabled.policy == BastionPolicy.DISABLED
+        disabled = next(vpc for vpc in self.manifest.vpcs if vpc.identity.endswith("net3"))
+        assert disabled.bastion_instance_id is None
         output = self.log()
         warnings = [line for line in output.splitlines() if "VPC access disabled:" in line]
         assert sum(disabled.identity in line for line in warnings) == 1, warnings
@@ -424,16 +442,15 @@ class LambdaTunnelSession(StandaloneCliSession):
 
     def assert_dns_isolation(self):
         ports = self.resolver_ports()
-        assert set(ports) == {api.hostname for api in self.apis.values()}
+        domains = {number: self.probe_domain(number) for number in self.apis}
+        assert set(ports) == set(domains.values())
         assert len(set(ports.values())) == len(self.apis)
-        for number, api in self.apis.items():
-            port = ports[api.hostname]
-            self.wait_dns_rcode(api.hostname, port, 0)
-            for other, peer in self.apis.items():
+        for number, domain in domains.items():
+            port = ports[domain]
+            self.wait_dns_rcode(f"acceptance-{os.urandom(16).hex()}.{domain}", port, 3)
+            for other, peer in domains.items():
                 if other != number:
-                    assert self.dns_rcode(peer.hostname, port) == 5, (
-                        "Wrong VPC DNS view accepted query"
-                    )
+                    assert self.dns_rcode(peer, port) == 5, "Wrong VPC DNS view accepted query"
         return ports
 
     def wait_admission_rejected(self, number: int):
@@ -460,7 +477,7 @@ class LambdaTunnelSession(StandaloneCliSession):
     def stopped_bastion(self, number: int):
         network = self.network(number)
         ec2 = self.aws.client("ec2", config=FAULT_IO)
-        identifier = network.access.instance_id
+        identifier = network.bastion_instance_id
         groups = ec2.describe_instances(InstanceIds=[identifier])["Reservations"]
         instances = [item for group in groups for item in group["Instances"]]
         assert len(instances) == 1

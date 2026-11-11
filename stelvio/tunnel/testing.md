@@ -647,8 +647,9 @@ client Function; a fourth client Function has no VPC attachment. The plain clien
 perform no private API request. All four clients use local invocation evidence to
 prove that the bridge ran the handler on the laptop. The backends have no VPC
 attachment or public URL. Each endpoint admits HTTPS from only its owning bastion security group, and
-each API policy restricts requests to its own endpoint. The API-ID hostname is a
-configured DNS domain for that VPC. Backend identity includes the VPC number.
+each API policy restricts requests to its own endpoint. Calls use the publicly
+resolvable API/VPC-endpoint alias, whose addresses are private. This requires no
+custom DNS-domain setting. Backend identity includes the VPC number.
 
 Standalone requests follow host DNS and utun through Traforo, SSH and Session
 Manager to the private endpoint. The dev tests invoke each client's public Function
@@ -658,16 +659,16 @@ certificate checks, fresh connections, and no environment HTTP proxy.
 
 Assertions check simultaneous requests, exact endpoint private addresses, distinct
 subnet routes/interfaces, distinct DNS listener ports, nonces, and payload digests.
-Each DNS listener must refuse the other VPC's hostname with `REFUSED`. Both private
-APIs must be unreachable without their tunnels. The APIs are custom-domain
-targets, so the tests explicitly probe them after CLI readiness. Initial target
+Each DNS listener must refuse the other VPC's synthetic probe domain with `REFUSED`;
+its own uncached negative queries return `NXDOMAIN`. Both private APIs must be
+unreachable without their tunnels. The tests explicitly probe them after CLI readiness. Initial target
 connection failures have a 90-second readiness budget; a wrong backend identity
 or payload fails immediately.
 
 The standalone fault test stops the first proof-owned bastion. The dev fault test
 stops the second, reversing the healthy and failed roles. Both require:
 
-- The failed unit retains its DNS listener and returns `SERVFAIL` for its own name.
+- The failed unit retains its DNS listener and returns `SERVFAIL` for its probe domain.
 - Fresh HTTPS requests through the healthy peer still return its own backend data.
 - The healthy unit's generation and SSM session stay unchanged.
 - The dev bridge rejects failed-VPC invocations with `VpcUnavailableError` before
