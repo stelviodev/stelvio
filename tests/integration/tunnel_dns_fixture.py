@@ -154,3 +154,52 @@ class SocksDnsFixture:
         self.server.server_close()
         self.thread.join(5)
         assert not self.thread.is_alive()
+
+
+def supervisor_worker(octet, owner, lease, forwarding):
+    """Use runtime observations for supervisor checks without deployment-only fields."""
+    from stelvio.network import ResourceNetwork, VpcNetwork
+    from stelvio.tunnel.runtime_models import (
+        DiscoveredDocumentDb,
+        SubnetInventory,
+        VpcInventory,
+    )
+    from stelvio.tunnel.supervisor import VpcWorker
+
+    identity = f"exact-{octet}"
+    subnet = SubnetInventory(
+        f"subnet-{octet:08x}", "us-east-1a", IPv4Network(f"10.{octet}.9.0/24")
+    )
+    network = VpcInventory(
+        VpcNetwork(
+            identity,
+            "123456789012",
+            "us-east-1",
+            f"vpc-{octet:08x}",
+            "fixture-provider",
+            (subnet.subnet_id,),
+            f"i-{octet:08x}",
+        ),
+        (IPv4Network(f"10.{octet}.0.0/16"),),
+        (subnet,),
+    )
+    hostname = f"database-{owner.replace('-', '')}-{octet}.example.test"
+    resource = DiscoveredDocumentDb(
+        ResourceNetwork(f"database-{octet}", identity, f"cluster-{octet}"),
+        27017,
+        (hostname,),
+    )
+    discovery = SimpleNamespace(resources=(resource,))
+    discovery.resources_for = lambda vpc: tuple(
+        item for item in discovery.resources if item.vpc == vpc
+    )
+    worker = VpcWorker(
+        SimpleNamespace(app="proof", environment="test", session_id=owner),
+        network,
+        SimpleNamespace(client=lambda *args, **kwargs: None),
+        lease,
+        forwarding,
+        discovery,
+    )
+    worker.transport = SimpleNamespace(healthy=lambda: True, close=lambda: None)
+    return worker

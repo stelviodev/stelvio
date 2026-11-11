@@ -7,8 +7,9 @@ import struct
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from stelvio.network import VERSION, manifest_from_records
 from stelvio.tunnel.helper_client import MAX_CONFIGURE_STAGE
-from stelvio.tunnel.manifest import VERSION, SessionDescription, manifest_from_records
+from stelvio.tunnel.session_types import SESSION_VERSION, SessionDescription
 
 if TYPE_CHECKING:
     import socket
@@ -66,28 +67,21 @@ def receive(connection: socket.socket) -> dict:
 
 def session_to_wire(session: SessionDescription) -> dict:
     records = []
-    for network in session.manifest.vpcs:
-        data = asdict(network)
-        data.update(
-            version=VERSION,
-            kind="vpc",
-            cidrs=[str(cidr) for cidr in network.cidrs],
-            policy=network.policy.value,
-        )
-        for tier in ("public_subnets", "private_subnets", "isolated_subnets"):
-            data[tier] = [
-                {"id": subnet.subnet_id, "az": subnet.availability_zone, "cidr": str(subnet.cidr)}
-                for subnet in getattr(network, tier)
-            ]
-        if network.access:
-            data["access"]["az"] = data["access"].pop("availability_zone")
-        records.append(data)
-    for kind, values in (
-        ("resource", session.manifest.resources),
-        ("endpoint", session.manifest.endpoints),
+    for component_type, values in (
+        ("stelvio:aws:Vpc", session.manifest.vpcs),
+        ("stelvio:aws:DocumentDb", session.manifest.resources),
     ):
-        records.extend({"version": VERSION, "kind": kind, **asdict(value)} for value in values)
-    # json roundtrip turns immutable sequences into the established metadata lists.
+        for record in values:
+            metadata = asdict(record)
+            identity = metadata.pop("identity")
+            records.append(
+                {
+                    "type": component_type,
+                    "urn": identity,
+                    "metadata": {"version": VERSION, **metadata},
+                }
+            )
+    # JSON turns immutable subnet-ID tuples into the deployment record's lists.
     return json.loads(
         json.dumps(
             {
@@ -112,15 +106,27 @@ def session_from_wire(value: dict) -> SessionDescription:
         "records",
     }:
         raise ValueError("Malformed network runtime session")
-    if type(value["version"]) is not int or value["version"] != VERSION:
+    if type(value["version"]) is not int or value["version"] != SESSION_VERSION:
         raise ValueError("Unsupported network runtime session version")
     if not isinstance(value["records"], list):
         raise TypeError("Malformed network runtime manifest records")
+    records = []
+    for item in value["records"]:
+        if (
+            not isinstance(item, dict)
+            or item.keys() != {"type", "urn", "metadata"}
+            or not isinstance(item["type"], str)
+            or not isinstance(item["urn"], str)
+            or not item["urn"]
+            or any(char.isspace() or not char.isprintable() for char in item["urn"])
+        ):
+            raise ValueError("Malformed network runtime record descriptor")
+        records.append((item["type"], item["urn"], item["metadata"]))
     return SessionDescription(
         value["session_id"],
         value["app"],
         value["environment"],
         value["owner_uid"],
-        manifest_from_records(value["records"]),
+        manifest_from_records(records),
         value["version"],
     )

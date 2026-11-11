@@ -46,7 +46,8 @@ if TYPE_CHECKING:
 
     from stelvio.tunnel.forwarding import Forwarding
     from stelvio.tunnel.helper_client import NativeLease
-    from stelvio.tunnel.manifest import SessionDescription, VpcNetwork
+    from stelvio.tunnel.runtime_models import DiscoveredDocumentDb, VpcInventory
+    from stelvio.tunnel.session_types import SessionDescription
 
 HEALTH_SECONDS = 5
 DISCOVERY_SECONDS = 30
@@ -109,12 +110,12 @@ class VpcWorker:
     def __init__(  # noqa: PLR0913 - independent runtime boundaries
         self,
         description: SessionDescription,
-        network: VpcNetwork,
+        network: VpcInventory,
         session: boto3.Session,
         lease: NativeLease,
         forwarding: Forwarding,
         discovery: ResourceDiscovery,
-        inventory_check: Callable[[VpcNetwork], VpcNetwork] | None = None,
+        inventory_check: Callable[[VpcInventory], VpcInventory] | None = None,
         inventory_terminal: Callable[[str], None] | None = None,
     ) -> None:
         self.description = description
@@ -186,12 +187,8 @@ class VpcWorker:
     def start(self) -> None:
         self._thread.start()
 
-    def _resources(self) -> tuple:
-        return tuple(
-            resource
-            for resource in self.discovery.manifest.resources
-            if resource.vpc == self.network.identity
-        )
+    def _resources(self) -> tuple[DiscoveredDocumentDb, ...]:
+        return self.discovery.resources_for(self.network.identity)
 
     def _view(self) -> int:
         self._dns_revision += 1
@@ -199,7 +196,6 @@ class VpcWorker:
             dict.fromkeys(
                 (
                     *self._claims,
-                    *self.network.dns_domains,
                     self._probe_domain,
                     *(name for resource in self._resources() for name in resource.hostnames),
                 )
@@ -267,7 +263,7 @@ class VpcWorker:
         self._host_request = {
             "unit": self.unit,
             "generation": self._host_generation,
-            "vpc_id": self.network.vpc_id,
+            "vpc_id": self.network.record.vpc_id,
             "cidrs": tuple(str(cidr) for cidr in self._route_cidrs),
             "resolvers": tuple(ResolverEndpoint(name, self._dns_port) for name in self._claims),
         }
@@ -376,8 +372,8 @@ class VpcWorker:
             raise TransportRetryError("VPC host configuration is not active")
         for resource in self._resources():
             for hostname in resource.hostnames:
-                self._dns("probe", name=hostname, port=resource.ports[0])
-                self._dns("probe", name=hostname, port=resource.ports[0], direct=True)
+                self._dns("probe", name=hostname, port=resource.port)
+                self._dns("probe", name=hostname, port=resource.port, direct=True)
         if self._claims:
             # Unique negative hostname bypasses OS caches. A generation-bound
             # relay observation, not a cached address, proves actual OS routing.
@@ -461,13 +457,16 @@ class VpcWorker:
     def _attempt_connection(self) -> None:
         self._phase = "vpc-inventory"
         self._host_generation = self._next_host_generation()
-        resolved = resolve_vpc_network(self.network, self.session.client("ec2", config=AWS_IO))
+        resolved = resolve_vpc_network(
+            self.network.record, self.session.client("ec2", config=AWS_IO)
+        )
         if self.inventory_check is None:
             if resolved.cidrs != self.network.cidrs:
                 raise TransportAuthorizationError("VPC ranges changed during this session")
             self.network = resolved
         else:
             self.network = self.inventory_check(resolved)
+        self.transport.network = self.network
         if not self._route_cidrs:
             raise TransportAuthorizationError("VPC has no private or isolated subnet destinations")
         if self.network.route_cidrs != self._route_cidrs:

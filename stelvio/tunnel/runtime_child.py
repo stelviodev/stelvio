@@ -7,7 +7,7 @@ import socket
 import sys
 import time
 from contextlib import ExitStack, suppress
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from hashlib import sha256
 from threading import Event, Lock, Thread
 from types import MappingProxyType
@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING
 
 from botocore.exceptions import ClientError, HTTPClientError
 
+from stelvio.network import ACCOUNT, NetworkManifest
 from stelvio.tunnel.aws_inventory import resolve_vpc_network
 from stelvio.tunnel.credentials import AWS_IO, AwsExecutionContext
 from stelvio.tunnel.discovery import ResourceDiscovery
 from stelvio.tunnel.forwarding import Forwarding, packaged_forwarder
 from stelvio.tunnel.helper_client import NativeHelper
-from stelvio.tunnel.manifest import ACCOUNT, NetworkManifest
-from stelvio.tunnel.supervisor import VpcStatus, VpcWorker
+from stelvio.tunnel.supervisor import STARTUP_SECONDS, VpcStatus, VpcWorker
 from stelvio.tunnel.transport import (
     TransportAuthorizationError,
     TransportRetryError,
@@ -34,8 +34,9 @@ if TYPE_CHECKING:
 
     from botocore.client import BaseClient
 
+    from stelvio.network import VpcNetwork
     from stelvio.tunnel.helper_client import NativeLease
-    from stelvio.tunnel.manifest import VpcNetwork
+    from stelvio.tunnel.runtime_models import VpcInventory
 
 MAX_RUNTIME_NETWORKS = 8
 MAX_PROVIDER_NAME = 1024
@@ -65,7 +66,7 @@ def _owner_status(lease: NativeLease, statuses: list[VpcStatus]) -> list[dict]:
 def _resolve_independent_inventory(
     manifest: NetworkManifest,
     client_for: Callable[[VpcNetwork], BaseClient],
-) -> tuple[NetworkManifest, dict[str, str]]:
+) -> tuple[dict[str, VpcInventory], dict[str, str]]:
     """Resolve VPC ranges independently, then fence every known overlap pair."""
     resolved = {}
     failures = {}
@@ -75,21 +76,17 @@ def _resolve_independent_inventory(
         except Exception:
             failures[network.identity] = "network-inventory"
 
-    updated = replace(
-        manifest,
-        vpcs=tuple(resolved.get(network.identity, network) for network in manifest.vpcs),
-    )
-    enabled = updated.enabled_vpcs
+    enabled = tuple(resolved.values())
     for index, left in enumerate(enabled):
         for right in enabled[index + 1 :]:
             if any(a.overlaps(b) for a in left.cidrs for b in right.cidrs):
                 failures[left.identity] = "cidr-overlap"
                 failures[right.identity] = "cidr-overlap"
-    return updated, failures
+    return resolved, failures
 
 
 def _has_unresolved_inventory(
-    pending_inventory: set[str], candidate_inventory: dict[str, VpcNetwork]
+    pending_inventory: set[str], candidate_inventory: dict[str, VpcInventory]
 ) -> bool:
     """Fence every VPC until each retryable inventory has a candidate or retires."""
     return bool(pending_inventory - candidate_inventory.keys())
@@ -109,6 +106,8 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
     if len(inputs["contexts"]) > MAX_RUNTIME_NETWORKS:
         raise ValueError("Network runtime provider context limit exceeded")
     description = session_from_wire(inputs["session"])
+    if len(description.manifest.enabled_vpcs) > MAX_RUNTIME_NETWORKS:
+        raise ValueError("Network runtime VPC limit exceeded")
     if description.owner_uid != os.geteuid():
         raise ValueError("Network runtime owner differs")
     contexts = {}
@@ -168,24 +167,20 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
         forwarding = Forwarding(binary, lease.carrier)
         scope.callback(forwarding.close)
         inventory_lock = Lock()
-        original_inventory: dict[str, VpcNetwork] = {}
-        known_inventory: dict[str, VpcNetwork] = {}
-        candidate_inventory: dict[str, VpcNetwork] = {}
+        known_inventory: dict[str, VpcInventory] = {}
+        candidate_inventory: dict[str, VpcInventory] = {}
         pending_inventory: set[str] = set()
         conflicted_inventory: set[str] = set()
 
-        def confirm_inventory(network: VpcNetwork) -> VpcNetwork:
+        def confirm_inventory(network: VpcInventory) -> VpcInventory:
             with inventory_lock:
                 if network.identity in conflicted_inventory:
                     raise TransportAuthorizationError("VPC CIDR overlaps another enabled VPC")
                 candidate_inventory[network.identity] = network
                 overlapping = set()
-                for identity, original_peer in original_inventory.items():
+                for identity, peer in (known_inventory | candidate_inventory).items():
                     if identity == network.identity:
                         continue
-                    peer = candidate_inventory.get(
-                        identity, known_inventory.get(identity, original_peer)
-                    )
                     if any(a.overlaps(b) for a in network.cidrs for b in peer.cidrs):
                         overlapping.add(identity)
                 if overlapping:
@@ -214,17 +209,24 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
             with inventory_lock:
                 pending_inventory.discard(identity)
 
-        def bootstrap(network: VpcNetwork) -> None:  # noqa: C901 - retry isolated provider bootstrap
+        def bootstrap(network: VpcNetwork) -> None:  # noqa: C901, PLR0912  # isolated provider/inventory retries
             backoff = 1
+            deadline = time.monotonic() + STARTUP_SECONDS
             while not stop.is_set():
                 try:
                     with sdk_lock:
                         session = contexts[network.provider].open_session()
                     if stop.is_set():
                         return
+                    with inventory_lock:
+                        inventory = known_inventory.get(network.identity)
+                    if inventory is None:
+                        inventory = resolve_vpc_network(
+                            network, session.client("ec2", config=AWS_IO)
+                        )
                     worker = VpcWorker(
                         description,
-                        network,
+                        inventory,
                         session,
                         lease,
                         forwarding,
@@ -247,11 +249,17 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                 except (OSError, HTTPClientError):
                     cause = "network-inventory"
                     retry = True
+                except (TransportAuthorizationError, ValueError):
+                    cause = "identity-or-configuration"
+                    retry = False
                 except Exception:
                     cause = "startup-ownership"
                     retry = False
                 else:
                     return
+                if retry and time.monotonic() >= deadline:
+                    cause = "startup-timeout"
+                    retry = False
                 with lock:
                     snapshots[network.identity] = VpcStatus(
                         network.identity,
@@ -267,27 +275,22 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
         threads: list[Thread] = []
 
         def prepare() -> None:
-            nonlocal description, discovery
             try:
                 # Resolve each VPC separately. A failed VPC is excluded while
                 # successful inventories are still checked against every known
                 # full CIDR range before any worker can add a host route.
-                manifest, failures = _resolve_independent_inventory(
+                inventories, failures = _resolve_independent_inventory(
                     description.manifest,
                     lambda network: contexts[network.provider]
                     .open_session()
                     .client("ec2", config=AWS_IO),
                 )
-                description = replace(description, manifest=manifest)
-                discovery = ResourceDiscovery(manifest)
                 with inventory_lock:
-                    original_inventory.update({vpc.identity: vpc for vpc in manifest.enabled_vpcs})
-                    known_inventory.update(
-                        {
-                            identity: vpc
-                            for identity, vpc in original_inventory.items()
-                            if failures.get(identity) != "network-inventory"
-                        }
+                    known_inventory.update(inventories)
+                    conflicted_inventory.update(
+                        identity
+                        for identity, failure in failures.items()
+                        if failure == "cidr-overlap"
                     )
                     pending_inventory.update(
                         identity
@@ -298,7 +301,7 @@ def run(control: socket.socket, lease_fd: int) -> None:  # noqa: C901, PLR0912, 
                 with lock:
                     if stop.is_set():
                         return
-                    for network in manifest.enabled_vpcs:
+                    for network in description.manifest.enabled_vpcs:
                         if failures.get(network.identity) == "cidr-overlap":
                             snapshots[network.identity] = VpcStatus(
                                 network.identity,

@@ -3,20 +3,11 @@
 import socket
 import struct
 from dataclasses import replace
-from ipaddress import IPv4Network
 
 from pytest import mark, raises
 
-from stelvio.tunnel.manifest import (
-    VERSION,
-    AccessDescriptor,
-    EndpointNetwork,
-    NetworkManifest,
-    SessionDescription,
-    SubnetNetwork,
-    VpcNetwork,
-)
-from stelvio.tunnel.policy import BastionPolicy
+from stelvio.network import NetworkManifest, ResourceNetwork, VpcNetwork
+from stelvio.tunnel.session_types import SESSION_VERSION, SessionDescription
 from stelvio.tunnel.wire import MAX_MESSAGE, receive, send, session_from_wire, session_to_wire
 
 
@@ -27,80 +18,103 @@ def _description():
         region="us-east-1",
         vpc_id="vpc-12345678",
         provider="provider",
-        cidrs=(IPv4Network("10.254.0.0/16"),),
-        policy=BastionPolicy.PERSISTENT,
-        dns_domains=("private.example",),
-        public_subnets=(
-            SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),
-        ),
-        private_subnets=(
-            SubnetNetwork("subnet-private", "us-east-1a", IPv4Network("10.254.2.0/24")),
-        ),
-        isolated_subnets=(
-            SubnetNetwork("subnet-isolated", "us-east-1a", IPv4Network("10.254.3.0/24")),
-        ),
-        access=AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
+        route_subnet_ids=("subnet-private", "subnet-isolated"),
+        bastion_instance_id="i-12345678",
     )
-    manifest = NetworkManifest(
-        (network,), (), (EndpointNetwork("function", "function", ("vpc-owner",)),)
-    )
+    manifest = NetworkManifest((network,), (ResourceNetwork("database", "vpc-owner", "cluster"),))
     return SessionDescription("11111111-1111-4111-8111-111111111111", "app", "dev", 501, manifest)
 
 
-@mark.parametrize("empty_private_tiers", [False, True])
-def test_session_description_round_trips_only_validated_network_metadata(empty_private_tiers):
+@mark.parametrize("empty_subnets", [False, True])
+def test_session_round_trips_minimal_records_with_component_descriptors(empty_subnets):
     original = _description()
-    if empty_private_tiers:
-        network = replace(original.manifest.vpcs[0], private_subnets=(), isolated_subnets=())
+    if empty_subnets:
+        network = replace(original.manifest.vpcs[0], route_subnet_ids=())
         original = replace(original, manifest=replace(original.manifest, vpcs=(network,)))
     wire = session_to_wire(original)
-    assert wire["version"] == VERSION
-    assert wire["records"][0]["access"]["az"] == "us-east-1a"
-    network = original.manifest.vpcs[0]
-    for tier in ("public_subnets", "private_subnets", "isolated_subnets"):
-        assert wire["records"][0][tier] == [
-            {"id": subnet.subnet_id, "az": subnet.availability_zone, "cidr": str(subnet.cidr)}
-            for subnet in getattr(network, tier)
-        ]
+    assert wire["version"] == SESSION_VERSION
+    assert wire["records"] == [
+        {
+            "type": "stelvio:aws:Vpc",
+            "urn": "vpc-owner",
+            "metadata": {
+                "version": 1,
+                "account": "123456789012",
+                "region": "us-east-1",
+                "vpc_id": "vpc-12345678",
+                "provider": "provider",
+                "route_subnet_ids": [] if empty_subnets else ["subnet-private", "subnet-isolated"],
+                "bastion_instance_id": "i-12345678",
+            },
+        },
+        {
+            "type": "stelvio:aws:DocumentDb",
+            "urn": "database",
+            "metadata": {
+                "version": 1,
+                "vpc": "vpc-owner",
+                "cluster_id": "cluster",
+            },
+        },
+    ]
     left, right = socket.socketpair()
-    left.settimeout(1)
-    right.settimeout(1)
-    try:
+    with left, right:
+        left.settimeout(1)
+        right.settimeout(1)
         send(left, wire)
-        decoded = session_from_wire(receive(right))
-    finally:
-        left.close()
-        right.close()
-    assert decoded == original
-    assert decoded.manifest.vpcs[0].route_cidrs == network.route_cidrs
+        assert session_from_wire(receive(right)) == original
 
 
-@mark.parametrize("version", [True, 2, VERSION + 1])
-def test_session_wire_rejects_unsupported_metadata_versions(version):
+@mark.parametrize("version", [True, 1.0, 2])
+def test_session_wire_rejects_unsupported_session_versions(version):
     value = session_to_wire(_description())
     value["version"] = version
-    with raises(ValueError, match="version"):
+    with raises(ValueError, match="session version"):
         session_from_wire(value)
 
 
-@mark.parametrize("tier", ["public_subnets", "private_subnets", "isolated_subnets"])
-def test_session_wire_validates_subnet_records(tier):
+@mark.parametrize(("field", "value"), [("urn", []), ("urn", ""), ("type", None)])
+def test_session_wire_validates_component_descriptors(field, value):
+    data = session_to_wire(_description())
+    data["records"][0][field] = value
+    with raises(ValueError, match="record descriptor"):
+        session_from_wire(data)
+
+
+def test_session_wire_rejects_unknown_descriptor_fields():
     value = session_to_wire(_description())
-    value["records"][0][tier][0]["cidr"] = "192.168.1.0/24"
-    with raises(ValueError, match="outside"):
+    value["records"][0]["cidrs"] = ["10.0.0.0/16"]
+    with raises(ValueError, match="record descriptor"):
         session_from_wire(value)
 
 
-def test_session_wire_rejects_unknown_or_unsupported_fields():
+def test_session_wire_validates_deployment_record_version_independently():
+    value = session_to_wire(_description())
+    value["records"][0]["metadata"]["version"] = 2
+    with raises(ValueError, match="upgrade Stelvio"):
+        session_from_wire(value)
+
+
+def test_session_wire_rejects_unknown_session_fields():
     value = session_to_wire(_description())
     value["unexpected"] = "handler data"
     with raises(ValueError, match="Malformed network runtime session"):
         session_from_wire(value)
 
-    value = session_to_wire(_description())
-    value["version"] = True
-    with raises(ValueError, match="version"):
-        session_from_wire(value)
+
+@mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("session_id", "not-a-uuid", "UUID"),
+        ("owner_uid", 0, "nonroot"),
+        ("owner_uid", True, "nonroot"),
+        ("app", "", "app"),
+        ("environment", "contains whitespace", "environment"),
+    ],
+)
+def test_session_identity_is_validated(field, value, message):
+    with raises(ValueError, match=message):
+        replace(_description(), **{field: value})
 
 
 def test_framed_ipc_round_trip_and_short_read():

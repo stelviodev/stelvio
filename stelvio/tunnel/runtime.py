@@ -14,7 +14,7 @@ from stelvio.tunnel.wire import receive, send, session_to_wire
 
 if TYPE_CHECKING:
     from stelvio.tunnel.credentials import AwsExecutionContext
-    from stelvio.tunnel.manifest import SessionDescription
+    from stelvio.tunnel.session_types import SessionDescription
 
 STATUS_TIMEOUT = 2
 STOP_TIMEOUT = 45
@@ -30,6 +30,8 @@ class NetworkRuntime:
     ) -> None:
         if not contexts or description.owner_uid != os.geteuid() or not os.geteuid():
             raise ValueError("Network runtime requires captured nonroot AWS contexts")
+        if len(description.manifest.enabled_vpcs) > MAX_RUNTIME_NETWORKS:
+            raise ValueError("Network runtime VPC limit exceeded")
         environment = contexts[0].process_environment()
         if any(
             context.parent_pid != os.getpid()

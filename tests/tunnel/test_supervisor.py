@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from pytest import mark, raises
 
+from stelvio.network import ResourceNetwork
 from stelvio.tunnel.evidence import record_transport_event
 from stelvio.tunnel.helper_client import (
     HelperError,
@@ -14,7 +15,7 @@ from stelvio.tunnel.helper_client import (
     HelperStatus,
     HelperUnitStatus,
 )
-from stelvio.tunnel.manifest import NetworkManifest, ResourceNetwork
+from stelvio.tunnel.runtime_models import DiscoveredDocumentDb
 from stelvio.tunnel.supervisor import VpcWorker
 from stelvio.tunnel.transport import (
     TransportArtifactError,
@@ -32,23 +33,17 @@ def _worker_world(  # noqa: C901 - models a cross-adapter VPC lifecycle in one f
         identity="network-a",
         cidrs=(IPv4Network("10.254.0.0/16"),),
         route_cidrs=(IPv4Network("10.254.16.0/20"), IPv4Network("10.254.64.0/20")),
-        dns_domains=("private.example.com",),
-        vpc_id="vpc-owned",
+        record=SimpleNamespace(identity="network-a", vpc_id="vpc-owned"),
     )
-    resource = ResourceNetwork(
-        "db",
-        "network-a",
-        "documentdb",
-        "cluster",
-        (27017,),
-        ("db.private.example.com",),
-        ("sg-database",),
+    resource = DiscoveredDocumentDb(
+        ResourceNetwork("db", "network-a", "cluster"), 27017, ("db.private.example.com",)
     )
     discovery = SimpleNamespace(
-        manifest=NetworkManifest((), (resource,), ()),
+        resources=(resource,),
         begin=lambda *args: None,
         refresh=lambda *args: None,
     )
+    discovery.resources_for = lambda identity: discovery.resources
 
     class Lease:
         unit = None
@@ -286,7 +281,7 @@ def test_inventory_gate_retries_before_forwarding_and_adopts_verified_cidrs(monk
         aws_inventory_checks.append(network.identity)
         if len(aws_inventory_checks) == 1:
             raise OSError("temporary VPC inventory outage")
-        return network
+        return worker.network
 
     monkeypatch.setattr("stelvio.tunnel.supervisor.resolve_vpc_network", resolve_inventory)
 
@@ -553,17 +548,15 @@ def test_route_conflict_is_terminal_and_reports_only_decoded_facts(monkeypatch, 
     assert world.transport.attempt == 1
 
 
-@mark.parametrize("domains", [(), ("private.example.com",)])
-def test_probe_scope_is_owned_stable_and_separate_from_resource_names(monkeypatch, domains):
+def test_probe_scope_is_owned_stable_and_separate_from_resource_names(monkeypatch):
     world = _worker_world(monkeypatch)
     worker = world.worker
-    worker.network.dns_domains = domains
     worker._host_generation = worker._attempt = 1
     world.forwarding.add(worker.unit, 1, 1, worker.network, 32123)
     worker._configure(worker._view())
     probe = worker._probe_domain
     assert probe == f"probe-session-{worker.unit}.stelvio.test"
-    assert worker._claims == (*domains, probe, "db.private.example.com")
+    assert worker._claims == (probe, "db.private.example.com")
     worker._probe(worker._dns_revision_current)
     worker._probe(worker._dns_revision_current)
     arms = [e[-1]["name"] for e in world.events if e[0] == "dns-arm"]
@@ -582,18 +575,11 @@ def test_probe_scope_counts_toward_name_limit(monkeypatch, resource_count, allow
 
     world = _worker_world(monkeypatch)
     worker = world.worker
-    worker.network.dns_domains = ()
-    resource = world.worker.discovery.manifest.resources[0]
+    resource = world.worker.discovery.resources[0]
     from dataclasses import replace
 
-    worker.discovery.manifest = NetworkManifest(
-        (),
-        (
-            replace(
-                resource, hostnames=tuple(f"db-{i}.example.com" for i in range(resource_count))
-            ),
-        ),
-        (),
+    worker.discovery.resources = (
+        replace(resource, hostnames=tuple(f"db-{i}.example.com" for i in range(resource_count))),
     )
     if allowed:
         worker._view()
@@ -676,11 +662,9 @@ def test_resource_os_lookup_includes_discovered_members_and_recovers(monkeypatch
 
     monkeypatch.setattr("stelvio.tunnel.supervisor.subprocess.run", probe)
     worker._probe_resource_dns()
-    old = worker.discovery.manifest.resources[0]
+    old = worker.discovery.resources[0]
     member = "member.private.example.com"
-    worker.discovery.manifest = NetworkManifest(
-        (), (replace(old, hostnames=(*old.hostnames, member)),), ()
-    )
+    worker.discovery.resources = (replace(old, hostnames=(*old.hostnames, member)),)
     with raises(TransportRetryError, match="OS resource DNS"):
         worker._probe_resource_dns()
     answers[member] = ["10.254.64.20"]
@@ -792,10 +776,8 @@ def test_resource_dns_subprocess_ignores_handler_pythonpath(monkeypatch, tmp_pat
     run = subprocess.run
     world = _worker_world(monkeypatch)
     worker = world.worker
-    resource = worker.discovery.manifest.resources[0]
-    worker.discovery.manifest = NetworkManifest(
-        (), (replace(resource, hostnames=("localhost",)),), ()
-    )
+    resource = worker.discovery.resources[0]
+    worker.discovery.resources = (replace(resource, hostnames=("localhost",)),)
     worker._route_cidrs = (IPv4Network("127.0.0.0/8"),)
     (tmp_path / "socket.py").write_text("raise RuntimeError('handler module imported')")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
@@ -806,7 +788,7 @@ def test_resource_dns_subprocess_ignores_handler_pythonpath(monkeypatch, tmp_pat
 
 def test_no_resource_dns_process_without_linked_resources(monkeypatch):
     world = _worker_world(monkeypatch)
-    world.worker.discovery.manifest = NetworkManifest((), (), ())
+    world.worker.discovery.resources = ()
 
     def unexpected(*args, **kwargs):
         raise AssertionError("No resource lookup is required")

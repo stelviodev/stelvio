@@ -14,10 +14,9 @@ from stelvio.stack_outputs import read_network_manifest
 from stelvio.tunnel.assets import NativeAssetError, require_network_version
 from stelvio.tunnel.credentials import AwsExecutionContext
 from stelvio.tunnel.installation import install_helper
-from stelvio.tunnel.manifest import SessionDescription
 from stelvio.tunnel.plugin import PluginAssetError
-from stelvio.tunnel.policy import BastionPolicy
-from stelvio.tunnel.runtime import NetworkRuntime
+from stelvio.tunnel.runtime import MAX_RUNTIME_NETWORKS, NetworkRuntime
+from stelvio.tunnel.session_types import SessionDescription
 from stelvio.tunnel.wire import (
     HOST_CONFIGURE_FAILURE_CAUSES,
     MAX_STATUS_DETAIL_LENGTH,
@@ -74,15 +73,11 @@ class NetworkSession:
         self._started = False
         self._closed = False
         self._close_lock = Lock()
-        disabled = {
-            v.identity for v in self.manifest.used_vpcs if v.policy == BastionPolicy.DISABLED
-        }
-        self.dependencies = {
-            e.endpoint_id: tuple(v for v in e.vpcs if v not in disabled)
-            for e in self.manifest.endpoints
-        }
-        for identity in sorted(disabled):
-            report(f"VPC access disabled: {identity}; local networking is your responsibility.")
+        if len(self.manifest.enabled_vpcs) > MAX_RUNTIME_NETWORKS:
+            raise StelvioValidationError(
+                f"Tunnel supports at most {MAX_RUNTIME_NETWORKS} VPCs with bastions; "
+                f"got {len(self.manifest.enabled_vpcs)}"
+            )
         if not self.manifest.enabled_vpcs:
             return
         self.description = SessionDescription(str(uuid4()), app, env, os.geteuid(), self.manifest)
@@ -303,8 +298,7 @@ class NetworkSession:
             if failed:
                 raise RuntimeError("VPC access failed: " + ", ".join(failed))
 
-    def admit(self, endpoint: str) -> VpcUnavailableError | None:
-        required = self.dependencies.get(endpoint, ())
+    def admit_vpcs(self, required: tuple[str, ...]) -> VpcUnavailableError | None:
         if not required:
             return None
         with self._lock:

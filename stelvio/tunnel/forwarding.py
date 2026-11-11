@@ -172,9 +172,7 @@ class Forwarding:
 
         if type(revision) is not int or revision < 1:
             raise ValueError("DNS configuration requires a positive revision")
-        domains = tuple(
-            dict.fromkeys((*domains, *((probe_domain,) if probe_domain else ())))
-        )
+        domains = tuple(dict.fromkeys((*domains, *((probe_domain,) if probe_domain else ()))))
         reply = self._command(
             dict(
                 self._identity(unit, generation, attempt, revision),

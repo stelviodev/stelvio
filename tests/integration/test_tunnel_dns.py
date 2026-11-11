@@ -21,6 +21,7 @@ from .tunnel_dns_fixture import (
     dns_response,
     native_network,
     packet_network,
+    supervisor_worker,
 )
 
 pytestmark = mark.integration_macos_privileged
@@ -262,11 +263,9 @@ def assert_two_vpc_dns_and_packet_forwarding(during_session=None, release_digest
     assert not final.units
 
 
-def test_supervisor_exact_hostname_readiness_and_independent_reconnect():  # noqa: PLR0915 - full scoped-DNS lifecycle
+def test_supervisor_exact_hostname_readiness_and_independent_reconnect():
     """Production readiness with exact resources, real scoped DNS and carrier IO."""
-    from types import SimpleNamespace
-
-    from stelvio.tunnel.supervisor import VpcWorker
+    from dataclasses import replace
 
     helper = NativeHelper()
     owner = str(uuid4())
@@ -280,21 +279,9 @@ def test_supervisor_exact_hostname_readiness_and_independent_reconnect():  # noq
         for octet in (254, 253):
             proxy = SocksDnsFixture(f"10.{octet}.9.19")
             scope.callback(proxy.close)
-            network = native_network(octet)
-            network.identity = f"exact-{octet}"
-            network.vpc_id = f"vpc-{octet:08x}"
-            hostname = f"database-{owner.replace('-', '')}-{octet}.example.test"
-            resource = SimpleNamespace(vpc=network.identity, hostnames=(hostname,), ports=(27017,))
-            discovery = SimpleNamespace(manifest=SimpleNamespace(resources=(resource,)))
-            worker = VpcWorker(
-                SimpleNamespace(app="proof", environment="test", session_id=owner),
-                network,
-                SimpleNamespace(client=lambda *args, **kwargs: None),
-                lease,
-                forwarding,
-                discovery,
-            )
-            worker.transport = SimpleNamespace(healthy=lambda: True, close=lambda: None)
+            worker = supervisor_worker(octet, owner, lease, forwarding)
+            network = worker.network
+            hostname = worker._resources()[0].hostnames[0]
             worker._host_generation = worker._attempt = 1
             forwarding.add(worker.unit, 1, 1, network, proxy.port)
             worker._stack_attempt = 1
@@ -318,8 +305,12 @@ def test_supervisor_exact_hostname_readiness_and_independent_reconnect():  # noq
         first._probe(first._dns_revision_current)
         assert first._dns_port == port
         assert first._probe_domain == domain
-        second.discovery.manifest.resources[0].hostnames += (
-            f"member-{owner.replace('-', '')}.example.test",
+        previous = second.discovery.resources_for(second.network.identity)[0]
+        second.discovery.resources = (
+            replace(
+                previous,
+                hostnames=(*previous.hostnames, f"member-{owner.replace('-', '')}.example.test"),
+            ),
         )
         second._configure(second._view())
         second._probe(second._dns_revision_current)

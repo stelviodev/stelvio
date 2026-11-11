@@ -13,22 +13,16 @@ from threading import Lock
 
 from pytest import mark, raises
 
+from stelvio.network import NetworkManifest, VpcNetwork
 from stelvio.tunnel.credentials import AwsExecutionContext
-from stelvio.tunnel.manifest import (
-    AccessDescriptor,
-    EndpointNetwork,
-    NetworkManifest,
-    SessionDescription,
-    SubnetNetwork,
-    VpcNetwork,
-)
-from stelvio.tunnel.policy import BastionPolicy
 from stelvio.tunnel.runtime import NetworkRuntime
 from stelvio.tunnel.runtime_child import (
     _has_unresolved_inventory,
     _owner_status,
     _resolve_independent_inventory,
 )
+from stelvio.tunnel.runtime_models import SubnetInventory, VpcInventory
+from stelvio.tunnel.session_types import SessionDescription
 
 IMAGE_REASON = (
     "Opt-in real Python/Traforo interoperability; pre-download a release or build locally"
@@ -37,35 +31,24 @@ IMAGE_REASON = (
 
 def _inventory_network(identity, cidr):
     cidr = IPv4Network(cidr)
-    return VpcNetwork(
-        identity=identity,
-        account="123456789012",
-        region="us-east-1",
-        vpc_id=f"vpc-{identity}",
-        provider="provider",
-        cidrs=(cidr,),
-        policy=BastionPolicy.PERSISTENT,
-        dns_domains=(),
-        public_subnets=(
-            SubnetNetwork(
-                f"subnet-{identity}", "us-east-1a", IPv4Network((cidr.network_address, 24))
-            ),
-        ),
-        private_subnets=(
-            SubnetNetwork(
-                f"subnet-{identity}-private",
-                "us-east-1a",
-                IPv4Network((cidr.network_address + 256, 24)),
-            ),
-        ),
-        isolated_subnets=(
-            SubnetNetwork(
-                f"subnet-{identity}-isolated",
-                "us-east-1a",
-                IPv4Network((cidr.network_address + 512, 24)),
-            ),
-        ),
+    subnets = tuple(
+        SubnetInventory(
+            f"subnet-{identity}-{index}",
+            "us-east-1a",
+            IPv4Network((cidr.network_address + offset, 24)),
+        )
+        for index, offset in enumerate((256, 512))
     )
+    record = VpcNetwork(
+        identity,
+        "123456789012",
+        "us-east-1",
+        f"vpc-{identity}",
+        "provider",
+        tuple(subnet.subnet_id for subnet in subnets),
+        f"i-{identity}",
+    )
+    return VpcInventory(record, (cidr,), subnets)
 
 
 def test_inventory_failure_isolated_and_known_overlaps_remain_fenced(monkeypatch):
@@ -75,23 +58,15 @@ def test_inventory_failure_isolated_and_known_overlaps_remain_fenced(monkeypatch
     overlaps = _inventory_network("overlap", "10.2.0.0/16")
     healthy = _inventory_network("healthy", "10.3.0.0/16")
     unrelated = _inventory_network("unrelated", "10.4.0.0/16")
-    manifest = NetworkManifest(
-        (failed, overlaps, healthy, unrelated),
-        (),
-        (
-            EndpointNetwork("endpoint-failed", "endpoint-failed", ("failed",)),
-            EndpointNetwork("endpoint-overlap", "endpoint-overlap", ("overlap",)),
-            EndpointNetwork("endpoint-healthy", "endpoint-healthy", ("healthy",)),
-            EndpointNetwork("endpoint-unrelated", "endpoint-unrelated", ("unrelated",)),
-        ),
-    )
+    inventories = {network.identity: network for network in (failed, overlaps, healthy, unrelated)}
+    manifest = NetworkManifest(tuple(network.record for network in inventories.values()), ())
 
-    def resolve(network, _client):
-        if network.identity == "failed":
-            raise RuntimeError("isolated AWS inventory failure")
-        if network.identity == "overlap":
-            return replace(network, cidrs=(IPv4Network("10.3.1.0/24"),))
-        return network
+    def resolve(record, _client):
+        if record.identity == "failed":
+            raise OSError("isolated AWS inventory failure")
+        if record.identity == "overlap":
+            return replace(inventories[record.identity], cidrs=(IPv4Network("10.3.1.0/24"),))
+        return inventories[record.identity]
 
     monkeypatch.setattr(runtime_child, "resolve_vpc_network", resolve)
     resolved, failures = _resolve_independent_inventory(manifest, lambda _: object())
@@ -100,37 +75,27 @@ def test_inventory_failure_isolated_and_known_overlaps_remain_fenced(monkeypatch
         "overlap": "cidr-overlap",
         "healthy": "cidr-overlap",
     }
-    assert "unrelated" not in failures
-    assert tuple(vpc.identity for vpc in resolved.enabled_vpcs) == (
-        "failed",
-        "overlap",
-        "healthy",
-        "unrelated",
-    )
+    assert tuple(resolved) == ("overlap", "healthy", "unrelated")
+    assert manifest.vpcs == tuple(network.record for network in inventories.values())
 
 
-def test_unrelated_vpc_inventory_failure_does_not_block_healthy_vpc(monkeypatch):
+def test_unknown_peer_has_no_fallback_inventory(monkeypatch):
     from stelvio.tunnel import runtime_child
 
     failed = _inventory_network("failed", "10.1.0.0/16")
     healthy = _inventory_network("healthy", "10.2.0.0/16")
-    manifest = NetworkManifest(
-        (failed, healthy),
-        (),
-        (
-            EndpointNetwork("endpoint-failed", "endpoint-failed", ("failed",)),
-            EndpointNetwork("endpoint-healthy", "endpoint-healthy", ("healthy",)),
-        ),
-    )
+    manifest = NetworkManifest((failed.record, healthy.record), ())
 
-    def resolve(network, _client):
-        if network.identity == "failed":
-            raise RuntimeError("isolated AWS inventory failure")
-        return network
+    def resolve(record, _client):
+        if record.identity == "failed":
+            raise OSError("isolated AWS inventory failure")
+        return healthy
 
     monkeypatch.setattr(runtime_child, "resolve_vpc_network", resolve)
-    _, failures = _resolve_independent_inventory(manifest, lambda _: object())
+    resolved, failures = _resolve_independent_inventory(manifest, lambda _: object())
+    assert resolved == {"healthy": healthy}
     assert failures == {"failed": "network-inventory"}
+    assert _has_unresolved_inventory(set(failures), resolved)
 
 
 def test_healthy_candidate_waits_for_retryable_inventory_or_terminal_release():
@@ -207,8 +172,7 @@ class Ec2:
                else "EnableDnsHostnames")
         return {"VpcId":"vpc-12345678",field:{"Value":True}}
     def describe_subnets(self,**kwargs):
-        expected={"subnet-12345678":"10.254.1.0/24",
-                  "subnet-private":"10.254.2.0/24", "subnet-isolated":"10.254.3.0/24"}
+        expected={"subnet-private":"10.254.2.0/24", "subnet-isolated":"10.254.3.0/24"}
         assert set(kwargs["SubnetIds"])==set(expected)
         return {"Subnets":[{"SubnetId":identity,"VpcId":"vpc-12345678",
             "OwnerId":"123456789012","AvailabilityZone":"us-east-1a",
@@ -294,31 +258,20 @@ def test_actual_isolated_runtime_uses_captured_environment_and_reports_cleanup_f
     )
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "HANDLER_KEY")
     network = VpcNetwork(
-        identity="vpc-owner",
-        account="123456789012",
-        region="us-east-1",
-        vpc_id="vpc-12345678",
-        provider="provider",
-        cidrs=(IPv4Network("10.254.0.0/16"),),
-        policy=BastionPolicy.PERSISTENT,
-        dns_domains=(),
-        public_subnets=(
-            SubnetNetwork("subnet-12345678", "us-east-1a", IPv4Network("10.254.1.0/24")),
-        ),
-        private_subnets=(
-            SubnetNetwork("subnet-private", "us-east-1a", IPv4Network("10.254.2.0/24")),
-        ),
-        isolated_subnets=(
-            SubnetNetwork("subnet-isolated", "us-east-1a", IPv4Network("10.254.3.0/24")),
-        ),
-        access=AccessDescriptor("i-12345678", "sg-12345678", "us-east-1a", "vpc-owner"),
+        "vpc-owner",
+        "123456789012",
+        "us-east-1",
+        "vpc-12345678",
+        "provider",
+        ("subnet-private", "subnet-isolated"),
+        "i-12345678",
     )
     description = SessionDescription(
         "11111111-1111-4111-8111-111111111111",
         "app",
         "dev",
         os.geteuid(),
-        NetworkManifest((network,), (), (EndpointNetwork("fn", "fn", ("vpc-owner",)),)),
+        NetworkManifest((network,), ()),
     )
     child_log = tmp_path / "runtime-child.log"
     real_popen = subprocess.Popen
@@ -410,7 +363,7 @@ def test_runtime_is_a_real_subprocess_with_captured_environment_and_bounded_shut
         "isolated-fixture",
         "dev",
         os.geteuid(),
-        NetworkManifest((), (), ()),
+        NetworkManifest((), ()),
     )
     real_popen = subprocess.Popen
 
@@ -442,7 +395,7 @@ def test_runtime_close_releases_lease_after_shutdown_deadline(monkeypatch, tmp_p
         "isolated-fixture",
         "dev",
         os.geteuid(),
-        NetworkManifest((), (), ()),
+        NetworkManifest((), ()),
     )
     monkeypatch.setattr("stelvio.tunnel.runtime.STOP_TIMEOUT", 0.01)
     real_popen = subprocess.Popen
@@ -538,8 +491,7 @@ except HostTrustError:
 
 
 @mark.skipif(not os.environ.get("STLV_TEST_TRAFORO_IMAGE"), reason=IMAGE_REASON)
-@mark.parametrize("custom_domains", [(), ("custom.example.test",)])
-def test_actual_forwarder_exact_hostnames_and_probe_scope(custom_domains):
+def test_actual_forwarder_exact_hostnames_and_probe_scope():
     from contextlib import ExitStack
     from pathlib import Path
     from uuid import uuid4
@@ -555,7 +507,7 @@ def test_actual_forwarder_exact_hostnames_and_probe_scope(custom_domains):
 
     probe = f"probe-{uuid4().hex}-00000019.stelvio.test"
     host = "db.exact.example.test"
-    network = native_network(254, *custom_domains)
+    network = native_network(254)
     with ExitStack() as scope:
         carrier, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         scope.enter_context(carrier)
